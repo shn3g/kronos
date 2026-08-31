@@ -477,3 +477,34 @@ def test_mint_uses_client_base_url() -> None:
     assert fixture.last_request().url.startswith(
         "https://github.fixture.test/app/installations/"
     )
+
+
+def test_merge_pull_is_integration_only_and_promotion_never_writes_default() -> None:
+    forge, fixture, _auth = controller_stack()
+    forge.create_feature_branch("kronos/merge", IdempotencyKey("branch:merge"))
+    pull = forge.open_draft_pr(
+        "Merge me",
+        "Fixes #1",
+        "kronos/merge",
+        IdempotencyKey("pr:merge"),
+    )
+    forge.merge_pull(pull.number, sha=fixture.branch_sha("kronos/merge"))
+    assert fixture.merge_calls() == (pull.number,)
+    assert "main" not in fixture.ref_writes()
+
+    with pytest.raises(DefaultBranchWriteRefused):
+        forge.merge_pull(pull.number, sha=fixture.branch_sha("kronos/merge"), target="main")
+
+    promotion = forge.open_pull(
+        title="Promote",
+        body="Human review",
+        head="integration",
+        base="main",
+        draft=True,
+        key=IdempotencyKey("pr:promote"),
+    )
+    assert promotion.base == "main"
+    assert promotion.draft is True
+    assert fixture.merge_calls() == (pull.number,)
+    assert "main" not in fixture.ref_writes()
+
