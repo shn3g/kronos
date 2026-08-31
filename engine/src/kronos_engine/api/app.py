@@ -11,6 +11,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
+from kronos_engine.adapters.embeddings.local import LocalEmbeddingAdapter
 from kronos_engine.adapters.git.detection import ManifestStackDetector
 from kronos_engine.adapters.git.repository import FilesystemGitInspector, GitError
 from kronos_engine.adapters.git.worktrees import CacheRuntimeLayout
@@ -104,7 +105,7 @@ from kronos_engine.domain.tasks import SchemaError, WipExceeded
 from kronos_engine.domain.version import client_is_compatible
 from kronos_engine.domain.workflow import UnresolvedEvidence
 from kronos_engine.indexing.service import IndexingService, IndexStatus
-from kronos_engine.memory.promotion import PromotionBlocked
+from kronos_engine.memory.promotion import PromotionBlocked, activate_promoted
 from kronos_engine.memory.records import MemoryRecord, MemoryRejected
 from kronos_engine.ports.executor import Executor
 from kronos_engine.ports.forge import (
@@ -261,6 +262,7 @@ def create_app(
                 skills_root=chosen_skills_root,
                 store_dir=settings.paths.cache / "skills",
                 source=skill_source,
+                embeddings=LocalEmbeddingAdapter(settings.paths.cache / "models"),
             )
             catalog.load_core()
             yield catalog
@@ -910,6 +912,19 @@ def create_app(
             except LookupError as error:
                 raise HTTPException(status_code=404, detail="not found") from error
             return skill_to_dict(skill)
+
+    @app.post("/skills/{skill_id}/promote")
+    def promote_skill(
+        skill_id: str, body: SkillApproveRequest, _: None = Depends(require_auth)
+    ) -> dict[str, object]:
+        with skill_catalog() as catalog:
+            try:
+                record = activate_promoted(catalog, skill_id, human=body.human)
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            except (HumanApprovalRequired, PromotionBlocked, SkillStillQuarantined) as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            return _memory_dict(record)
 
     @app.post("/skills/route")
     def route_installed_skills(

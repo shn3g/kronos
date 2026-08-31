@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from kronos_engine.api.app import create_app
 from kronos_engine.config.paths import resolve_paths
 from kronos_engine.config.settings import Settings
 from kronos_engine.memory.promotion import (
+    PromotionBlocked,
     PromotionConfig,
     activate_promoted,
     consider_promotion,
@@ -84,12 +86,30 @@ def _catalog(
     )
 
 
-def _ready_repo_skill(catalog: SkillCatalog, locator: str, revision: str) -> str:
+def _approve_repo_skill(catalog: SkillCatalog, locator: str, revision: str) -> str:
     installed = catalog.import_pack(locator, revision, scope="repo")
     catalog.evaluate(installed.id)
     catalog.approve(installed.id, human=True)
-    catalog.activate(installed.id)
     return installed.id
+
+
+def _grant_helpful(catalog: SkillCatalog, skill_id: str, shas: tuple[str, ...]) -> None:
+    for sha in shas:
+        record_outcome(
+            catalog,
+            skill_id=skill_id,
+            source_sha=sha,
+            outcome="helpful",
+            text="Independent helpful run.",
+            confidence=0.8,
+        )
+
+
+def _ready_repo_skill(catalog: SkillCatalog, locator: str, revision: str) -> str:
+    skill_id = _approve_repo_skill(catalog, locator, revision)
+    _grant_helpful(catalog, skill_id, (SHA_A, SHA_B, SHA_C))
+    catalog.activate(skill_id)
+    return skill_id
 
 
 def test_useful_skill_passes_regression_then_stays_proposed_until_activate(
@@ -97,7 +117,8 @@ def test_useful_skill_passes_regression_then_stays_proposed_until_activate(
 ) -> None:
     packs = {("fixture://useful", IMMUTABLE_USEFUL): useful_pack(tmp_path / "useful")}
     catalog = _catalog(tmp_path, packs)
-    skill_id = _ready_repo_skill(catalog, "fixture://useful", IMMUTABLE_USEFUL)
+    skill_id = _approve_repo_skill(catalog, "fixture://useful", IMMUTABLE_USEFUL)
+    assert catalog.get(skill_id).status == "approved"
     config = PromotionConfig(min_independent_helpful=3)
     first = record_outcome(
         catalog,
@@ -141,9 +162,12 @@ def test_useful_skill_passes_regression_then_stays_proposed_until_activate(
     assert decision.needs_human is False
     procedural = catalog.procedural.for_skill(skill_id)
     assert procedural.status is MemoryStatus.proposed
+    assert catalog.get(skill_id).status == "approved"
     activated = activate_promoted(catalog, skill_id)
     assert activated.status is MemoryStatus.active
-    assert catalog.get(skill_id).status == "active"
+    assert catalog.get(skill_id).status == "approved"
+    live = catalog.activate(skill_id)
+    assert live.status == "active"
 
 
 def test_harmful_outcome_disables_and_rolls_back(tmp_path: Path) -> None:
@@ -214,6 +238,7 @@ def test_prior_lessons_import_as_disabled_candidates(tmp_path: Path) -> None:
         assert decision.activated is False
         with pytest.raises(Exception, match="disabled|candidate|activate"):
             activate_promoted(catalog, item.skill_id or item.id, record_id=item.id)
+    assert catalog.retrieve("venue timezone") == ()
 
 
 def test_memory_rejects_secrets_and_hidden_chain_of_thought(tmp_path: Path) -> None:
@@ -254,6 +279,7 @@ def test_retrieval_uses_text_and_has_no_booking_or_a11y_boosts(tmp_path: Path) -
         source_sha=SHA_A,
         confidence=0.7,
     )
+    catalog.procedural.save(replace(utc, status=MemoryStatus.active))
     hits = catalog.retrieve("timestamp timezone UTC conversion", limit=5)
     assert any(item.id == utc.id for item in hits)
     booking_hits = catalog.retrieve("booking widget checkout", limit=5)
@@ -295,6 +321,16 @@ async def test_skills_and_memory_http_surfaces(tmp_path: Path) -> None:
             f"/skills/{skill_id}/approve", headers=headers, json={"human": True}
         )
         assert approved.status_code == 200
+        blocked = await http.post(f"/skills/{skill_id}/activate", headers=headers)
+        assert blocked.status_code == 400
+        conn = database.connect()
+        catalog = SkillCatalog(
+            conn,
+            skills_root=tmp_path / "library",
+            store_dir=settings.paths.cache / "skills",
+            source=FixtureSkillSource(packs),
+        )
+        _grant_helpful(catalog, skill_id, (SHA_A, SHA_B, SHA_C))
         activated = await http.post(f"/skills/{skill_id}/activate", headers=headers)
         assert activated.status_code == 200
         assert activated.json()["status"] == "active"
@@ -319,3 +355,107 @@ async def test_skills_and_memory_http_surfaces(tmp_path: Path) -> None:
         memory = await http.get("/memory", headers=headers)
         assert memory.status_code == 200
         assert memory.json()["records"]
+        promoted = await http.post(
+            f"/skills/{skill_id}/promote", headers=headers, json={"human": True}
+        )
+        assert promoted.status_code == 200
+        assert promoted.json()["status"] == "active"
+
+
+def test_evaluate_on_active_core_keeps_status(tmp_path: Path) -> None:
+    catalog = SkillCatalog(
+        Database(tmp_path / "kronos.sqlite3").connect(),
+        skills_root=REPO_SKILLS,
+        store_dir=tmp_path / "skill-store",
+        source=FixtureSkillSource({}),
+    )
+    core = catalog.load_core()
+    tdd = next(item for item in core if item.name == "tdd")
+    assert tdd.status == "active"
+    evaluated = catalog.evaluate(tdd.id)
+    assert evaluated.status == "active"
+
+
+def test_repo_activate_without_evidence_raises(tmp_path: Path) -> None:
+    packs = {("fixture://useful", IMMUTABLE_USEFUL): useful_pack(tmp_path / "useful")}
+    catalog = _catalog(tmp_path, packs)
+    skill_id = _approve_repo_skill(catalog, "fixture://useful", IMMUTABLE_USEFUL)
+    with pytest.raises(PromotionBlocked, match="evidence"):
+        catalog.activate(skill_id)
+    assert catalog.get(skill_id).status == "approved"
+
+
+def test_execute_routes_summaries_and_records_outcome(tmp_path: Path) -> None:
+    from tests.e2e.test_goal_to_integration_pr import GoalHarness, ScriptedExecutor
+    from tests.support.skill_fixtures import write_skill_pack
+
+    from kronos_engine.adapters.embeddings.local import LocalEmbeddingAdapter
+    from kronos_engine.adapters.sandboxes.process_jail import ProcessJailSandbox
+    from kronos_engine.application.dispatch import DispatchService
+    from kronos_engine.indexing.service import IndexingService
+
+    class _Capture(ScriptedExecutor):
+        def __init__(self) -> None:
+            super().__init__("happy")
+            self.last = None
+
+        def run(self, request, sandbox):  # type: ignore[no-untyped-def]
+            self.last = request
+            return super().run(request, sandbox)
+
+    capture = _Capture()
+    harness = GoalHarness(tmp_path, "happy", executor=capture)
+    harness.setup_goal()
+    revision = "e" * 40
+    packs = {
+        ("fixture://add", revision): write_skill_pack(
+            tmp_path / "add-fix",
+            name="add-fix",
+            description="Fix add in pkg math with a failing test.",
+            body="# Add\n\nWrite a failing test before implementation.\n",
+            scope="community",
+            capabilities=("tdd",),
+            permissions=("worktree_read",),
+            regression={
+                "verification": ["failing test before implementation"],
+                "forbidden": ["rewrite backend tests"],
+            },
+        )
+    }
+    catalog = SkillCatalog(
+        harness.conn,
+        skills_root=tmp_path / "library",
+        store_dir=tmp_path / "skill-store",
+        source=FixtureSkillSource(packs),
+        embeddings=LocalEmbeddingAdapter(harness.paths.cache / "models"),
+    )
+    installed = catalog.import_pack("fixture://add", revision, scope="community")
+    catalog.evaluate(installed.id)
+    catalog.approve(installed.id, human=True)
+    catalog.activate(installed.id)
+    harness.dispatch = DispatchService(
+        harness.store,
+        harness.repos,
+        harness.leases,
+        harness.recorder,
+        IndexingService(harness.paths),
+        capture,
+        lambda worktree: ProcessJailSandbox(worktree),
+        harness.paths.cache,
+        clock=lambda: harness.now,
+        skills=catalog,
+    )
+    claimed = harness.dispatch.claim(harness.task_id, dry_run=False, holder_id="worker-1")
+    assert claimed.ok is True
+    executed = harness.dispatch.execute(claimed, phase="red")
+    assert executed.ok is True
+    assert capture.last is not None
+    summaries = capture.last.context.skill_summaries
+    assert any("add-fix" in item for item in summaries)
+    assert all("Write a failing test before implementation" not in item for item in summaries)
+    assert "GH_TOKEN" not in capture.last.worker_env
+    assert "KRONOS_REVIEWER" not in capture.last.worker_env
+    recorded = catalog.procedural.for_skill(installed.id)
+    assert recorded.source_sha
+    assert recorded.outcome in {"helpful", "harmful"}
+    assert recorded.helpful >= 1 or recorded.harmful >= 1

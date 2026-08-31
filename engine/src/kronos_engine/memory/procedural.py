@@ -233,10 +233,12 @@ def retrieve_records(
         return ()
     fused = reciprocal_rank_fusion(tuple(item for item in (sparse, dense) if item))
     records = []
-    for record_id in fused[:limit]:
+    for record_id in fused[: limit * 4]:
         loaded = load_record(conn, record_id)
-        if loaded is not None:
+        if loaded is not None and loaded.status is MemoryStatus.active:
             records.append(loaded)
+        if len(records) >= limit:
+            break
     return tuple(records)
 
 
