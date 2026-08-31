@@ -16,7 +16,7 @@ from tests.e2e.test_goal_to_integration_pr import (
 from kronos_engine.application.planning import PlanningService
 from kronos_engine.domain.goals import GoalSource, GoalSpec
 from kronos_engine.domain.policy import ModeWriteRefused, parse_policy, policy_to_dict
-from kronos_engine.domain.tasks import SchemaError
+from kronos_engine.domain.tasks import SchemaError, TaskState
 from kronos_engine.state.repositories import SqliteRepositoryRegistry
 
 
@@ -54,6 +54,9 @@ def test_write_draft_prs_opens_draft_but_does_not_merge(tmp_path: Path) -> None:
     assert "open_draft_pr" in kinds
     assert "merge_pull" not in kinds
     assert result.pr_url is not None
+    assert result.ok is True
+    assert result.status != TaskState.PAUSED.value
+    assert harness.store.get_task(harness.task_id).state is not TaskState.PAUSED
 
 
 def test_merge_integration_still_refuses_default_branch(tmp_path: Path) -> None:
