@@ -40,6 +40,7 @@ from kronos_engine.domain.workflow import (
 )
 from kronos_engine.indexing.service import IndexingService
 from kronos_engine.indexing.sparse import SqliteIndexStore
+from kronos_engine.memory.promotion import record_outcome
 from kronos_engine.ports.executor import (
     Executor,
     ExecutorCapabilities,
@@ -48,6 +49,7 @@ from kronos_engine.ports.executor import (
 )
 from kronos_engine.ports.leases import LeaseStore
 from kronos_engine.ports.sandbox import Sandbox
+from kronos_engine.skills.catalog import SkillCatalog
 from kronos_engine.state.goals import SqliteGoalStore
 
 
@@ -85,6 +87,7 @@ class DispatchService:
         *,
         clock: Callable[[], datetime],
         worktrees: GitCacheWorktree | None = None,
+        skills: SkillCatalog | None = None,
     ) -> None:
         self._store = store
         self._repos = repos
@@ -96,6 +99,7 @@ class DispatchService:
         self._cache_root = cache_root
         self._clock = clock
         self._worktrees = worktrees or GitCacheWorktree()
+        self._skills = skills
 
     def claim(
         self,
@@ -317,6 +321,7 @@ class DispatchService:
                 status="failed",
             )
         self._recorder.emit("run.started", {"task_id": task.id.value, "phase": phase})
+        summaries, routed_ids = self._route_skill_summaries(task)
         request = ExecutorRequest(
             repository_id=task.repository_id,
             task_id=task.id,
@@ -326,6 +331,7 @@ class DispatchService:
                 evidence=",".join(f"{item.path}:{item.line}" for item in task.evidence),
                 expected_artifact=_expected_artifact(running, phase),
                 expected_content="",
+                skill_summaries=summaries,
             ),
             capabilities=ExecutorCapabilities(
                 network=True,
@@ -360,6 +366,7 @@ class DispatchService:
             "run.completed",
             {"task_id": task.id.value, "status": result.status, "error": result.error or ""},
         )
+        self._record_skill_outcomes(task, routed_ids, helpful=result.status == "succeeded")
         if result.status != "succeeded":
             return ExecuteResult(
                 ok=False,
@@ -408,6 +415,35 @@ class DispatchService:
             self._recorder.emit(
                 "budget.consumed",
                 {"task_id": task_id.value, "attempts": self._store.task_attempts(task_id)},
+            )
+
+    def _route_skill_summaries(self, task: TaskRecord) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        if self._skills is None:
+            return (), ()
+        routed = self._skills.route(f"{task.title} {task.kind.value}", budget_tokens=200)
+        summaries = tuple(f"{item.name}: {item.description}" for item in routed.summaries)
+        installed = {item.name: item.id for item in self._skills.list()}
+        ids = tuple(installed[item.name] for item in routed.summaries if item.name in installed)
+        return summaries, ids
+
+    def _record_skill_outcomes(
+        self, task: TaskRecord, skill_ids: tuple[str, ...], *, helpful: bool
+    ) -> None:
+        if self._skills is None or not skill_ids:
+            return
+        source_sha = self._indexer.status(task.repository_id.value).commit or ""
+        if not source_sha:
+            return
+        outcome = "helpful" if helpful else "harmful"
+        text = f"Task {task.id.value} {outcome} after execute."
+        for skill_id in skill_ids:
+            record_outcome(
+                self._skills,
+                skill_id=skill_id,
+                source_sha=source_sha,
+                outcome=outcome,
+                text=text,
+                confidence=0.6 if helpful else 0.8,
             )
 
 

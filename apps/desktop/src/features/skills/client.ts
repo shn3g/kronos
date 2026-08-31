@@ -1,11 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+export interface SkillFinding {
+  path: string;
+  code: string;
+  detail: string;
+}
+
 export interface SkillScan {
   malicious: boolean;
   executedScripts: boolean;
   files: string[];
   scripts: string[];
   permissions: string[];
+  findings: SkillFinding[];
 }
 
 export interface SkillRecord {
@@ -16,6 +23,7 @@ export interface SkillRecord {
   status: string;
   scope: string;
   description: string;
+  capabilities: string[];
   scan: SkillScan;
 }
 
@@ -25,6 +33,7 @@ export interface SkillsClient {
   evaluate(id: string): Promise<SkillRecord>;
   approve(id: string, human: boolean): Promise<SkillRecord>;
   activate(id: string): Promise<SkillRecord>;
+  promote(id: string, human: boolean): Promise<SkillRecord>;
   disable(id: string): Promise<SkillRecord>;
 }
 
@@ -64,6 +73,11 @@ export function createProductionSkillsClient(
     },
     async activate(id) {
       const payload = await jsonRequest(request, "POST", `/skills/${id}/activate`);
+      return mapSkill(payload);
+    },
+    async promote(id, human) {
+      await jsonRequest(request, "POST", `/skills/${id}/promote`, { human });
+      const payload = await jsonRequest(request, "GET", `/skills/${id}`);
       return mapSkill(payload);
     },
     async disable(id) {
@@ -112,6 +126,10 @@ function mapSkill(raw: unknown): SkillRecord {
   const declared = Array.isArray(scanRaw.declared_permissions)
     ? scanRaw.declared_permissions.filter((entry): entry is string => typeof entry === "string")
     : [];
+  const findingsRaw = Array.isArray(scanRaw.findings) ? scanRaw.findings : [];
+  const capabilities = Array.isArray(item.capabilities)
+    ? item.capabilities.filter((entry): entry is string => typeof entry === "string")
+    : [];
   return {
     id: typeof item.id === "string" ? item.id : "",
     name: typeof item.name === "string" ? item.name : "",
@@ -120,6 +138,7 @@ function mapSkill(raw: unknown): SkillRecord {
     status: typeof item.status === "string" ? item.status : "",
     scope: typeof item.scope === "string" ? item.scope : "",
     description: typeof item.description === "string" ? item.description : "",
+    capabilities,
     scan: {
       malicious: scanRaw.malicious === true,
       executedScripts: scanRaw.executed_scripts === true,
@@ -130,6 +149,19 @@ function mapSkill(raw: unknown): SkillRecord {
         ? scanRaw.scripts.filter((entry): entry is string => typeof entry === "string")
         : [],
       permissions: declared,
+      findings: findingsRaw.flatMap((entry) => {
+        if (typeof entry !== "object" || entry === null) {
+          return [];
+        }
+        const finding = entry as Record<string, unknown>;
+        return [
+          {
+            path: typeof finding.path === "string" ? finding.path : "",
+            code: typeof finding.code === "string" ? finding.code : "",
+            detail: typeof finding.detail === "string" ? finding.detail : "",
+          },
+        ];
+      }),
     },
   };
 }

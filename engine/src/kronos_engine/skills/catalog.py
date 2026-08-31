@@ -156,7 +156,7 @@ class SkillCatalog:
     def evaluate(self, skill_id: str) -> InstalledSkill:
         skill = self.get(skill_id)
         result = evaluate_skill(skill)
-        if result.passed:
+        if result.passed and skill.status == "quarantined":
             self._set_status(skill_id, "evaluated")
         return self.get(skill_id)
 
@@ -182,6 +182,15 @@ class SkillCatalog:
             raise SkillStillQuarantined("imported skill remains quarantined")
         if skill.status == "evaluated":
             raise SkillStillQuarantined("approval is required before activation")
+        if skill.scope == "repo":
+            from kronos_engine.memory.promotion import PromotionBlocked, consider_promotion
+
+            try:
+                decision = consider_promotion(self, skill_id)
+            except LookupError as error:
+                raise PromotionBlocked("insufficient evidence") from error
+            if not decision.eligible:
+                raise PromotionBlocked(decision.reason)
         self._set_status(skill_id, "active")
         return self.get(skill_id)
 

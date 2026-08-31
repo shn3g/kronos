@@ -91,13 +91,11 @@ def scan_skill_pack(root: Path) -> SkillScan:
         is_script = rel.startswith("scripts/") or path.suffix.lower() in _SCRIPT_SUFFIXES
         if is_script:
             scripts.append(rel)
-            findings.extend(_script_findings(rel, text))
         elif path.name != "SKILL.md":
             assets.append(rel)
-            if _ESCAPE.search(text):
-                findings.append(
-                    ScanFinding(rel, "path_escape", "asset references a parent path", "error")
-                )
+        findings.extend(_content_findings(rel, text))
+        if path.name == "SKILL.md":
+            findings.extend(_reference_escapes(root, text))
     inferred = tuple(sorted({item.code for item in findings if item.code != "eval"}))
     malicious = any(
         item.code in {"network", "secrets", "eval", "path_escape"} for item in findings
@@ -114,16 +112,16 @@ def scan_skill_pack(root: Path) -> SkillScan:
     )
 
 
-def _script_findings(rel: str, text: str) -> list[ScanFinding]:
+def _content_findings(rel: str, text: str) -> list[ScanFinding]:
     found: list[ScanFinding] = []
     if _NETWORK.search(text):
-        found.append(ScanFinding(rel, "network", "script performs network I/O", "error"))
+        found.append(ScanFinding(rel, "network", "content performs network I/O", "error"))
     if _SECRETS.search(text):
-        found.append(ScanFinding(rel, "secrets", "script reads credential-shaped values", "error"))
+        found.append(ScanFinding(rel, "secrets", "content reads credential-shaped values", "error"))
     if _EVAL.search(text):
-        found.append(ScanFinding(rel, "eval", "script evaluates or spawns a shell", "error"))
+        found.append(ScanFinding(rel, "eval", "content evaluates or spawns a shell", "error"))
     if _ESCAPE.search(text):
-        found.append(ScanFinding(rel, "path_escape", "script walks outside the pack", "error"))
+        found.append(ScanFinding(rel, "path_escape", "content walks outside the pack", "error"))
     return found
 
 
