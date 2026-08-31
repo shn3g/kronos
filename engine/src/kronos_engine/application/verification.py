@@ -14,6 +14,7 @@ from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import RepositoryService
 from kronos_engine.domain.entities import TaskId
 from kronos_engine.domain.goals import GoalState, transition_goal
+from kronos_engine.domain.policy import ModeWriteRefused, refuse_mode_write
 from kronos_engine.domain.results import StaleFenceError
 from kronos_engine.domain.tasks import TaskRecord, TaskState, transition_task
 from kronos_engine.domain.workflow import (
@@ -170,6 +171,11 @@ class VerificationService:
 
     def open_integration_pr(self, task_id: TaskId) -> PullRef:
         task = self._store.get_task(task_id)
+        repo = self._repos.get(task.repository_id)
+        try:
+            refuse_mode_write(repo.policy.autonomy.mode, "open_draft_pr")
+        except ModeWriteRefused as error:
+            raise ForgeError(str(error)) from error
         goal = self._store.get_goal(task.goal_id)
         branch = f"kronos/{task.id.value}"
         create_branch = getattr(self._forge, "create_feature_branch")
@@ -214,6 +220,16 @@ class VerificationService:
         task = self._store.get_task(task_id)
         if task.pr_number is None:
             return MergeAttempt(ok=False, reason="no integration PR")
+        repo = self._repos.get(task.repository_id)
+        try:
+            refuse_mode_write(
+                repo.policy.autonomy.mode,
+                "merge_integration",
+                target_branch=task.pr_base,
+                protected_branch=repo.policy.branches.protected,
+            )
+        except ModeWriteRefused as error:
+            return MergeAttempt(ok=False, reason=str(error))
         try:
             decision = merge.merge_if_eligible(task.pr_number)
         except MergeRefused as error:

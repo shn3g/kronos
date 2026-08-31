@@ -206,6 +206,10 @@ class RepositoryService:
         self._registry.save(updated)
         return updated
 
+    def save_policy(self, record: EnrolledRepository) -> EnrolledRepository:
+        self._registry.save(record)
+        return record
+
     def runtime_paths(self, repo_id: RepositoryId) -> RuntimePaths:
         state_dir = self._paths.data / "repositories" / repo_id.value
         worktrees = self._runtime.worktree_root(self._paths.cache, repo_id)

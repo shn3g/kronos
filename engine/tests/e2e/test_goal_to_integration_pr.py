@@ -82,6 +82,7 @@ autonomy:
   freeze: false
   invent_issues: false
   refill_enabled: false
+  mode: merge_integration
 paths:
   locked_prefixes: []
 risk:
@@ -105,7 +106,12 @@ indexing:
 """
 
 POLICY_OVERRIDE = {
-    "autonomy": {"freeze": False, "invent_issues": False, "refill_enabled": False},
+    "autonomy": {
+        "freeze": False,
+        "invent_issues": False,
+        "refill_enabled": False,
+        "mode": "merge_integration",
+    },
     "branches": {"integration": "integration", "protected": "main"},
     "commands": {"setup": [], "test": ["pytest", "-q"], "lint": [], "build": []},
     "budgets": {

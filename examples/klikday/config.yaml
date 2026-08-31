@@ -1,20 +1,40 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 schema_version: 2
 branches:
-  integration: main
+  integration: main-openclaw
   protected: main
 commands:
-  setup: []
-  test: []
-  lint: []
-  build: []
+  setup:
+    - python
+    - -m
+    - pip
+    - install
+    - -r
+    - requirements.txt
+  test:
+    - python
+    - backend/manage.py
+    - test
+  lint:
+    - npm
+    - --prefix
+    - frontend
+    - run
+    - lint
+  build:
+    - npm
+    - --prefix
+    - frontend
+    - run
+    - build
 autonomy:
   freeze: true
   invent_issues: false
   refill_enabled: false
-  mode: observe
+  mode: shadow
 paths:
-  locked_prefixes: []
+  locked_prefixes:
+    - backend/bookings
 risk:
   floor: low
 budgets:
@@ -26,7 +46,7 @@ wip:
   ready: 2
   running: 3
 executor:
-  profile: standard
+  profile: cursor
   sandbox: default
 indexing:
   enabled: true
