@@ -41,9 +41,20 @@ export interface EngineEvent {
   payload: Record<string, unknown>;
 }
 
+export interface TickResult {
+  ok: boolean;
+  status: string;
+  reason: string;
+  taskId: string | null;
+  prUrl: string | null;
+  terminal: boolean;
+}
+
 export interface GoalsClient {
   list(): Promise<GoalRecord[]>;
   create(draft: GoalDraft): Promise<GoalRecord>;
+  plan(id: string): Promise<{ goal: GoalRecord; tasks: GoalTask[] }>;
+  tick(): Promise<TickResult>;
   get(id: string): Promise<{ goal: GoalRecord; tasks: GoalTask[] }>;
   pollEvents(after: number): Promise<{ events: EngineEvent[]; headSeq: number }>;
 }
@@ -77,6 +88,25 @@ export function createProductionGoalsClient(
         max_attempts: draft.maxAttempts,
       });
       return mapGoal(payload);
+    },
+    async plan(id) {
+      const payload = await jsonRequest(request, "POST", `/goals/${id}/plan`);
+      const tasks = Array.isArray(payload.tasks) ? payload.tasks : [];
+      return {
+        goal: mapGoal(asRecord(payload.goal)),
+        tasks: tasks.map(mapTask),
+      };
+    },
+    async tick() {
+      const payload = await jsonRequest(request, "POST", "/goals/tick");
+      return {
+        ok: Boolean(payload.ok),
+        status: stringField(payload, "status"),
+        reason: stringField(payload, "reason"),
+        taskId: typeof payload.task_id === "string" ? payload.task_id : null,
+        prUrl: typeof payload.pr_url === "string" ? payload.pr_url : null,
+        terminal: Boolean(payload.terminal),
+      };
     },
     async get(id) {
       const payload = await jsonRequest(request, "GET", `/goals/${id}`);

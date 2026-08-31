@@ -34,6 +34,17 @@ class Planner(Protocol):
     def plan(self, goal: object) -> Mapping[str, object]: ...
 
 
+_IN_FLIGHT_TASK_STATES = frozenset(
+    {
+        TaskState.CLAIMED,
+        TaskState.RUNNING,
+        TaskState.AWAITING_GATES,
+        TaskState.AWAITING_REVIEW,
+        TaskState.MERGED,
+    }
+)
+
+
 class PlanningService:
     def __init__(
         self,
@@ -54,6 +65,11 @@ class PlanningService:
         goal = self._store.get_goal(goal_id)
         if goal.state not in {GoalState.DRAFT, GoalState.PLANNED}:
             raise InvalidTransition(f"cannot plan goal from {goal.state}")
+        for task in self._store.list_tasks(goal_id):
+            if task.state in _IN_FLIGHT_TASK_STATES:
+                raise InvalidTransition(
+                    f"cannot re-plan goal while task {task.id.value} is {task.state.value}"
+                )
         repo = self._repos.get(goal.repository_id)
         meter = self._store.budget_meter(repo.id, self._clock().date().isoformat())
         check_budget(meter, repo.policy, task_attempts=0)

@@ -12,7 +12,7 @@ from tests.e2e.test_goal_to_integration_pr import GoalHarness, ScriptedPlanner
 
 from kronos_engine.application.dispatch import ExecuteResult
 from kronos_engine.domain.entities import TaskId
-from kronos_engine.domain.goals import GoalState, GoalValidationError, InvalidTransition
+from kronos_engine.domain.goals import GoalSource, GoalSpec, GoalState, GoalValidationError, InvalidTransition
 from kronos_engine.domain.tasks import EvidenceLocator, TaskState
 from kronos_engine.domain.workflow import ScheduledSpawnForbidden, UnresolvedEvidence
 from kronos_engine.state.scheduler import GoalScheduler
@@ -192,6 +192,60 @@ def test_plan_refuses_stopped_goals_and_empty_evidence_graph(tmp_path: Path) -> 
     )
     with pytest.raises(UnresolvedEvidence):
         fresh.planning.plan(fresh.goal.id)
+
+
+def test_replan_refuses_when_task_claimed(tmp_path: Path) -> None:
+    harness = GoalHarness(tmp_path, "happy")
+    harness.setup_goal()
+    task = harness.store.get_task(harness.task_id)
+    harness.store.save_task(replace(task, state=TaskState.CLAIMED))
+    with pytest.raises(InvalidTransition, match="claimed"):
+        harness.planning.plan(harness.goal.id)
+
+
+def test_tick_surfaces_draft_plan_failure(tmp_path: Path) -> None:
+    from kronos_engine.application.planning import PlanningService
+    from kronos_engine.domain.tasks import SchemaError
+    from kronos_engine.indexing.service import IndexingService
+
+    harness = GoalHarness(tmp_path, "happy")
+    record = harness.repos.enrol(str(harness.repo_root))
+    harness.repo_id = record.id
+    IndexingService(harness.paths).rebuild(record.id.value, harness.repo_root, record.policy)
+    harness.goals.create(
+        GoalSpec(
+            repository_id=record.id,
+            title="Draft only",
+            success_criteria="add(1, 1) == 2",
+            non_goals="do not rewrite packaging",
+            risk_ceiling="medium",
+            source=GoalSource.DESKTOP,
+            max_attempts=3,
+        )
+    )
+
+    class FailingPlanner:
+        def plan(self, goal: object) -> dict[str, object]:
+            _ = goal
+            raise SchemaError("index has no source path for evidence")
+
+    harness.planning = PlanningService(
+        harness.store, harness.repos, harness.recorder, FailingPlanner()
+    )
+    harness.engine = type(harness.engine)(
+        harness.store,
+        harness.planning,
+        harness.dispatch,
+        harness.verification,
+        harness.recovery,
+        harness.merge,
+        harness.scheduler,
+        clock=lambda: harness.now,
+    )
+    result = harness.engine.tick()
+    assert result.ok is False
+    assert result.status == "plan_failed"
+    assert "index has no source path" in result.reason
 
 
 def test_scheduler_is_goal_scheduler() -> None:

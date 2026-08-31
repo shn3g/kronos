@@ -110,13 +110,16 @@ class GoalEngine:
     def tick(self, *, holder_id: str = "engine") -> TickResult:
         now = self._clock()
         for goal in self._scheduler.tick_due(now):
-            self._planning.plan(goal.id)
+            try:
+                self._planning.plan(goal.id)
+            except Exception as error:
+                return self._plan_failed(error)
         for goal in self._store.list_goals():
             if goal.state is GoalState.DRAFT:
                 try:
                     self._planning.plan(goal.id)
-                except Exception:
-                    continue
+                except Exception as error:
+                    return self._plan_failed(error)
         ready = self._next_ready_task()
         if ready is None:
             return TickResult(
@@ -234,3 +237,14 @@ class GoalEngine:
             if all(self._store.get_task(dep).state is TaskState.MERGED for dep in task.depends_on):
                 return task
         return None
+
+    def _plan_failed(self, error: Exception) -> TickResult:
+        return TickResult(
+            ok=False,
+            status="plan_failed",
+            reason=str(error),
+            task_id=None,
+            pr_url=None,
+            claim_steps=(),
+            terminal=False,
+        )
