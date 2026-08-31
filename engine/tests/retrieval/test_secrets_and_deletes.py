@@ -29,6 +29,35 @@ def test_secrets_never_appear_in_retrieved_context(tmp_path: Path) -> None:
         assert not any(item.path.endswith("secrets.env") for item in pack.items)
 
 
+def test_secret_patterns_past_50k_in_source_are_not_searchable(tmp_path: Path) -> None:
+    padding = "safe_padding = 1\n" + ("x" * 51_000) + "\n"
+    body = (
+        padding
+        + "AKIAIOSFODNN7EXAMPLE\n"
+        + "-----BEGIN PRIVATE KEY-----\n"
+        + "ghp_lateTokenValueExampleToken99\n"
+        + "VISIBLE_AFTER_PAD = 1\n"
+    )
+    paths = kronos_paths(tmp_path)
+    root = init_git_repo(tmp_path / "late-secret", files={"src/mod.py": body})
+    service = IndexingService(paths)
+    service.rebuild("repo_late", root, indexing_policy())
+    blob = "\n".join(
+        item.text
+        for query in (
+            "AKIAIOSFODNN7EXAMPLE",
+            "BEGIN PRIVATE KEY",
+            "ghp_lateTokenValueExampleToken99",
+            "VISIBLE_AFTER_PAD",
+        )
+        for item in service.search("repo_late", query).items
+    )
+    assert "AKIAIOSFODNN7EXAMPLE" not in blob
+    assert "BEGIN PRIVATE KEY" not in blob
+    assert "ghp_lateTokenValueExampleToken99" not in blob
+    assert service.search("repo_late", "VISIBLE_AFTER_PAD").items == ()
+
+
 def test_deleted_chunks_disappear_from_search(tmp_path: Path) -> None:
     paths = kronos_paths(tmp_path)
     root = init_git_repo(

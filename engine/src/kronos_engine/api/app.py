@@ -340,6 +340,17 @@ def create_app(
             )
             return _index_status(status)
 
+    @app.post("/repositories/{repository_id}/index/refresh", response_model=IndexStatusResponse)
+    def index_refresh(
+        repository_id: str, _: None = Depends(require_auth)
+    ) -> IndexStatusResponse:
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+            status = IndexingService(settings.paths).incremental(
+                record.id.value, Path(record.realpath), record.policy
+            )
+            return _index_status(status)
+
     @app.get("/repositories/{repository_id}/index/search", response_model=IndexSearchResponse)
     def index_search(
         repository_id: str,

@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from tests.retrieval.support import golden_fixture, indexing_policy
+from tests.support.git_fixtures import init_git_repo
 
 from kronos_engine.indexing.scanner import scan_repository
 
@@ -24,6 +26,24 @@ def test_scanner_respects_gitignore_vendor_size_binary_and_secrets(tmp_path: Pat
     assert "huge.txt" not in paths
     assert not any("AKIAIOSFODNN7EXAMPLE" in item.text for item in files)
     assert not any("SHOULD_NOT_BE_INDEXED_TOKEN" in item.text for item in files)
+
+
+def test_exclude_prefixes_match_path_boundaries(tmp_path: Path) -> None:
+    root = init_git_repo(
+        tmp_path / "prefix",
+        files={
+            "src/mod.py": "SRC_ONLY = 1\n",
+            "srcfoo/mod.py": "BOUNDARY_KEEP = 1\n",
+        },
+    )
+    policy = indexing_policy()
+    policy = replace(
+        policy,
+        indexing=replace(policy.indexing, exclude_prefixes=("src",)),
+    )
+    paths = {item.path for item in scan_repository(root, policy)}
+    assert "src/mod.py" not in paths
+    assert "srcfoo/mod.py" in paths
 
 
 def test_scanner_does_not_write_into_the_enrolled_tree(tmp_path: Path) -> None:

@@ -114,14 +114,19 @@ def _ranges_from_events(
 def _tree_sitter_symbols(text: str, language: str) -> tuple[Symbol, ...] | None:
     """Prefer tree-sitter grammars when the optional language packages are installed."""
     try:
-        from tree_sitter import Language, Parser  # type: ignore[import-not-found]
+        from tree_sitter import (
+            Language,
+            Parser,
+            Query,
+            QueryCursor,
+        )
     except ImportError:
         return None
     language_id = None
     query_src = ""
     try:
         if language == "python":
-            import tree_sitter_python as ts_python  # type: ignore[import-not-found]
+            import tree_sitter_python as ts_python
 
             language_id = Language(ts_python.language())
             query_src = """
@@ -129,7 +134,7 @@ def _tree_sitter_symbols(text: str, language: str) -> tuple[Symbol, ...] | None:
             (class_definition name: (identifier) @name)
             """
         elif language == "javascript":
-            import tree_sitter_javascript as ts_javascript  # type: ignore[import-not-found]
+            import tree_sitter_javascript as ts_javascript
 
             language_id = Language(ts_javascript.language())
             query_src = """
@@ -137,12 +142,12 @@ def _tree_sitter_symbols(text: str, language: str) -> tuple[Symbol, ...] | None:
             (class_declaration name: (identifier) @name)
             """
         elif language == "typescript":
-            import tree_sitter_typescript as ts_typescript  # type: ignore[import-not-found]
+            import tree_sitter_typescript as ts_typescript
 
             language_id = Language(ts_typescript.language_typescript())
             query_src = """
-            (function_declaration name: (identifier) @name)
-            (class_declaration name: (identifier) @name)
+            (function_declaration (identifier) @name)
+            (class_declaration (type_identifier) @name)
             """
         else:
             return None
@@ -150,23 +155,23 @@ def _tree_sitter_symbols(text: str, language: str) -> tuple[Symbol, ...] | None:
         return None
     if language_id is None:
         return None
-    try:
-        parser = Parser(language_id)
-        tree = parser.parse(text.encode("utf-8"))
-        query = language_id.query(query_src)
-        captures = query.captures(tree.root_node)
-        found: list[Symbol] = []
-        nodes = captures.get("name", []) if isinstance(captures, dict) else []
-        if not nodes and isinstance(captures, list):
-            nodes = [node for node, name in captures if name == "name"]
-        for node in nodes:
-            parent_type = node.parent.type if node.parent is not None else ""
-            kind = "class" if "class" in parent_type else "function"
-            start = node.start_point[0] + 1
-            end = (node.parent.end_point[0] + 1) if node.parent is not None else start
-            found.append(
-                Symbol(name=node.text.decode("utf-8"), kind=kind, start_line=start, end_line=end)
-            )
-        return tuple(found) if found else None
-    except (AttributeError, TypeError, ValueError, OSError):
-        return None
+    parser = Parser(language_id)
+    tree = parser.parse(text.encode("utf-8"))
+    query = Query(language_id, query_src)
+    captures = QueryCursor(query).captures(tree.root_node)
+    found: list[Symbol] = []
+    nodes = captures.get("name", []) if isinstance(captures, dict) else []
+    if not nodes and isinstance(captures, list):
+        nodes = [node for node, name in captures if name == "name"]
+    for node in nodes:
+        parent_type = node.parent.type if node.parent is not None else ""
+        kind = "class" if "class" in parent_type else "function"
+        start = node.start_point[0] + 1
+        end = (node.parent.end_point[0] + 1) if node.parent is not None else start
+        raw = node.text
+        if raw is None:
+            continue
+        found.append(
+            Symbol(name=raw.decode("utf-8"), kind=kind, start_line=start, end_line=end)
+        )
+    return tuple(found) if found else None

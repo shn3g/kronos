@@ -20,6 +20,8 @@ from kronos_engine.domain.policy import (
     parse_policy,
     policy_to_dict,
 )
+from kronos_engine.indexing.scanner import GitReadError
+from kronos_engine.indexing.service import IndexingService
 from kronos_engine.ports.repository import (
     GitInspector,
     RepositoryRegistry,
@@ -61,12 +63,14 @@ class RepositoryService:
         inspector: GitInspector,
         detector: StackDetector,
         runtime: RuntimeLayout,
+        indexer: IndexingService | None = None,
     ) -> None:
         self._registry = registry
         self._paths = paths
         self._inspector = inspector
         self._detector = detector
         self._runtime = runtime
+        self._indexer = indexer if indexer is not None else IndexingService(paths)
 
     def inspect(self, path: str) -> InspectResult:
         snapshot = self._inspector.inspect(Path(path))
@@ -122,6 +126,10 @@ class RepositoryService:
         )
         self._registry.save(record)
         self._ensure_runtime(record.id, record.realpath)
+        try:
+            self._indexer.incremental(record.id.value, Path(record.realpath), record.policy)
+        except GitReadError:
+            pass
         return record
 
     def list(self) -> Sequence[EnrolledRepository]:

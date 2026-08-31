@@ -3,10 +3,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.retrieval.support import indexing_policy, kronos_paths
+import pytest
+from tests.retrieval.support import indexing_policy, kronos_paths, write_tiny_embedding_onnx
 from tests.support.git_fixtures import init_git_repo
 
-from kronos_engine.adapters.embeddings.local import LocalEmbeddingAdapter
+from kronos_engine.adapters.embeddings.local import (
+    DOCUMENT_FILENAME,
+    DOCUMENT_MODEL_ID,
+    DOCUMENT_MODEL_LICENSE,
+    EmbeddingModelConfig,
+    LocalEmbeddingAdapter,
+)
 from kronos_engine.indexing.service import IndexingService
 from kronos_engine.ports.embedding import EmbeddingPort
 
@@ -24,13 +31,16 @@ class _UnavailableEmbedding:
 class _RecordingEmbedding:
     def __init__(self) -> None:
         self.kinds: list[str] = []
+        self.batches: list[tuple[str, tuple[str, ...]]] = []
 
     def available(self, kind: str) -> bool:
         _ = kind
         return True
 
     def embed(self, texts: list[str], *, kind: str) -> list[list[float]]:
+        payload = tuple(texts)
         self.kinds.append(kind)
+        self.batches.append((kind, payload))
         dim = 8
         vectors: list[list[float]] = []
         for text in texts:
@@ -39,6 +49,20 @@ class _RecordingEmbedding:
                 vector[index % dim] += float(char)
             vectors.append(vector)
         return vectors
+
+
+class _SpyEmbedding:
+    def __init__(self, inner: LocalEmbeddingAdapter) -> None:
+        self._inner = inner
+        self.batches: list[tuple[str, tuple[str, ...]]] = []
+
+    def available(self, kind: str) -> bool:
+        return self._inner.available(kind)
+
+    def embed(self, texts: list[str], *, kind: str) -> list[list[float]] | None:
+        self.batches.append((kind, tuple(texts)))
+        result = self._inner.embed(texts, kind=kind)
+        return None if result is None else [list(row) for row in result]
 
 
 def test_dense_degrades_when_model_file_is_absent(tmp_path: Path) -> None:
@@ -75,17 +99,64 @@ def test_minilm_document_path_never_embeds_source_code(tmp_path: Path) -> None:
     embeddings = _RecordingEmbedding()
     service = IndexingService(paths, embeddings=embeddings)
     service.rebuild("repo_mix", root, indexing_policy())
+    assert "code" in embeddings.kinds
     assert "document" in embeddings.kinds
-    # Source code uses the code kind, never the English MiniLM document kind.
-    dense_file = (
-        Path(__file__).resolve().parents[2] / "src" / "kronos_engine" / "indexing" / "dense.py"
-    )
-    text = dense_file.read_text(encoding="utf-8")
-    assert "document" in text
-    assert "code" in text
+    document_texts = [
+        text for kind, batch in embeddings.batches if kind == "document" for text in batch
+    ]
+    code_texts = [text for kind, batch in embeddings.batches if kind == "code" for text in batch]
+    assert any("def enrol" in text for text in code_texts)
+    assert any("documentation" in text.lower() for text in document_texts)
+    assert not any("def enrol" in text for text in document_texts)
     status = service.status("repo_mix")
     assert status.dense_available is True
     _ = EmbeddingPort
+
+
+def test_local_onnx_file_produces_code_vectors_and_never_uses_minilm(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("onnxruntime")
+    models = tmp_path / "models"
+    write_tiny_embedding_onnx(models / "code.onnx")
+    write_tiny_embedding_onnx(models / "all-MiniLM-L6-v2.onnx")
+    adapter = LocalEmbeddingAdapter(models)
+    assert adapter.available("code") is True
+    assert adapter.available("document") is True
+    vectors = adapter.embed(["def enrol():\n    return 1\n"], kind="code")
+    assert vectors is not None
+    assert len(vectors) == 1
+    assert len(vectors[0]) >= 1
+    assert all(isinstance(value, float) for value in vectors[0])
+    minilm_as_code = LocalEmbeddingAdapter(
+        models,
+        code=EmbeddingModelConfig(
+            model_id=DOCUMENT_MODEL_ID,
+            license=DOCUMENT_MODEL_LICENSE,
+            filename=DOCUMENT_FILENAME,
+            sha256="",
+        ),
+    )
+    assert minilm_as_code.available("code") is False
+    assert minilm_as_code.embed(["def enrol():\n    pass\n"], kind="code") is None
+
+    spy = _SpyEmbedding(adapter)
+    paths = kronos_paths(tmp_path)
+    root = init_git_repo(
+        tmp_path / "onnx-mix",
+        files={
+            "src/code.py": "def enrol():\n    return 1\n",
+            "docs/guide.md": "English documentation about enrolment.\n",
+        },
+    )
+    service = IndexingService(paths, embeddings=spy)
+    status = service.rebuild("repo_onnx", root, indexing_policy())
+    assert status.dense_available is True
+    code_texts = [text for kind, batch in spy.batches if kind == "code" for text in batch]
+    document_texts = [text for kind, batch in spy.batches if kind == "document" for text in batch]
+    assert any("def enrol" in text for text in code_texts)
+    assert any("documentation" in text.lower() for text in document_texts)
+    assert not any("def enrol" in text for text in document_texts)
 
 
 def test_sparse_and_graph_still_serve_without_dense(tmp_path: Path) -> None:

@@ -1,10 +1,14 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 from __future__ import annotations
 
-from pathlib import Path
+import pytest
 
 from kronos_engine.indexing.chunks import chunk_text
-from kronos_engine.indexing.languages import detect_language, extract_imports, extract_symbols
+from kronos_engine.indexing.languages import (
+    detect_language,
+    extract_imports,
+    extract_symbols,
+)
 from kronos_engine.indexing.scanner import ScannedFile
 
 
@@ -52,16 +56,34 @@ def test_detect_language_from_path() -> None:
     assert detect_language("docs/overview.md") == "markdown"
 
 
-def test_languages_module_declares_tree_sitter_adapters() -> None:
-    source = (
-        Path(__file__).resolve().parents[2]
-        / "src"
-        / "kronos_engine"
-        / "indexing"
-        / "languages.py"
+def test_tree_sitter_python_js_ts_symbol_names_and_line_ranges() -> None:
+    pytest.importorskip("tree_sitter")
+    pytest.importorskip("tree_sitter_python")
+    pytest.importorskip("tree_sitter_javascript")
+    pytest.importorskip("tree_sitter_typescript")
+    from kronos_engine.indexing.languages import _tree_sitter_symbols
+
+    py_src = "class Store:\n    pass\n\ndef connect(dsn: str) -> str:\n    return dsn\n"
+    py = _tree_sitter_symbols(py_src, "python")
+    assert py is not None
+    by_name = {item.name: item for item in py}
+    assert by_name["Store"].kind == "class"
+    assert by_name["Store"].start_line == 1
+    assert by_name["Store"].end_line >= 2
+    assert by_name["connect"].kind == "function"
+    assert by_name["connect"].start_line == 4
+    assert by_name["connect"].end_line >= 4
+
+    js_src = "function renderShell() {\n  return 'ok';\n}\n"
+    js = _tree_sitter_symbols(js_src, "javascript")
+    assert js is not None
+    assert any(item.name == "renderShell" and item.start_line == 1 for item in js)
+
+    ts_src = (
+        "export function fetchSession(id: string): Promise<string> {\n"
+        "  return Promise.resolve(id);\n"
+        "}\n"
     )
-    text = source.read_text(encoding="utf-8")
-    assert "tree-sitter" in text.lower() or "tree_sitter" in text
-    assert "python" in text
-    assert "javascript" in text
-    assert "typescript" in text
+    ts = _tree_sitter_symbols(ts_src, "typescript")
+    assert ts is not None
+    assert any(item.name == "fetchSession" and item.start_line == 1 for item in ts)
