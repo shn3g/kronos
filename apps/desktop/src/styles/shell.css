@@ -345,6 +345,77 @@
   font-size: 13px;
 }
 
+.index-page__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 24px;
+  max-width: 28rem;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.index-page__field select,
+.index-page__field input {
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--void);
+  color: var(--ink);
+}
+
+.index-page__status {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 20px 0 0;
+}
+
+.index-page__status dt {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.index-page__status dd {
+  margin: 6px 0 0;
+  color: var(--ink);
+}
+
+.index-page__actions,
+.index-page__search {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  margin-top: 20px;
+}
+
+.index-page__hits {
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.index-page__hits li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.index-page__hit-path {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.index-page__hit-meta,
+.index-page__empty {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 @media (max-width: 860px) {
   .app-shell {
     grid-template-columns: 1fr;

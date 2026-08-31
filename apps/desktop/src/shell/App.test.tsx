@@ -17,6 +17,7 @@ const routes = [
   { name: "Runs", heading: "Runs" },
   { name: "Skills", heading: "Skills" },
   { name: "Models", heading: "Models" },
+  { name: "Index", heading: "Index" },
   { name: "Connections", heading: "Connections" },
 ] as const;
 

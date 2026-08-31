@@ -39,6 +39,12 @@ export const ROUTES = [
     summary: "Assign planner, coder, reviewer, and embedding profiles. Fail closed without an engine.",
   },
   {
+    path: "/index",
+    name: "Index",
+    heading: "Index",
+    summary: "Per-repository hybrid index status and fail-closed search.",
+  },
+  {
     path: "/connections",
     name: "Connections",
     heading: "Connections",
