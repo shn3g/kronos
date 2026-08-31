@@ -42,6 +42,15 @@ function modelsClient(overrides: Partial<ModelsClient> = {}): ModelsClient {
       reviewer: "prof_local",
       embedding: "prof_embed",
     }),
+    createProvider: async () => ({
+      provider: {
+        id: "prov_1",
+        kind: "openai_compatible",
+        displayName: "Local",
+        billed: false,
+      },
+      profiles: [],
+    }),
     ...overrides,
   };
 }
@@ -85,6 +94,74 @@ describe("ModelsPage", () => {
       coder: "prof_local",
       reviewer: "prof_local",
       embedding: "prof_embed",
+    });
+  });
+
+  it("registers a detected local endpoint on an empty ready engine then assigns", async () => {
+    const user = userEvent.setup();
+    const profiles = [
+      { id: "prof_planner", displayName: "Local (planner)", role: "planner", billed: false },
+      { id: "prof_coder", displayName: "Local (coder)", role: "coder", billed: false },
+      { id: "prof_reviewer", displayName: "Local (reviewer)", role: "reviewer", billed: false },
+      { id: "prof_embedding", displayName: "Local (embedding)", role: "embedding", billed: false },
+    ];
+    let registered = false;
+    const createProvider = vi.fn(async () => {
+      registered = true;
+      return {
+        provider: {
+          id: "prov_local",
+          kind: "openai_compatible",
+          displayName: "http://127.0.0.1:11434/v1",
+          billed: false,
+        },
+        profiles,
+      };
+    });
+    const assign = vi.fn(async (assignments: Record<ModelRole, string>) => assignments);
+    render(
+      <ModelsPage
+        engineClient={engine("ready")}
+        modelsClient={modelsClient({
+          snapshot: async () => ({
+            detected: [
+              {
+                kind: "openai_compatible",
+                label: "http://127.0.0.1:11434/v1",
+                present: true,
+              },
+            ],
+            profiles: registered ? profiles : [],
+            assignments: {
+              planner: null,
+              coder: null,
+              reviewer: null,
+              embedding: null,
+            },
+          }),
+          createProvider,
+          assign,
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: /register as provider/i }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /register as provider/i }));
+    expect(createProvider).toHaveBeenCalledWith({
+      kind: "openai_compatible",
+      displayName: "http://127.0.0.1:11434/v1",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      billed: false,
+    });
+    expect(await screen.findByLabelText(/^planner$/i)).toHaveValue("prof_planner");
+    await user.click(screen.getByRole("button", { name: /save assignments/i }));
+    expect(assign).toHaveBeenCalledWith({
+      planner: "prof_planner",
+      coder: "prof_coder",
+      reviewer: "prof_reviewer",
+      embedding: "prof_embedding",
     });
   });
 });

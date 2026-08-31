@@ -294,11 +294,24 @@
 }
 
 .models__detected li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
   padding: 6px 10px;
   border: 1px solid var(--hairline);
   border-radius: 8px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.models__confirm {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
 }
 
 .models__form {

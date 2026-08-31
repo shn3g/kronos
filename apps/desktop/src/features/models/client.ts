@@ -15,6 +15,19 @@ export interface ModelProfileOption {
   billed: boolean;
 }
 
+export interface ProviderDraft {
+  kind: string;
+  displayName: string;
+  baseUrl: string | null;
+  billed: boolean;
+  apiKey?: string | null;
+}
+
+export interface CreatedProvider {
+  provider: { id: string; kind: string; displayName: string; billed: boolean };
+  profiles: ModelProfileOption[];
+}
+
 export type RoleAssignments = Record<ModelRole, string | null>;
 
 export interface ModelsSnapshot {
@@ -25,7 +38,11 @@ export interface ModelsSnapshot {
 
 export interface ModelsClient {
   snapshot(): Promise<ModelsSnapshot>;
-  assign(assignments: Record<ModelRole, string>): Promise<RoleAssignments>;
+  assign(
+    assignments: Record<ModelRole, string>,
+    options?: { confirmSharedRoles?: boolean },
+  ): Promise<RoleAssignments>;
+  createProvider(draft: ProviderDraft): Promise<CreatedProvider>;
 }
 
 interface EngineJsonResponse {
@@ -45,9 +62,23 @@ export function createProductionModelsClient(
       const payload = await jsonRequest(request, "GET", "/models");
       return mapSnapshot(payload);
     },
-    async assign(assignments) {
-      const payload = await jsonRequest(request, "PUT", "/models/assignments", assignments);
+    async assign(assignments, options) {
+      const body: Record<string, string | boolean> = { ...assignments };
+      if (options?.confirmSharedRoles) {
+        body.confirm_shared_roles = true;
+      }
+      const payload = await jsonRequest(request, "PUT", "/models/assignments", body);
       return mapAssignments(asRecord(payload.assignments));
+    },
+    async createProvider(draft) {
+      const payload = await jsonRequest(request, "POST", "/models/providers", {
+        kind: draft.kind,
+        display_name: draft.displayName,
+        base_url: draft.baseUrl,
+        billed: draft.billed,
+        ...(draft.apiKey ? { api_key: draft.apiKey } : {}),
+      });
+      return mapCreatedProvider(payload);
     },
   };
 }
@@ -94,16 +125,32 @@ function mapSnapshot(payload: Record<string, unknown>): ModelsSnapshot {
         present: tool.present === true,
       };
     }),
-    profiles: profilesRaw.map((item) => {
-      const profile = asRecord(item);
-      return {
-        id: stringField(profile, "id"),
-        displayName: stringField(profile, "display_name") || stringField(profile, "id"),
-        role: stringField(profile, "role"),
-        billed: profile.billed === true,
-      };
-    }),
+    profiles: profilesRaw.map(mapProfile),
     assignments: mapAssignments(asRecord(payload.assignments)),
+  };
+}
+
+function mapCreatedProvider(payload: Record<string, unknown>): CreatedProvider {
+  const provider = asRecord(payload.provider);
+  const profilesRaw = Array.isArray(payload.profiles) ? payload.profiles : [];
+  return {
+    provider: {
+      id: stringField(provider, "id"),
+      kind: stringField(provider, "kind"),
+      displayName: stringField(provider, "display_name") || stringField(provider, "id"),
+      billed: provider.billed === true,
+    },
+    profiles: profilesRaw.map(mapProfile),
+  };
+}
+
+function mapProfile(item: unknown): ModelProfileOption {
+  const profile = asRecord(item);
+  return {
+    id: stringField(profile, "id"),
+    displayName: stringField(profile, "display_name") || stringField(profile, "id"),
+    role: stringField(profile, "role"),
+    billed: profile.billed === true,
   };
 }
 
