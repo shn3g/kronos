@@ -58,3 +58,52 @@ def test_registering_apps_keeps_private_keys_out_of_sqlite(tmp_path: Path) -> No
             transport=fixture,
         ).mint_installation_token("reviewer")
     conn.close()
+
+
+def test_convert_manifest_stores_key_without_returning_pem(tmp_path: Path) -> None:
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    store = InMemorySecretStore()
+    _forge, fixture, _auth = controller_stack(secrets=store)
+    service = GitHubSetupService(
+        apps=SqliteGithubAppStore(conn),
+        secrets=store,
+        transport=fixture,
+    )
+    record = service.convert_manifest(role="controller", code="controller-manifest")
+    assert record.app_id == 1001
+    assert record.slug == "kronos-controller"
+    assert store.get("github:controller:private_key") == TEST_CONTROLLER_PEM
+    assert not hasattr(record, "pem")
+    db_bytes = (tmp_path / "kronos.sqlite3").read_bytes()
+    assert TEST_CONTROLLER_PEM.encode() not in db_bytes
+    conn.close()
+
+
+def test_product_forge_uses_time_sleep(tmp_path: Path) -> None:
+    import time
+
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    store = InMemorySecretStore()
+    _forge, fixture, _auth = controller_stack(secrets=store)
+    service = GitHubSetupService(
+        apps=SqliteGithubAppStore(conn),
+        secrets=store,
+        transport=fixture,
+    )
+    service.convert_manifest(role="controller", code="controller-manifest")
+    service.record_installation("controller", 2001)
+    from kronos_engine.ports.forge import ForgeTarget
+
+    forge = service.forge(
+        "controller",
+        ForgeTarget(
+            owner="acme",
+            repo="app",
+            integration_branch="integration",
+            protected_branch="main",
+        ),
+    )
+    assert forge._client._sleep is time.sleep
+    conn.close()

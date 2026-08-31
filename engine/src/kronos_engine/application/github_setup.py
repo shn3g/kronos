@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,7 +21,10 @@ from kronos_engine.domain.github import (
 from kronos_engine.ports.forge import (
     AppCredentials,
     ForgeAuthError,
+    ForgePermissionDenied,
+    ForgeRateLimited,
     ForgeTarget,
+    ForgeTransientError,
     GithubAppRecord,
     GithubAppStatus,
     GithubAppStore,
@@ -90,6 +94,43 @@ class GitHubSetupService:
         self._apps.save(record)
         return record
 
+    def convert_manifest(self, *, role: str, code: str) -> GithubAppRecord:
+        if role not in APP_ROLES:
+            raise ForgeAuthError(f"unknown GitHub App role: {role}")
+        if not code.strip():
+            raise ForgeAuthError("manifest conversion code is required")
+        from kronos_engine.adapters.github.client import (
+            DEFAULT_TIMEOUT_SECONDS,
+            HttpRequest,
+            send_with_backoff,
+        )
+
+        try:
+            response = send_with_backoff(
+                self._transport,
+                HttpRequest(
+                    method="POST",
+                    url=f"/app-manifests/{code.strip()}/conversions",
+                    headers={"Accept": "application/vnd.github+json"},
+                    body=b"{}",
+                    timeout=DEFAULT_TIMEOUT_SECONDS,
+                ),
+                sleep=time.sleep,
+            )
+        except (ForgePermissionDenied, ForgeRateLimited, ForgeTransientError) as error:
+            raise ForgeAuthError("GitHub App manifest conversion failed") from error
+        if response.status >= 400:
+            raise ForgeAuthError("GitHub App manifest conversion failed")
+        payload = json.loads(response.body.decode() or "{}")
+        pem = payload.get("pem")
+        app_id = payload.get("id")
+        slug = payload.get("slug")
+        if not isinstance(pem, str) or not pem.strip():
+            raise ForgeAuthError("converted App private key was empty")
+        if not isinstance(app_id, int) or not isinstance(slug, str) or not slug.strip():
+            raise ForgeAuthError("converted App identity was incomplete")
+        return self.register_app(role=role, app_id=app_id, slug=slug, private_key=pem)
+
     def record_installation(self, role: str, installation_id: int) -> GithubAppRecord:
         current = self._apps.get(role)
         if current is None:
@@ -107,7 +148,9 @@ class GitHubSetupService:
     def verify_installation(self, role: str) -> GithubAppRecord:
         current = self._require_installed(role)
         auth = self._auth()
-        client = GitHubClient(self._transport, auth, role=role, sleep=lambda _seconds: None)
+        client = GitHubClient(
+            self._transport, auth, role=role, base_url=self._github_base_url()
+        )
         payload = client.request_json(
             "GET",
             f"/app/installations/{current.installation_id}",
@@ -132,7 +175,7 @@ class GitHubSetupService:
     def forge(self, role: str, target: ForgeTarget) -> GitHubForge:
         self._require_installed(role)
         client = GitHubClient(
-            self._transport, self._auth(), role=role, sleep=lambda _seconds: None
+            self._transport, self._auth(), role=role, base_url=self._github_base_url()
         )
         return GitHubForge(client, target)
 
@@ -154,7 +197,12 @@ class GitHubSetupService:
                 installation_id=record.installation_id or 0,
                 role=record.role,
             )
-        return InstallationAuth(self._secrets, apps, self._transport, sleep=lambda _seconds: None)
+        return InstallationAuth(
+            self._secrets, apps, self._transport, base_url=self._github_base_url()
+        )
+
+    def _github_base_url(self) -> str:
+        return str(getattr(self._transport, "_base_url", "https://api.github.com")).rstrip("/")
 
     def _role_status(self, role: str) -> GithubAppStatus:
         record = self._apps.get(role)
@@ -164,4 +212,6 @@ class GitHubSetupService:
             registered=True,
             installed=record.installation_id is not None,
             verified=record.verified_at is not None,
+            app_id=record.app_id,
+            slug=record.slug,
         )
