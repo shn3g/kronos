@@ -105,13 +105,30 @@ describe("probeEngineState", () => {
 });
 
 describe("createProductionEngineClient", () => {
-  it("fails closed when the locator cannot find a live engine", async () => {
+  it("fails closed when the sidecar reports no state", async () => {
     const client = createProductionEngineClient({
-      locate: async () => null,
+      readState: async () => null,
     });
     const state = await client.getState();
     expect(state.status).toBe("unavailable");
     expect(state).not.toMatchObject({ status: "ready" });
+  });
+
+  it("uses sidecar probe state without a renderer bearer token", async () => {
+    const client = createProductionEngineClient({
+      readState: async () => ({ status: "ready", version: "0.1.0" }),
+    });
+    await expect(client.getState()).resolves.toEqual({
+      status: "ready",
+      version: "0.1.0",
+    });
+  });
+
+  it("reports starting while the sidecar is coming up", async () => {
+    const client = createProductionEngineClient({
+      readState: async () => ({ status: "starting" }),
+    });
+    await expect(client.getState()).resolves.toEqual({ status: "starting" });
   });
 });
 
