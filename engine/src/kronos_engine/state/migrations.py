@@ -259,6 +259,36 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        8,
+        """
+        CREATE TABLE telegram_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            allowed_user_ids_json TEXT NOT NULL,
+            allowed_chat_ids_json TEXT NOT NULL,
+            default_repository_id TEXT,
+            last_update_offset INTEGER NOT NULL DEFAULT 0
+        );
+
+        INSERT INTO telegram_settings(
+            id, allowed_user_ids_json, allowed_chat_ids_json,
+            default_repository_id, last_update_offset
+        ) VALUES (1, '[]', '[]', NULL, 0);
+
+        CREATE TABLE telegram_updates (
+            update_id INTEGER PRIMARY KEY,
+            processed_at TEXT NOT NULL
+        );
+
+        CREATE TABLE telegram_rate (
+            user_id INTEGER NOT NULL,
+            window_start INTEGER NOT NULL,
+            command_count INTEGER NOT NULL,
+            approval_count INTEGER NOT NULL,
+            PRIMARY KEY (user_id, window_start)
+        );
+        """,
+    ),
 )
 
 

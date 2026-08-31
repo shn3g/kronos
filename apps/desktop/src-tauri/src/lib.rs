@@ -12,7 +12,12 @@ pub fn run() {
             app.manage(supervisor);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![engine::engine_state, engine::engine_json, engine::pick_repository_folder])
+        .invoke_handler(tauri::generate_handler![
+            engine::engine_state,
+            engine::engine_json,
+            engine::pick_repository_folder,
+            engine::import_telegram_bot_token
+        ])
         .run(tauri::generate_context!())
         .expect("Kronos failed to start");
 }
