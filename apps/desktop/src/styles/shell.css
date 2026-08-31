@@ -416,6 +416,32 @@
   font-size: 12px;
 }
 
+.github-setup__check,
+.github-setup__meta {
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.github-setup .wizard {
+  margin-top: 24px;
+}
+
+.github-setup .wizard + .wizard {
+  margin-top: 16px;
+}
+
+.github-setup textarea.wizard__input {
+  width: 100%;
+  min-height: 6rem;
+  resize: vertical;
+}
+
+.github-setup .btn-primary,
+.github-setup .btn-quiet {
+  margin-top: 12px;
+}
+
 @media (max-width: 860px) {
   .app-shell {
     grid-template-columns: 1fr;

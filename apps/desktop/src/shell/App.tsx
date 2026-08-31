@@ -10,6 +10,7 @@ import { WorkspacesPage } from "../features/workspaces/WorkspacesPage";
 import { pickRepositoryFolder } from "../features/workspaces/client";
 import { ModelsPage } from "../features/models/ModelsPage";
 import { IndexPage } from "../features/index/IndexPage";
+import { GitHubPage } from "../features/connections/github/GitHubPage";
 import { pathFromHash, ROUTES } from "./routes";
 
 const productionClient = createProductionEngineClient();
@@ -66,6 +67,8 @@ export function App({ engineClient }: AppProps) {
             <ModelsPage engineClient={client} />
           ) : path === "/index" ? (
             <IndexPage engineClient={client} />
+          ) : path === "/connections" ? (
+            <GitHubPage engineClient={client} />
           ) : (
             <>
               <p className="page-kicker">{active.name}</p>

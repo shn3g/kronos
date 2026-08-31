@@ -1,0 +1,22 @@
+{
+  "name": "Kronos Controller",
+  "url": "https://github.com/shn3g/kronos",
+  "hook_attributes": {
+    "url": "http://127.0.0.1/github/hooks",
+    "active": false
+  },
+  "redirect_url": "http://127.0.0.1/github/setup",
+  "callback_urls": ["http://127.0.0.1/github/setup"],
+  "description": "Opens issues, discussions, feature branches, and draft PRs. Never posts kronos-review (kronos-reviewer). Never writes the protected default branch.",
+  "public": false,
+  "default_events": [],
+  "default_permissions": {
+    "issues": "write",
+    "pull_requests": "write",
+    "contents": "write",
+    "discussions": "write",
+    "administration": "write",
+    "metadata": "read",
+    "checks": "read"
+  }
+}
