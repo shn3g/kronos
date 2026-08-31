@@ -8,7 +8,7 @@ Windows, macOS, and Linux are first-class targets. The desktop client talks to a
 
 ## Status
 
-The desktop shell, engine lifecycle, and repository enrolment are present. Workspaces lists enrolled repositories after the engine is ready. Enable Kronos proposes a reviewable diff and does not write runtime files into the git tree. The production client fails closed: it reports **ready** only when the live loopback API is healthy and version-compatible.
+The desktop shell, engine lifecycle, repository enrolment, and model routing are present. Workspaces lists enrolled repositories after the engine is ready. The Models screen assigns planner, coder, reviewer, and embedding profiles when the engine is ready and stays fail-closed otherwise. Enable Kronos proposes a reviewable diff and does not write runtime files into the git tree. The production client fails closed: it reports **ready** only when the live loopback API is healthy and version-compatible.
 
 ## Repository layout
 
