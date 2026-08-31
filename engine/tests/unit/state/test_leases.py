@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -8,6 +9,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from kronos_engine.domain.entities import Lease
 from kronos_engine.domain.results import LockHeldError, StaleFenceError
 from kronos_engine.state.database import connect
 from kronos_engine.state.leases import SqliteLeases
@@ -80,3 +82,99 @@ def test_steal_count_matches_fence_token(ttl_seconds: int) -> None:
             assert lease.holder_id == "h3"
         finally:
             conn.close()
+
+
+def test_concurrent_steal_of_expired_lease_has_one_winner(tmp_path: Path) -> None:
+    path = tmp_path / "kronos.sqlite3"
+    setup = connect(path)
+    try:
+        SqliteLeases(setup).acquire("r", "holder-a", timedelta(seconds=30), now=NOW)
+    finally:
+        setup.close()
+
+    steal_now = NOW + timedelta(seconds=31)
+    barrier = threading.Barrier(2)
+    outcomes: list[object] = []
+    guard = threading.Lock()
+
+    def take(holder: str) -> None:
+        conn = connect(path)
+        try:
+            barrier.wait(timeout=5)
+            try:
+                lease = SqliteLeases(conn).acquire(
+                    "r", holder, timedelta(seconds=30), now=steal_now
+                )
+                with guard:
+                    outcomes.append(lease)
+            except Exception as exc:
+                with guard:
+                    outcomes.append(exc)
+        finally:
+            conn.close()
+
+    threads = [
+        threading.Thread(target=take, args=("holder-b",)),
+        threading.Thread(target=take, args=("holder-c",)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+
+    wins = [item for item in outcomes if isinstance(item, Lease)]
+    losses = [item for item in outcomes if isinstance(item, LockHeldError)]
+    assert len(outcomes) == 2
+    assert len(wins) == 1
+    assert len(losses) == 1
+    assert wins[0].fence_token == 2
+    assert wins[0].holder_id in {"holder-b", "holder-c"}
+
+
+def test_concurrent_first_acquire_has_one_winner(tmp_path: Path) -> None:
+    path = tmp_path / "kronos.sqlite3"
+    connect(path).close()
+
+    barrier = threading.Barrier(2)
+    outcomes: list[object] = []
+    guard = threading.Lock()
+
+    def take(holder: str) -> None:
+        conn = connect(path)
+        try:
+            barrier.wait(timeout=5)
+            try:
+                lease = SqliteLeases(conn).acquire(
+                    "fresh", holder, timedelta(seconds=30), now=NOW
+                )
+                with guard:
+                    outcomes.append(lease)
+            except Exception as exc:
+                with guard:
+                    outcomes.append(exc)
+        finally:
+            conn.close()
+
+    threads = [
+        threading.Thread(target=take, args=("holder-a",)),
+        threading.Thread(target=take, args=("holder-b",)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+
+    wins = [item for item in outcomes if isinstance(item, Lease)]
+    losses = [item for item in outcomes if isinstance(item, LockHeldError)]
+    assert len(outcomes) == 2
+    assert len(wins) == 1
+    assert len(losses) == 1
+    assert wins[0].fence_token == 1
+    unexpected = [
+        item
+        for item in outcomes
+        if isinstance(item, Exception) and not isinstance(item, LockHeldError)
+    ]
+    assert unexpected == []

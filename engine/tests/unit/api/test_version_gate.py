@@ -9,7 +9,7 @@ from httpx import ASGITransport, AsyncClient
 from kronos_engine.api.app import create_app
 from kronos_engine.config.paths import resolve_paths
 from kronos_engine.config.settings import Settings
-from kronos_engine.state.database import connect
+from kronos_engine.state.database import Database
 
 
 @pytest.fixture
@@ -30,9 +30,9 @@ async def http(tmp_path: Path) -> AsyncIterator[AsyncClient]:
         auth_token="install-token",
         paths=paths,
     )
-    conn = connect(tmp_path / "kronos.sqlite3")
+    database = Database(tmp_path / "kronos.sqlite3")
     client = AsyncClient(
-        transport=ASGITransport(app=create_app(settings, conn), client=("127.0.0.1", 50000)),
+        transport=ASGITransport(app=create_app(settings, database), client=("127.0.0.1", 50000)),
         base_url="http://127.0.0.1",
         headers={"Authorization": "Bearer install-token"},
     )
@@ -40,7 +40,6 @@ async def http(tmp_path: Path) -> AsyncIterator[AsyncClient]:
         yield client
     finally:
         await client.aclose()
-        conn.close()
 
 
 @pytest.mark.asyncio
