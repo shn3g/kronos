@@ -32,7 +32,10 @@ from kronos_engine.api.models import (
     GithubManifestsResponse,
     GithubRulesetRequest,
     GithubStatusResponse,
+    GoalCreateRequest,
+    GoalDetailResponse,
     GoalListResponse,
+    GoalModel,
     HealthResponse,
     IndexMapResponse,
     IndexSearchHit,
@@ -49,16 +52,20 @@ from kronos_engine.api.models import (
     RepositoryDetailResponse,
     RepositoryListResponse,
     RepositoryRecord,
+    RunListResponse,
+    RunModel,
+    TaskModel,
     VersionResponse,
 )
-from kronos_engine.application.catalog import CatalogService
 from kronos_engine.application.event_query import EventQuery
 from kronos_engine.application.github_setup import GitHubSetupService
+from kronos_engine.application.goals import GoalService
 from kronos_engine.application.model_profiles import (
     ModelProfileService,
     ProviderDraft,
     RoleAssignmentError,
 )
+from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import (
     InspectResult,
     RepositoryNotFound,
@@ -71,8 +78,9 @@ from kronos_engine.config.repository import (
     render_enrolment_preview,
 )
 from kronos_engine.config.settings import CLIENT_VERSION_HEADER, Settings, is_loopback_client
-from kronos_engine.domain.entities import EnrolledRepository, IdentifierError, RepositoryId
+from kronos_engine.domain.entities import EnrolledRepository, GoalId, IdentifierError, RepositoryId
 from kronos_engine.domain.github import APP_ROLES
+from kronos_engine.domain.goals import GoalRecord, GoalSource, GoalSpec, GoalValidationError
 from kronos_engine.domain.models import ModelProfile
 from kronos_engine.domain.policy import PolicyError, policy_to_dict
 from kronos_engine.domain.version import client_is_compatible
@@ -90,11 +98,12 @@ from kronos_engine.ports.model_provider import ToolDetector
 from kronos_engine.ports.model_registry import ProviderConfig
 from kronos_engine.ports.repository import RuntimeInsideEnrolledTree
 from kronos_engine.ports.secrets import SecretStore
-from kronos_engine.state.catalog import SqliteCatalog
 from kronos_engine.state.database import Database
 from kronos_engine.state.event_store import SqliteEventStore
 from kronos_engine.state.github_apps import SqliteGithubAppStore
+from kronos_engine.state.goals import SqliteGoalStore
 from kronos_engine.state.model_profiles import SqliteModelRegistry
+from kronos_engine.state.outbox import SqliteOutbox
 from kronos_engine.state.repositories import SqliteRepositoryRegistry
 
 
@@ -119,18 +128,29 @@ def create_app(
             raise HTTPException(status_code=401, detail="unauthorized")
 
     @contextmanager
-    def catalog_service() -> Iterator[CatalogService]:
-        conn = database.connect()
-        try:
-            yield CatalogService(SqliteCatalog(conn))
-        finally:
-            conn.close()
-
-    @contextmanager
     def event_query() -> Iterator[EventQuery]:
         conn = database.connect()
         try:
             yield EventQuery(SqliteEventStore(conn))
+        finally:
+            conn.close()
+
+    @contextmanager
+    def goal_service() -> Iterator[GoalService]:
+        conn = database.connect()
+        try:
+            repos = RepositoryService(
+                SqliteRepositoryRegistry(conn),
+                settings.paths,
+                FilesystemGitInspector(),
+                ManifestStackDetector(),
+                CacheRuntimeLayout(),
+            )
+            yield GoalService(
+                SqliteGoalStore(conn),
+                repos,
+                Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn)),
+            )
         finally:
             conn.close()
 
@@ -551,11 +571,73 @@ def create_app(
 
     @app.get("/goals", response_model=GoalListResponse)
     def goals(_: None = Depends(require_auth)) -> GoalListResponse:
-        with catalog_service() as catalog:
-            return GoalListResponse(
-                goals=[
-                    {"id": goal.id.value, "repository_id": goal.repository_id.value}
-                    for goal in catalog.list_goals()
+        with goal_service() as service:
+            return GoalListResponse(goals=[_goal_model(item) for item in service.list()])
+
+    @app.post("/goals", response_model=GoalModel)
+    def create_goal(body: GoalCreateRequest, _: None = Depends(require_auth)) -> GoalModel:
+        try:
+            source = GoalSource(body.source)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail="unknown goal source") from error
+        try:
+            spec = GoalSpec(
+                repository_id=_parse_id(body.repository_id),
+                title=body.title,
+                success_criteria=body.success_criteria,
+                non_goals=body.non_goals,
+                risk_ceiling=body.risk_ceiling,
+                source=source,
+                schedule=body.schedule,
+            )
+        except (GoalValidationError, IdentifierError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        with goal_service() as service:
+            try:
+                created = service.create(spec)
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return _goal_model(created)
+
+    @app.get("/goals/{goal_id}", response_model=GoalDetailResponse)
+    def get_goal(goal_id: str, _: None = Depends(require_auth)) -> GoalDetailResponse:
+        with goal_service() as service:
+            try:
+                goal = service.get(GoalId(goal_id))
+            except (LookupError, IdentifierError) as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            tasks = service.list_tasks(goal.id)
+            return GoalDetailResponse(
+                goal=_goal_model(goal),
+                tasks=[
+                    TaskModel(
+                        id=item.id.value,
+                        goal_id=item.goal_id.value,
+                        title=item.title,
+                        state=item.state.value,
+                        kind=item.kind.value,
+                        stop_reason=item.stop_reason,
+                        pr_url=item.pr_url,
+                        pr_base=item.pr_base,
+                    )
+                    for item in tasks
+                ],
+            )
+
+    @app.get("/runs", response_model=RunListResponse)
+    def list_runs(_: None = Depends(require_auth)) -> RunListResponse:
+        with goal_service() as service:
+            return RunListResponse(
+                runs=[
+                    RunModel(
+                        id=item.id.value,
+                        goal_id=item.goal_id.value,
+                        task_id=item.task_id.value,
+                        status=item.status,
+                        evidence=item.evidence,
+                        pr_url=item.pr_url,
+                    )
+                    for item in service.list_runs()
                 ]
             )
 
@@ -733,4 +815,19 @@ def _index_status(status: IndexStatus) -> IndexStatusResponse:
         index_path=status.index_path,
         disk_bytes=status.disk_bytes,
         ready=status.ready,
+    )
+
+
+def _goal_model(goal: GoalRecord) -> GoalModel:
+    return GoalModel(
+        id=goal.id.value,
+        repository_id=goal.repository_id.value,
+        title=goal.title,
+        state=goal.state.value,
+        source=goal.source.value,
+        risk_ceiling=goal.risk_ceiling,
+        success_criteria=goal.success_criteria,
+        non_goals=goal.non_goals,
+        stop_reason=goal.stop_reason,
+        schedule=goal.schedule,
     )

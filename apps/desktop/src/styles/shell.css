@@ -461,6 +461,31 @@
   margin-top: 12px;
 }
 
+.goals-page__list,
+.runs-page__list {
+  display: grid;
+  gap: 12px;
+  margin: 24px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.goals-page .workspace-card {
+  width: 100%;
+  text-align: left;
+}
+
+.goals-page textarea.wizard__input {
+  min-height: 72px;
+  width: 100%;
+}
+
+.goals-page select.wizard__input,
+.goals-page input.wizard__input {
+  width: 100%;
+  margin-top: 8px;
+}
+
 @media (max-width: 860px) {
   .app-shell {
     grid-template-columns: 1fr;

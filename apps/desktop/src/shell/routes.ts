@@ -18,13 +18,13 @@ export const ROUTES = [
     path: "/goals",
     name: "Goals",
     heading: "Goals",
-    summary: "Bounded goals will be planned and tracked from this screen.",
+    summary: "Bounded goals are planned and tracked from this screen.",
   },
   {
     path: "/runs",
     name: "Runs",
     heading: "Runs",
-    summary: "Task runs, tests, and review evidence will stream here.",
+    summary: "Task runs, tests, and review evidence stream here.",
   },
   {
     path: "/skills",

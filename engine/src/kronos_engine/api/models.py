@@ -66,8 +66,60 @@ class RepositoryDetailResponse(BaseModel):
     pushed: bool = False
 
 
+class GoalModel(BaseModel):
+    id: str
+    repository_id: str
+    title: str
+    state: str
+    source: str
+    risk_ceiling: str
+    success_criteria: str
+    non_goals: str
+    stop_reason: str | None = None
+    schedule: str | None = None
+
+
 class GoalListResponse(BaseModel):
-    goals: list[dict[str, str]]
+    goals: list[GoalModel]
+
+
+class GoalCreateRequest(BaseModel):
+    repository_id: str
+    title: str
+    success_criteria: str
+    non_goals: str
+    risk_ceiling: str
+    source: str = "desktop"
+    schedule: str | None = None
+
+
+class TaskModel(BaseModel):
+    id: str
+    goal_id: str
+    title: str
+    state: str
+    kind: str
+    stop_reason: str | None = None
+    pr_url: str | None = None
+    pr_base: str | None = None
+
+
+class GoalDetailResponse(BaseModel):
+    goal: GoalModel
+    tasks: list[TaskModel]
+
+
+class RunModel(BaseModel):
+    id: str
+    goal_id: str
+    task_id: str
+    status: str
+    evidence: str
+    pr_url: str | None = None
+
+
+class RunListResponse(BaseModel):
+    runs: list[RunModel]
 
 
 class EventItem(BaseModel):

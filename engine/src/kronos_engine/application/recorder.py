@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sqlite3
+import uuid
 from collections.abc import Mapping
 
 from kronos_engine.domain.entities import EventId
@@ -33,3 +34,7 @@ class Recorder:
             self._conn.rollback()
             raise
         return stored, row
+
+    def emit(self, event_type: str, payload: Mapping[str, object]) -> tuple[StoredEvent, OutboxRow]:
+        event_id = EventId(f"evt_{uuid.uuid4().hex[:16]}")
+        return self.record(event_id, event_type, payload, payload)
