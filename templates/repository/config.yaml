@@ -12,6 +12,7 @@ autonomy:
   freeze: true
   invent_issues: false
   refill_enabled: false
+  mode: observe
 paths:
   locked_prefixes: []
 risk:

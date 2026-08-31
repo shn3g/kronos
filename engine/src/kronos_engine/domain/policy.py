@@ -37,6 +37,24 @@ _ALLOWED_TOP_LEVEL = frozenset(
     }
 )
 _UNREPRESENTABLE_AUTONOMY = frozenset({"coder_may_merge", "pulse_may_merge"})
+_ALLOWED_AUTONOMY = frozenset({"freeze", "invent_issues", "refill_enabled", "mode"})
+OPERATION_MODES: tuple[str, ...] = (
+    "observe",
+    "shadow",
+    "write_issues",
+    "write_draft_prs",
+    "merge_integration",
+    "multi_task",
+)
+DEFAULT_OPERATION_MODE = "observe"
+_MODE_RANK = {name: index for index, name in enumerate(OPERATION_MODES)}
+_ACTION_MIN_MODE = {
+    "create_issue": "write_issues",
+    "open_draft_pr": "write_draft_prs",
+    "merge_integration": "merge_integration",
+    "merge": "merge_integration",
+    "multi_task": "multi_task",
+}
 
 
 class PolicyError(ValueError):
@@ -45,6 +63,10 @@ class PolicyError(ValueError):
 
 class BudgetWriteRefused(RuntimeError):
     """Budget meters are schema data only until the metering sub-plan."""
+
+
+class ModeWriteRefused(RuntimeError):
+    """Raised when the staged operation mode refuses a GitHub write."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +88,7 @@ class Autonomy:
     freeze: bool
     invent_issues: bool
     refill_enabled: bool
+    mode: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +148,12 @@ def default_policy(*, integration_branch: str, protected_branch: str) -> Reposit
             "schema_version": POLICY_SCHEMA_VERSION,
             "branches": {"integration": integration_branch, "protected": protected_branch},
             "commands": {"setup": [], "test": [], "lint": [], "build": []},
-            "autonomy": {"freeze": True, "invent_issues": False, "refill_enabled": False},
+            "autonomy": {
+                "freeze": True,
+                "invent_issues": False,
+                "refill_enabled": False,
+                "mode": DEFAULT_OPERATION_MODE,
+            },
             "paths": {"locked_prefixes": []},
             "risk": {"floor": "low"},
             "budgets": {
@@ -156,6 +184,9 @@ def parse_policy(raw: Mapping[str, object]) -> RepositoryPolicy:
     forbidden = _UNREPRESENTABLE_AUTONOMY.intersection(autonomy_raw)
     if forbidden:
         raise PolicyError("worker merge fuses are unrepresentable")
+    unknown_autonomy = set(autonomy_raw) - _ALLOWED_AUTONOMY
+    if unknown_autonomy:
+        raise PolicyError(f"unknown autonomy fields: {sorted(unknown_autonomy)}")
     branches = _require_mapping(raw, "branches")
     commands = _require_mapping(raw, "commands")
     paths = _require_mapping(raw, "paths")
@@ -186,6 +217,7 @@ def parse_policy(raw: Mapping[str, object]) -> RepositoryPolicy:
             freeze=_require_bool(autonomy_raw, "freeze"),
             invent_issues=_require_bool(autonomy_raw, "invent_issues"),
             refill_enabled=_require_bool(autonomy_raw, "refill_enabled"),
+            mode=_parse_operation_mode(autonomy_raw),
         ),
         paths=LockedPaths(locked_prefixes=_require_str_tuple(paths, "locked_prefixes")),
         risk=RiskPolicy(floor=floor),
@@ -228,6 +260,7 @@ def policy_to_dict(policy: RepositoryPolicy) -> dict[str, object]:
             "freeze": policy.autonomy.freeze,
             "invent_issues": policy.autonomy.invent_issues,
             "refill_enabled": policy.autonomy.refill_enabled,
+            "mode": policy.autonomy.mode,
         },
         "paths": {"locked_prefixes": list(policy.paths.locked_prefixes)},
         "risk": {"floor": policy.risk.floor},
@@ -251,6 +284,8 @@ def apply_model_proposal(
     current: RepositoryPolicy, proposal: Mapping[str, object]
 ) -> RepositoryPolicy:
     proposed = parse_policy(proposal)
+    if proposed.autonomy.mode != current.autonomy.mode:
+        raise PolicyError("models cannot change operation mode")
     if proposed.autonomy != current.autonomy:
         raise PolicyError("models cannot change autonomy")
     if proposed.budgets != current.budgets:
@@ -289,6 +324,41 @@ def clamp_value(current: str, proposed: str) -> str:
 
 def refuse_budget_write(operation: str) -> None:
     raise BudgetWriteRefused(f"budget write refused until metering exists: {operation}")
+
+
+def freeze_autonomy(policy: RepositoryPolicy) -> RepositoryPolicy:
+    return replace(policy, autonomy=replace(policy.autonomy, freeze=True))
+
+
+def refuse_mode_write(
+    mode: str,
+    action: str,
+    *,
+    target_branch: str | None = None,
+    protected_branch: str = "main",
+) -> None:
+    if mode not in OPERATION_MODES:
+        raise PolicyError("unknown operation mode")
+    if action == "merge_protected" or (
+        action in {"merge_integration", "merge"}
+        and target_branch is not None
+        and target_branch == protected_branch
+    ):
+        raise ModeWriteRefused("never write the protected default branch")
+    needed = _ACTION_MIN_MODE.get(action)
+    if needed is None:
+        return
+    if _MODE_RANK[mode] < _MODE_RANK[needed]:
+        raise ModeWriteRefused(f"{mode} refuses {action}")
+
+
+def _parse_operation_mode(raw: Mapping[str, object]) -> str:
+    if "mode" not in raw:
+        return DEFAULT_OPERATION_MODE
+    value = raw.get("mode")
+    if not isinstance(value, str) or value not in OPERATION_MODES:
+        raise PolicyError("unknown operation mode")
+    return value
 
 
 def _step_index(steps: tuple[str, ...], value: str) -> int:

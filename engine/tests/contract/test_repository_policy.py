@@ -8,8 +8,10 @@ from pathlib import Path
 import pytest
 
 from kronos_engine.domain.policy import (
+    OPERATION_MODES,
     POLICY_SCHEMA_VERSION,
     BudgetWriteRefused,
+    ModeWriteRefused,
     PolicyError,
     RepositoryPolicy,
     apply_model_proposal,
@@ -17,8 +19,10 @@ from kronos_engine.domain.policy import (
     clamp_size,
     clamp_value,
     default_policy,
+    freeze_autonomy,
     parse_policy,
     refuse_budget_write,
+    refuse_mode_write,
 )
 
 
@@ -39,6 +43,7 @@ def test_default_policy_ports_prior_fuses_as_schema_data() -> None:
     assert policy.branches.protected == "main"
     assert policy.executor.profile == "standard"
     assert policy.indexing.enabled is True
+    assert policy.autonomy.mode == "observe"
 
 
 def test_strict_schema_rejects_unknown_fields_and_worker_merge_fuses() -> None:
@@ -79,7 +84,12 @@ def test_models_cannot_lower_risk_or_raise_budgets() -> None:
 def test_models_cannot_change_autonomy_budgets_wip_or_branches() -> None:
     current = parse_policy(_minimal_policy_dict())
     flipped = _minimal_policy_dict()
-    flipped["autonomy"] = {"freeze": False, "invent_issues": True, "refill_enabled": True}
+    flipped["autonomy"] = {
+        "freeze": False,
+        "invent_issues": True,
+        "refill_enabled": True,
+        "mode": "observe",
+    }
     with pytest.raises(PolicyError, match="autonomy"):
         apply_model_proposal(current, flipped)
 
@@ -149,6 +159,86 @@ def test_operator_can_set_distinct_integration_and_protected_branches() -> None:
     assert policy.branches.protected == "main"
 
 
+def test_staged_operation_modes_are_fixed_and_models_cannot_change_them() -> None:
+    assert OPERATION_MODES == (
+        "observe",
+        "shadow",
+        "write_issues",
+        "write_draft_prs",
+        "merge_integration",
+        "multi_task",
+    )
+    current = parse_policy(_minimal_policy_dict())
+    promoted = _minimal_policy_dict()
+    promoted["autonomy"] = {
+        "freeze": True,
+        "invent_issues": False,
+        "refill_enabled": False,
+        "mode": "multi_task",
+    }
+    with pytest.raises(PolicyError, match="operation mode"):
+        apply_model_proposal(current, promoted)
+    with pytest.raises(PolicyError, match="unknown operation mode|mode"):
+        raw = _minimal_policy_dict()
+        raw["autonomy"] = {
+            "freeze": True,
+            "invent_issues": False,
+            "refill_enabled": False,
+            "mode": "full_auto",
+        }
+        parse_policy(raw)
+
+
+def test_observe_and_shadow_refuse_github_writes() -> None:
+    for mode in ("observe", "shadow"):
+        for action in ("create_issue", "open_draft_pr", "merge_integration"):
+            with pytest.raises(ModeWriteRefused, match="refuses"):
+                refuse_mode_write(mode, action)
+
+
+def test_higher_modes_still_refuse_default_branch_writes() -> None:
+    for mode in ("write_draft_prs", "merge_integration", "multi_task"):
+        with pytest.raises(ModeWriteRefused, match="protected default branch"):
+            refuse_mode_write(
+                mode,
+                "merge_integration",
+                target_branch="main",
+                protected_branch="main",
+            )
+        with pytest.raises(ModeWriteRefused, match="protected default branch"):
+            refuse_mode_write(mode, "merge_protected")
+    refuse_mode_write("write_issues", "create_issue")
+    refuse_mode_write("write_draft_prs", "open_draft_pr")
+    refuse_mode_write(
+        "merge_integration",
+        "merge_integration",
+        target_branch="main-openclaw",
+        protected_branch="main",
+    )
+    with pytest.raises(ModeWriteRefused, match="multi_task"):
+        refuse_mode_write("merge_integration", "multi_task")
+    refuse_mode_write("multi_task", "multi_task")
+
+
+def test_operator_freeze_sets_freeze_without_enabling_invent() -> None:
+    current = parse_policy(
+        {
+            **_minimal_policy_dict(),
+            "autonomy": {
+                "freeze": False,
+                "invent_issues": False,
+                "refill_enabled": False,
+                "mode": "shadow",
+            },
+        }
+    )
+    frozen = freeze_autonomy(current)
+    assert frozen.autonomy.freeze is True
+    assert frozen.autonomy.invent_issues is False
+    assert frozen.autonomy.refill_enabled is False
+    assert frozen.autonomy.mode == "shadow"
+
+
 def _minimal_policy_dict() -> dict[str, object]:
     return {
         "schema_version": 2,
@@ -159,7 +249,12 @@ def _minimal_policy_dict() -> dict[str, object]:
             "lint": [],
             "build": [],
         },
-        "autonomy": {"freeze": True, "invent_issues": False, "refill_enabled": False},
+        "autonomy": {
+            "freeze": True,
+            "invent_issues": False,
+            "refill_enabled": False,
+            "mode": "observe",
+        },
         "paths": {"locked_prefixes": ["engine/src/kronos_engine/domain"]},
         "risk": {"floor": "high"},
         "budgets": {

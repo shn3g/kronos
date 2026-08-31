@@ -47,7 +47,7 @@ def policy_mapping(
             "lint": [],
             "build": [],
         },
-        "autonomy": {"freeze": freeze, "invent_issues": False, "refill_enabled": False},
+        "autonomy": {"freeze": freeze, "invent_issues": False, "refill_enabled": False, "mode": "merge_integration"},
         "paths": {"locked_prefixes": list(locked)},
         "risk": {"floor": risk},
         "budgets": {
