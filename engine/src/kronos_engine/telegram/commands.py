@@ -198,7 +198,10 @@ def parse_command(text: str) -> ParsedCommand | None:
     if name in {"pause", "resume", "approval"}:
         return ParsedCommand(name=name, goal_id=rest.strip() or None)
     if name == "goal":
-        return _parse_goal(stripped)
+        goal_line = f"/{name}"
+        if rest:
+            goal_line = f"{goal_line} {rest}"
+        return _parse_goal(goal_line)
     return None
 
 
