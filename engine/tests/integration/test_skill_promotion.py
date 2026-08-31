@@ -457,5 +457,45 @@ def test_execute_routes_summaries_and_records_outcome(tmp_path: Path) -> None:
     assert "KRONOS_REVIEWER" not in capture.last.worker_env
     recorded = catalog.procedural.for_skill(installed.id)
     assert recorded.source_sha
-    assert recorded.outcome in {"helpful", "harmful"}
-    assert recorded.helpful >= 1 or recorded.harmful >= 1
+    assert recorded.outcome == "helpful"
+    assert recorded.helpful >= 1
+    assert recorded.harmful == 0
+
+
+def test_execute_failure_leaves_core_tdd_active(tmp_path: Path) -> None:
+    from tests.e2e.test_goal_to_integration_pr import GoalHarness
+
+    from kronos_engine.adapters.embeddings.local import LocalEmbeddingAdapter
+    from kronos_engine.adapters.sandboxes.process_jail import ProcessJailSandbox
+    from kronos_engine.application.dispatch import DispatchService
+    from kronos_engine.indexing.service import IndexingService
+
+    harness = GoalHarness(tmp_path, "model_outage")
+    harness.setup_goal()
+    catalog = SkillCatalog(
+        harness.conn,
+        skills_root=REPO_SKILLS,
+        store_dir=tmp_path / "skill-store",
+        source=FixtureSkillSource({}),
+        embeddings=LocalEmbeddingAdapter(harness.paths.cache / "models"),
+    )
+    core = catalog.load_core()
+    tdd = next(item for item in core if item.name == "tdd")
+    assert tdd.status == "active"
+    harness.dispatch = DispatchService(
+        harness.store,
+        harness.repos,
+        harness.leases,
+        harness.recorder,
+        IndexingService(harness.paths),
+        harness.executor,
+        lambda worktree: ProcessJailSandbox(worktree),
+        harness.paths.cache,
+        clock=lambda: harness.now,
+        skills=catalog,
+    )
+    claimed = harness.dispatch.claim(harness.task_id, dry_run=False, holder_id="worker-1")
+    assert claimed.ok is True
+    executed = harness.dispatch.execute(claimed, phase="red")
+    assert executed.ok is False
+    assert catalog.get(tdd.id).status == "active"

@@ -301,6 +301,29 @@ def test_scan_flags_skill_md_and_asset_payloads(tmp_path: Path) -> None:
     assert any(item.path.endswith("hint.txt") for item in scan.findings)
 
 
+def test_community_pack_named_tdd_without_local_contract_fails(tmp_path: Path) -> None:
+    pack = write_skill_pack(
+        tmp_path / "fake-tdd",
+        name="tdd",
+        description="A community helper that collides with bundled tdd by name.",
+        body="# Fake\n\nNo pack-local regression contract is shipped.\n",
+        scope="community",
+    )
+    catalog = SkillCatalog(
+        Database(tmp_path / "kronos.sqlite3").connect(),
+        skills_root=REPO_SKILLS,
+        store_dir=tmp_path / "skill-store",
+        source=FixtureSkillSource({("fixture://fake", IMMUTABLE_USEFUL): pack}),
+    )
+    installed = catalog.import_pack("fixture://fake", IMMUTABLE_USEFUL, scope="community")
+    assert installed.contract is None
+    result = evaluate_skill(installed)
+    assert result.regression_passed is False
+    assert result.passed is False
+    evaluated = catalog.evaluate(installed.id)
+    assert evaluated.status == "quarantined"
+
+
 def test_community_pack_without_contract_fails_regression(tmp_path: Path) -> None:
     pack = write_skill_pack(
         tmp_path / "empty-contract",
