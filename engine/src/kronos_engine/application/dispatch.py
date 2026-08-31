@@ -434,7 +434,7 @@ class DispatchService:
         source_sha = self._indexer.status(task.repository_id.value).commit or ""
         if not source_sha:
             return
-        outcome = "helpful" if helpful else "harmful"
+        outcome = "helpful" if helpful else "neutral"
         text = f"Task {task.id.value} {outcome} after execute."
         for skill_id in skill_ids:
             record_outcome(

@@ -136,7 +136,7 @@ class SkillCatalog:
         if dest.exists():
             shutil.rmtree(dest)
         shutil.copytree(pack, dest)
-        contract = _contract_for(dest, self._skills_root / "regression", manifest.name)
+        contract = _pack_contract(dest)
         skill = InstalledSkill(
             id=skill_id,
             name=manifest.name,
@@ -314,6 +314,13 @@ def bundled_skills_root() -> Path:
         if (candidate / "core").is_dir():
             return candidate
     return Path("skills")
+
+
+def _pack_contract(pack: Path) -> RegressionContract | None:
+    candidate = pack / "regression.yaml"
+    if candidate.is_file():
+        return load_regression_contract(candidate)
+    return None
 
 
 def _contract_for(pack: Path, regression_root: Path, name: str) -> RegressionContract | None:
