@@ -1,8 +1,6 @@
 # Architecture notes
 
-See `docs/superpowers/2026-08-31-kronos-standalone-design.md` for the approved product architecture.
-
-This folder holds file-level notes that accumulate as subsystems land.
+Architecture notes live in `docs/architecture/`. This folder holds file-level notes that accumulate as subsystems land.
 
 - [Quickstart](../quickstart.md)
 - [Desktop shell](desktop-shell.md)
@@ -15,4 +13,3 @@ This folder holds file-level notes that accumulate as subsystems land.
 - [Retrieval metrics](../retrieval-metrics.md)
 - [Operations and rollback](../operations.md)
 - [Threat model](../security/threat-model.md)
-- [prior example](../../examples/removed/README.md)

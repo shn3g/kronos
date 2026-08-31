@@ -20,10 +20,10 @@ Private keys live under `github:reviewer:private_key`. Ambient `GH_TOKEN` is not
 
 ## Rulesets
 
-Enrolment can propose a ruleset. It must require the reviewer check with `integration_id`, keep strict required status checks, and zero bypass actors. Kronos will not copy prior's `strict_required_status_checks_policy: false`.
+Enrolment can propose a ruleset. It must require the reviewer check with `integration_id`, keep strict required status checks, and zero bypass actors. Kronos will not copy `strict_required_status_checks_policy: false`.
 
 ## Workflows
 
 `templates/github/kronos-pr.yml` is the repository workflow template. CODEOWNERS must cover `.kronos/**` and that workflow. See `templates/github/CODEOWNERS`.
 
-prior merge-gate and hermes-reviewer identity stay in that product repository until a dedicated cleanup after two stable Kronos release cycles. Kronos does not use Hermes check names.
+Kronos does not use Hermes check names.

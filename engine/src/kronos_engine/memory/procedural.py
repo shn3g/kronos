@@ -83,7 +83,7 @@ class ProceduralStore:
                 independent_sources=(),
                 skill_id=None,
                 created_at=str(item.get("created") or datetime.now(tz=UTC).isoformat()),
-                provenance={"source_pr": source_pr, "import": "prior"},
+                provenance={"source_pr": source_pr, "import": "yaml"},
             )
             persist_record(self._conn, record, self._embeddings)
             imported.append(record)

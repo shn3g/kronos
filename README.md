@@ -8,9 +8,9 @@ Windows, macOS, and Linux are first-class targets. The desktop client talks to a
 
 ## Status
 
-The desktop shell, engine lifecycle, repository enrolment, model routing, GitHub Apps, Telegram, skills, ops dashboard, and prior shadow pack are present. Workspaces lists enrolled repositories after the engine is ready. Enable Kronos proposes a reviewable diff and does not write runtime files into the git tree. The production client fails closed: it reports **ready** only when the live loopback API is healthy and version-compatible.
+The desktop shell, engine lifecycle, repository enrolment, model routing, GitHub Apps, Telegram, skills, and ops dashboard are present. Workspaces lists enrolled repositories after the engine is ready. Enable Kronos proposes a reviewable diff and does not write runtime files into the git tree. The production client fails closed: it reports **ready** only when the live loopback API is healthy and version-compatible.
 
-Kronos is the source of truth for prior automation policy. Public GitHub visibility is a later controller step. See [docs/quickstart.md](docs/quickstart.md) and [docs/operations.md](docs/operations.md).
+See [docs/quickstart.md](docs/quickstart.md) and [docs/operations.md](docs/operations.md).
 
 ## Repository layout
 
@@ -22,7 +22,6 @@ skills/                Future skill library
 templates/             Repository policy and GitHub workflow templates
 deploy/                Future service unit files
 docs/                  Architecture, security, operations, and design plans
-examples/removed/      Tested policy pack for the prior dashboard repository
 ```
 
 ## Prerequisites

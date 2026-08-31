@@ -26,7 +26,7 @@ from kronos_engine.domain.policy import (
 )
 
 
-def test_default_policy_ports_prior_fuses_as_schema_data() -> None:
+def test_default_policy_ports_fuses_as_schema_data() -> None:
     policy = default_policy(integration_branch="main", protected_branch="main")
     assert policy.schema_version == POLICY_SCHEMA_VERSION
     assert policy.schema_version == 2

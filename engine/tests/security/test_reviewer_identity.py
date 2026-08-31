@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Independent reviewer identity is the only merge gate. Inverted prior bugs."""
+"""Independent reviewer identity is the only merge gate. Invert contracts."""
 
 from __future__ import annotations
 

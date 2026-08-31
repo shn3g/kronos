@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Rollback freezes Kronos autonomy and leaves prior wrappers as fallback."""
+"""Rollback freezes Kronos autonomy and leaves operator wrappers as fallback."""
 
 from __future__ import annotations
 
@@ -37,9 +37,9 @@ def test_rollback_freezes_kronos_and_does_not_reenable_wrappers(tmp_path: Path) 
         indexer=IndexingService(paths),
     )
     root = init_git_repo(
-        tmp_path / "prior",
+        tmp_path / "sample-app",
         origin="https://github.com/acme/sample-app.git",
-        files={"README.md": "prior\n"},
+        files={"README.md": "sample\n"},
     )
     enrolled = repos.enrol(
         str(root),

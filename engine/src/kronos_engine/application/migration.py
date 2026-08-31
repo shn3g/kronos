@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Freeze Kronos autonomy. prior wrappers stay as the operator fallback."""
+"""Freeze Kronos autonomy. Operator wrappers stay as the fallback."""
 
 from __future__ import annotations
 
@@ -30,5 +30,5 @@ def rollback_to_wrappers(repos: RepositoryService, repo_id: RepositoryId) -> Rol
         frozen=True,
         wrappers_reenabled=False,
         write_crons_enabled=False,
-        fallback="prior wrappers remain the operator fallback; do not re-enable write crons",
+        fallback="operator wrappers remain the fallback; do not re-enable write crons",
     )

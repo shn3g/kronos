@@ -14,7 +14,7 @@ Workers never receive controller or reviewer credentials.
 
 ## Invert contracts (must fail)
 
-These prior-era paths must not succeed in Kronos:
+These invert-contract paths must not succeed in Kronos:
 
 1. Bot-authored verdict comments as merge identity.
 2. `security-reviewed` labels as merge identity.

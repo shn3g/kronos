@@ -225,13 +225,14 @@ def test_core_skill_changes_need_human_approval(tmp_path: Path) -> None:
         activate_promoted(catalog, tdd.id, record_id=record.id)
 
 
-def test_prior_lessons_import_as_disabled_candidates(tmp_path: Path) -> None:
+def test_lessons_import_as_disabled_candidates(tmp_path: Path) -> None:
     catalog = _catalog(tmp_path, {})
     imported = catalog.procedural.import_lessons(sample_lessons_yaml())
     assert len(imported) == 2
     assert {item.status for item in imported} == {MemoryStatus.disabled_candidate}
     assert all(item.kind == "procedural" for item in imported)
     assert all(item.source_sha for item in imported)
+    assert all(item.provenance.get("import") == "yaml" for item in imported)
     for item in imported:
         decision = consider_promotion(catalog, item.skill_id or item.id, PromotionConfig())
         assert decision.eligible is False

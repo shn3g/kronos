@@ -116,6 +116,28 @@ def test_enrol_inspect_and_lifecycle_keep_runtime_out_of_the_tree(tmp_path: Path
     assert again.id == beta.id
 
 
+def test_enrol_does_not_insert_memory_records(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    root = init_git_repo(
+        tmp_path / "sample-app",
+        origin="https://github.com/acme/sample-app.git",
+        files={"README.md": "sample\n"},
+    )
+    service.enrol(str(root))
+    paths = resolve_paths(
+        environ={
+            "KRONOS_DATA_HOME": str(tmp_path / "data"),
+            "KRONOS_CONFIG_HOME": str(tmp_path / "config"),
+            "KRONOS_CACHE_HOME": str(tmp_path / "cache"),
+            "KRONOS_LOG_HOME": str(tmp_path / "logs"),
+        }
+    )
+    conn = Database(paths.database).connect()
+    count = conn.execute("SELECT COUNT(*) AS n FROM memory_records").fetchone()
+    assert count is not None
+    assert int(count["n"]) == 0
+
+
 def test_models_cannot_patch_enrolled_policy_to_raise_budgets(tmp_path: Path) -> None:
     service = _service(tmp_path)
     root = init_git_repo(tmp_path / "gamma", origin="https://github.com/acme/gamma.git")

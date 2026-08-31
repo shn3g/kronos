@@ -8,7 +8,7 @@ The GitHub organization or user that owns [shn3g/kronos](https://github.com/shn3
 
 ## Decision process
 
-1. Product architecture lives in `docs/superpowers/` and `docs/architecture/`.
+1. Product architecture lives in `docs/architecture/`.
 2. Behavior changes land as reviewable pull requests with tests.
 3. License, security policy, and required checks need maintainer approval.
 4. Disagreements that block a release are resolved by the owning maintainer until a broader maintainer group exists.

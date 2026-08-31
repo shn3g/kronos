@@ -21,4 +21,4 @@ Imported skills stay quarantined until a human approves. Harmful outcomes roll i
 
 ## Lessons
 
-Readable text with provenance and helpful/harmful counters is authoritative. Propose is not activate. prior `lessons.yaml` imports as `disabled_candidate` records. See `examples/removed/lessons.yaml`.
+Readable text with provenance and helpful/harmful counters is authoritative. Propose is not activate. YAML lesson imports become `disabled_candidate` records.

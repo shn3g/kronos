@@ -21,7 +21,7 @@ Windows, macOS, and Linux are first-class. A signed production installer is a la
 4. Connect the controller GitHub App and the isolated reviewer GitHub App. Workers never receive those credentials.
 5. Leave autonomy frozen (`freeze: true`) and `mode: observe` or `mode: shadow` until you are ready for writes.
 
-prior uses the pack in `examples/removed/`. Integration stays `main-openclaw`. The protected default branch stays `main`.
+Integration stays `main-openclaw`. The protected default branch stays `main`.
 
 ## Staged modes
 
@@ -47,4 +47,3 @@ From the repository root: `pnpm test`. From `engine/`: `python -m pytest`. Fixtu
 - [Architecture](architecture/README.md)
 - [Threat model](security/threat-model.md)
 - [Operations and rollback](operations.md)
-- [prior example](../examples/removed/README.md)

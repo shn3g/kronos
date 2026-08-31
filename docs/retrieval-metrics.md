@@ -12,7 +12,7 @@ Each enrolled repository has an isolated hybrid index: SQLite FTS5/BM25, local c
 
 ## What not to copy
 
-prior recall tests encoded product-specific booking/accessibility score boosts. Kronos does not ship query-specific constants. Golden retrieval uses fixture lessons without those hacks.
+Recall tests must not encode product-specific booking or accessibility score boosts. Kronos does not ship query-specific constants. Golden retrieval uses fixture lessons without those hacks.
 
 ## Operations
 
