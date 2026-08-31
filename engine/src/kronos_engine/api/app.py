@@ -154,6 +154,7 @@ from kronos_engine.telegram.client import (
     TelegramTransport,
 )
 from kronos_engine.telegram.commands import TelegramConnector
+from kronos_engine.telegram.poller import TelegramPoller
 
 
 def create_app(
@@ -177,16 +178,11 @@ def create_app(
         stop_polling = threading.Event()
         worker: threading.Thread | None = None
         if telegram_auto_poll:
+            poller = TelegramPoller(store, telegram_connector)
 
             def _poll() -> None:
                 while not stop_polling.wait(1.5):
-                    if not store.get(BOT_TOKEN_REF):
-                        continue
-                    try:
-                        with telegram_connector() as connector:
-                            connector.poll()
-                    except Exception:
-                        continue
+                    poller.tick()
 
             worker = threading.Thread(target=_poll, daemon=True, name="kronos-telegram")
             worker.start()
