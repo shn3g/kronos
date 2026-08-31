@@ -47,6 +47,7 @@ export function GoalsPage({ engineClient, goalsClient }: GoalsPageProps) {
     nonGoals: "",
     riskCeiling: "low",
     source: "desktop",
+    maxAttempts: 3,
   });
 
   useEffect(() => {
@@ -71,19 +72,30 @@ export function GoalsPage({ engineClient, goalsClient }: GoalsPageProps) {
       return;
     }
     let cancelled = false;
-    void Promise.all([client.list(), client.listRepositories()]).then(([items, repos]) => {
-      if (cancelled) {
-        return;
-      }
-      setGoals(items);
-      setRepositories(repos);
-      setDraft((current) => ({
-        ...current,
-        repositoryId: current.repositoryId || repos[0]?.id || "",
-      }));
-    });
+    let after = 0;
+    const refresh = () => {
+      void Promise.all([
+        client.list(),
+        client.listRepositories(),
+        client.pollEvents(after),
+      ]).then(([items, repos, streamed]) => {
+        if (cancelled) {
+          return;
+        }
+        setGoals(items);
+        setRepositories(repos);
+        after = streamed.headSeq;
+        setDraft((current) => ({
+          ...current,
+          repositoryId: current.repositoryId || repos[0]?.id || "",
+        }));
+      });
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 1500);
     return () => {
       cancelled = true;
+      window.clearInterval(interval);
     };
   }, [client, ready]);
 
@@ -204,6 +216,19 @@ export function GoalsPage({ engineClient, goalsClient }: GoalsPageProps) {
             <option value="high">high</option>
             <option value="critical">critical</option>
           </select>
+        </label>
+        <label className="wizard__label" htmlFor="goal-budget">
+          Attempt budget
+          <input
+            id="goal-budget"
+            className="wizard__input"
+            type="number"
+            min={1}
+            value={draft.maxAttempts}
+            onChange={(event) => {
+              setDraft({ ...draft, maxAttempts: Number(event.target.value) });
+            }}
+          />
         </label>
         <button type="submit" className="btn-primary">
           Create goal

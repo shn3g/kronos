@@ -145,6 +145,16 @@ class IndexingService:
         finally:
             store.close()
 
+    def list_chunks(self, repo_id: str) -> tuple[IndexedChunk, ...]:
+        db_path = self._index_dir(repo_id) / "index.sqlite3"
+        if not db_path.is_file():
+            return ()
+        store = SqliteIndexStore(db_path)
+        try:
+            return tuple(store.list_chunks())
+        finally:
+            store.close()
+
     def status(self, repo_id: str) -> IndexStatus:
         db_path = self._index_dir(repo_id) / "index.sqlite3"
         if not db_path.is_file():

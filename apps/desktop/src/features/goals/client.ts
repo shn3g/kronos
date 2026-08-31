@@ -11,6 +11,7 @@ export interface GoalRecord {
   nonGoals: string;
   stopReason: string | null;
   schedule: string | null;
+  maxAttempts: number;
 }
 
 export interface GoalTask {
@@ -31,12 +32,20 @@ export interface GoalDraft {
   nonGoals: string;
   riskCeiling: string;
   source: string;
+  maxAttempts: number;
+}
+
+export interface EngineEvent {
+  seq: number;
+  type: string;
+  payload: Record<string, unknown>;
 }
 
 export interface GoalsClient {
   list(): Promise<GoalRecord[]>;
   create(draft: GoalDraft): Promise<GoalRecord>;
   get(id: string): Promise<{ goal: GoalRecord; tasks: GoalTask[] }>;
+  pollEvents(after: number): Promise<{ events: EngineEvent[]; headSeq: number }>;
 }
 
 interface EngineJsonResponse {
@@ -65,6 +74,7 @@ export function createProductionGoalsClient(
         non_goals: draft.nonGoals,
         risk_ceiling: draft.riskCeiling,
         source: draft.source,
+        max_attempts: draft.maxAttempts,
       });
       return mapGoal(payload);
     },
@@ -74,6 +84,21 @@ export function createProductionGoalsClient(
       return {
         goal: mapGoal(asRecord(payload.goal)),
         tasks: tasks.map(mapTask),
+      };
+    },
+    async pollEvents(after) {
+      const payload = await jsonRequest(request, "GET", `/events?after=${after}`);
+      const events = Array.isArray(payload.events) ? payload.events : [];
+      return {
+        events: events.map((item) => {
+          const record = asRecord(item);
+          return {
+            seq: typeof record.seq === "number" ? record.seq : 0,
+            type: stringField(record, "type"),
+            payload: asRecord(record.payload),
+          };
+        }),
+        headSeq: typeof payload.head_seq === "number" ? payload.head_seq : after,
       };
     },
   };
@@ -122,6 +147,7 @@ function mapGoal(raw: unknown): GoalRecord {
     nonGoals: stringField(item, "non_goals"),
     stopReason: typeof item.stop_reason === "string" ? item.stop_reason : null,
     schedule: typeof item.schedule === "string" ? item.schedule : null,
+    maxAttempts: typeof item.max_attempts === "number" ? item.max_attempts : 0,
   };
 }
 

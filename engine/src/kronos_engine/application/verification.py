@@ -13,10 +13,22 @@ from kronos_engine.application.merge import MergeRefused, MergeService
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import RepositoryService
 from kronos_engine.domain.entities import TaskId
-from kronos_engine.domain.goals import GoalState
-from kronos_engine.domain.tasks import TaskState, transition_task
-from kronos_engine.domain.workflow import NoTestStop, require_reproduction_artifact
+from kronos_engine.domain.goals import GoalState, transition_goal
+from kronos_engine.domain.results import StaleFenceError
+from kronos_engine.domain.tasks import TaskRecord, TaskState, transition_task
+from kronos_engine.domain.workflow import (
+    EmptyTestCommands,
+    MissingWorktree,
+    NoTestStop,
+    TddGateError,
+    assert_red_green,
+    lease_resource_key,
+    require_reproduction_artifact,
+    require_test_commands,
+    require_worktree_path,
+)
 from kronos_engine.ports.forge import ForgeError, IdempotencyKey, PullRef
+from kronos_engine.ports.leases import LeaseStore
 from kronos_engine.state.goals import SqliteGoalStore
 
 
@@ -47,6 +59,7 @@ class VerificationService:
         recorder: Recorder,
         forge: object,
         gates: GateRunner,
+        leases: LeaseStore,
         *,
         clock: Callable[[], datetime],
     ) -> None:
@@ -55,9 +68,39 @@ class VerificationService:
         self._recorder = recorder
         self._forge = forge
         self._gates = gates
+        self._leases = leases
         self._clock = clock
 
-    def accept(self, task_id: TaskId, executed: object) -> VerifyResult:
+    def gate(self, task_id: TaskId) -> VerifyResult:
+        task = self._store.get_task(task_id)
+        try:
+            worktree = Path(require_worktree_path(task.worktree_path))
+        except MissingWorktree as error:
+            return VerifyResult(ok=False, reason=str(error), evidence=str(error))
+        try:
+            self._assert_fence(task)
+        except StaleFenceError as error:
+            return VerifyResult(ok=False, reason=str(error), evidence=str(error))
+        repo = self._repos.get(task.repository_id)
+        try:
+            require_test_commands(repo.policy.commands.test)
+        except EmptyTestCommands as error:
+            return VerifyResult(ok=False, reason=str(error), evidence=str(error))
+        results = self._gates.run(worktree, (tuple(repo.policy.commands.test),))
+        passed = bool(results) and all(bool(item.get("passed")) for item in results)
+        output = str(results[0].get("output") if results else "no gate output")
+        if passed:
+            return VerifyResult(ok=True, reason="gates passed", evidence=output)
+        return VerifyResult(ok=False, reason="failing tests", evidence=output)
+
+    def accept(
+        self,
+        task_id: TaskId,
+        executed: object,
+        *,
+        red_failed: bool = False,
+        re_execute: Callable[[], object] | None = None,
+    ) -> VerifyResult:
         ok = bool(getattr(executed, "ok", False))
         artifacts = tuple(getattr(executed, "artifacts", ()) or ())
         error = getattr(executed, "error", None)
@@ -69,42 +112,49 @@ class VerificationService:
             )
         task = self._store.get_task(task_id)
         try:
+            require_worktree_path(task.worktree_path)
+        except MissingWorktree as error:
+            return VerifyResult(ok=False, reason=str(error), evidence=str(error))
+        try:
             require_reproduction_artifact(task.kind.value, artifacts, task.exemption)
         except NoTestStop as stopped:
             return VerifyResult(ok=False, reason=str(stopped), evidence="missing reproduction test")
         repo = self._repos.get(task.repository_id)
-        commands = tuple(
-            group
-            for group in (
-                repo.policy.commands.setup,
-                repo.policy.commands.test,
-                repo.policy.commands.lint,
-                repo.policy.commands.build,
-            )
-            if group
-        )
-        worktree = Path(task.worktree_path or ".")
+        try:
+            require_test_commands(repo.policy.commands.test)
+        except EmptyTestCommands as error:
+            return VerifyResult(ok=False, reason=str(error), evidence=str(error))
         last_output = ""
         max_repair = repo.policy.budgets.max_attempts_per_issue
-        for _attempt in range(max_repair):
-            results = self._gates.run(worktree, commands)
-            if all(bool(item.get("passed")) for item in results):
-                gated = replace(
-                    task,
-                    artifacts=artifacts,
-                    state=transition_task(task.state, TaskState.AWAITING_GATES),
-                )
-                self._store.save_task(gated)
-                self._recorder.emit(
-                    "task.transitioned",
-                    {
-                        "task_id": task.id.value,
-                        "from": task.state.value,
-                        "to": TaskState.AWAITING_GATES.value,
-                    },
-                )
-                return VerifyResult(ok=True, reason="gates passed", evidence="gates passed")
-            last_output = str(results[0].get("output") if results else "failing tests")
+        current = executed
+        for attempt in range(max_repair):
+            if attempt > 0 and re_execute is not None:
+                current = re_execute()
+                if not bool(getattr(current, "ok", False)):
+                    last_output = str(getattr(current, "error", None) or "repair execute failed")
+                    continue
+                artifacts = tuple(getattr(current, "artifacts", ()) or artifacts)
+            gated = self.gate(task_id)
+            last_output = gated.evidence
+            try:
+                assert_red_green(red_failed=red_failed, green_passed=gated.ok)
+            except TddGateError:
+                continue
+            waiting = replace(
+                task,
+                artifacts=artifacts,
+                state=transition_task(task.state, TaskState.AWAITING_GATES),
+            )
+            self._store.save_task(waiting)
+            self._recorder.emit(
+                "task.transitioned",
+                {
+                    "task_id": task.id.value,
+                    "from": task.state.value,
+                    "to": TaskState.AWAITING_GATES.value,
+                },
+            )
+            return VerifyResult(ok=True, reason="gates passed", evidence="gates passed")
         return VerifyResult(
             ok=False,
             reason="failing tests after bounded repair",
@@ -169,7 +219,10 @@ class VerificationService:
         if siblings and all(item.state is TaskState.MERGED for item in siblings):
             goal = self._store.get_goal(task.goal_id)
             if goal.state is GoalState.ACTIVE:
-                self._store.save_goal(replace(goal, state=GoalState.COMPLETED))
+                completed = replace(
+                    goal, state=transition_goal(goal.state, GoalState.COMPLETED)
+                )
+                self._store.save_goal(completed)
                 self._recorder.emit(
                     "goal.transitioned",
                     {
@@ -179,3 +232,9 @@ class VerificationService:
                     },
                 )
         return MergeAttempt(ok=True, reason=decision.reason)
+
+    def _assert_fence(self, task: TaskRecord) -> None:
+        if task.fence_token is None:
+            raise StaleFenceError("fence required")
+        key = lease_resource_key(task.repository_id.value, task.scope_paths, task.id.value)
+        self._leases.assert_fence(key, task.fence_token, now=self._clock())

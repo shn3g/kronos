@@ -15,7 +15,7 @@ function engine(status: "unavailable" | "starting" | "ready"): EngineClient {
 describe("RunsPage", () => {
   it("stays fail-closed when the engine is not ready", async () => {
     const list = vi.fn(async () => []);
-    render(<RunsPage engineClient={engine("unavailable")} runsClient={{ list }} />);
+    render(<RunsPage engineClient={engine("unavailable")} runsClient={{ list, pollEvents: async () => ({ events: [], headSeq: 0 }) }} />);
 
     expect(await screen.findByRole("heading", { level: 1, name: "Runs" })).toBeInTheDocument();
     expect(
@@ -35,7 +35,15 @@ describe("RunsPage", () => {
         prUrl: "https://github.com/acme/app/pull/1",
       },
     ];
-    render(<RunsPage engineClient={engine("ready")} runsClient={{ list }} />);
+    render(
+      <RunsPage
+        engineClient={engine("ready")}
+        runsClient={{
+          list,
+          pollEvents: async () => ({ events: [], headSeq: 0 }),
+        }}
+      />,
+    );
 
     expect(await screen.findByText(/task_add/)).toBeInTheDocument();
     expect(screen.getByText("tests/test_repro.py")).toBeInTheDocument();

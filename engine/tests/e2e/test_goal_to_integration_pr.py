@@ -21,6 +21,7 @@ from kronos_engine.adapters.git.repository import FilesystemGitInspector
 from kronos_engine.adapters.git.worktrees import CacheRuntimeLayout
 from kronos_engine.adapters.sandboxes.process_jail import ProcessJailSandbox
 from kronos_engine.application.dispatch import DispatchService
+from kronos_engine.application.goal_engine import GoalEngine
 from kronos_engine.application.goals import GoalService
 from kronos_engine.application.merge import MergeService
 from kronos_engine.application.planning import PlanningService
@@ -172,6 +173,12 @@ class ScriptedExecutor:
             "tests/test_repro.py",
             "from pkg.math import add\n\ndef test_add():\n    assert add(1, 1) == 2\n",
         )
+        if request.context.story.startswith("red:"):
+            return ExecutorResult(
+                status="succeeded",
+                artifacts=("tests/test_repro.py",),
+                usage=_usage(self.runs),
+            )
         sandbox.write_text("pkg/math.py", "def add(a, b):\n    return a + b\n")
         return ExecutorResult(
             status="succeeded",
@@ -203,12 +210,16 @@ class ScriptedPlanner:
 class ScriptedGates:
     def __init__(self, script: Script) -> None:
         self.script = script
+        self.calls = 0
 
     def run(self, worktree: Path, commands: tuple[tuple[str, ...], ...]) -> list[dict[str, object]]:
         _ = worktree
         _ = commands
-        passed = self.script not in {"failing_test"}
-        return [{"name": "test", "passed": passed, "output": "ok" if passed else "assert False"}]
+        self.calls += 1
+        if self.script == "failing_test":
+            return [{"name": "test", "passed": False, "output": "assert False"}]
+        passed = self.calls > 1
+        return [{"name": "test", "passed": passed, "output": "ok" if passed else "red"}]
 
 
 class _ConflictForge:
@@ -331,10 +342,23 @@ class GoalHarness:
             self.recorder,
             self.forge,  # type: ignore[arg-type]
             ScriptedGates(self.script),
+            self.leases,
             clock=lambda: self.now,
         )
         self.recovery = RecoveryService(self.store, self.recorder)
-        self.scheduler = GoalScheduler(self.store, self.goals)
+        self.scheduler = GoalScheduler(
+            self.store, self.goals, self.leases, clock=lambda: self.now
+        )
+        self.engine = GoalEngine(
+            self.store,
+            self.planning,
+            self.dispatch,
+            self.verification,
+            self.recovery,
+            self.merge,
+            self.scheduler,
+            clock=lambda: self.now,
+        )
 
     def setup_goal(self) -> None:
         overrides = dict(POLICY_OVERRIDE)
@@ -381,6 +405,7 @@ class GoalHarness:
                 non_goals="do not rewrite packaging",
                 risk_ceiling="medium",
                 source=GoalSource.DESKTOP,
+                max_attempts=3,
             )
         )
         self.goal = goal
@@ -414,13 +439,13 @@ class GoalHarness:
     def run_until_merge(self) -> Outcome:
         self.setup_goal()
         if self.script == "restart":
-            self._advance(stop_after="pr")
+            self.engine.advance(self.task_id, holder_id="worker-1", stop_after="pr")
             restarted = self.reconnect()
             restarted._simulate_reviewer()
             return restarted._merge_or_recover()
-        claimed = self.dispatch.claim(self.task_id, dry_run=False, holder_id="worker-1")
         if self.script == "budget_exhaustion":
-            self.dispatch.execute(claimed)
+            claimed = self.dispatch.claim(self.task_id, dry_run=False, holder_id="worker-1")
+            self.dispatch.execute(claimed, phase="red")
             self.recovery.pause_task(
                 self.task_id,
                 reason="executor failed on first attempt",
@@ -438,41 +463,20 @@ class GoalHarness:
                     paused.stop_reason or second.reason,
                     claimed.steps,
                 )
-        executed = self.dispatch.execute(claimed)
-        verified = self.verification.accept(self.task_id, executed)
-        if not verified.ok:
-            paused = self.recovery.pause_or_stop(self.task_id, verified.reason, verified.evidence)
-            return self._outcome(
-                paused.state.value,
-                paused.stop_reason or verified.reason,
-                claimed.steps,
-            )
-        pull = self.verification.open_integration_pr(self.task_id)
-        if self.script == "ci_fail":
-            self._simulate_ci_failure(pull.number, pull.head_sha)
-        else:
-            self._simulate_reviewer()
-        merged = self.verification.merge_if_eligible(self.task_id, self.merge)
-        if not merged.ok:
-            paused = self.recovery.pause_task(
-                self.task_id, reason=merged.reason, evidence=merged.reason
-            )
-            return self._outcome(
-                paused.state.value,
-                paused.stop_reason or merged.reason,
-                claimed.steps,
-            )
-        return self._outcome(TaskState.MERGED.value, merged.reason, claimed.steps)
+        result = self.engine.advance(
+            self.task_id,
+            holder_id="worker-1",
+            after_pr=self._after_pr,
+        )
+        return self._outcome(result.status, result.reason, result.claim_steps)
 
-    def _advance(self, *, stop_after: str) -> Outcome:
-        claimed = self.dispatch.claim(self.task_id, dry_run=False, holder_id="worker-1")
-        executed = self.dispatch.execute(claimed)
-        verified = self.verification.accept(self.task_id, executed)
-        assert verified.ok
-        pull = self.verification.open_integration_pr(self.task_id)
-        _ = pull
-        _ = stop_after
-        return self._outcome("awaiting_review", "draft PR opened", claimed.steps)
+    def _after_pr(self, pull: object) -> None:
+        number = int(getattr(pull, "number"))
+        head_sha = str(getattr(pull, "head_sha"))
+        if self.script == "ci_fail":
+            self._simulate_ci_failure(number, head_sha)
+            return
+        self._simulate_reviewer()
 
     def _merge_or_recover(self) -> Outcome:
         merged = self.verification.merge_if_eligible(self.task_id, self.merge)
