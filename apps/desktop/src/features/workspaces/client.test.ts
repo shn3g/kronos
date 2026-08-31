@@ -34,4 +34,31 @@ describe("createProductionRepositoriesClient", () => {
       },
     ]);
   });
+
+  it("resumes a paused repository through the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path) => {
+      expect(method).toBe("POST");
+      expect(path).toBe("/repositories/repo_alpha/resume");
+      return {
+        status: 200,
+        body: JSON.stringify({
+          repository: {
+            id: "repo_alpha",
+            display_name: "alpha",
+            realpath: "C:/tmp/alpha",
+            origin: "https://github.com/acme/alpha.git",
+            status: "active",
+          },
+        }),
+      };
+    });
+
+    await expect(client.resume("repo_alpha")).resolves.toEqual({
+      id: "repo_alpha",
+      displayName: "alpha",
+      realpath: "C:/tmp/alpha",
+      origin: "https://github.com/acme/alpha.git",
+      status: "active",
+    });
+  });
 });

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { EngineClient } from "../../engine/client";
 import {
   createProductionRepositoriesClient,
+  pickRepositoryFolder,
   type EnrolledRepository,
   type InspectResult,
   type RepositoriesClient,
@@ -34,13 +35,18 @@ export function WorkspacesPage({
 
   useEffect(() => {
     let cancelled = false;
-    void engineClient.getState().then((state) => {
-      if (!cancelled) {
-        setReady(state.status === "ready");
-      }
-    });
+    const apply = () => {
+      void engineClient.getState().then((state) => {
+        if (!cancelled) {
+          setReady(state.status === "ready");
+        }
+      });
+    };
+    apply();
+    const interval = window.setInterval(apply, 1500);
     return () => {
       cancelled = true;
+      window.clearInterval(interval);
     };
   }, [engineClient]);
 
@@ -85,10 +91,8 @@ export function WorkspacesPage({
   }
 
   async function onChooseFolder() {
-    if (!pickFolder) {
-      return;
-    }
-    const picked = await pickFolder();
+    const chooser = pickFolder ?? pickRepositoryFolder;
+    const picked = await chooser();
     if (picked) {
       await inspectPath(picked);
     }
@@ -119,6 +123,18 @@ export function WorkspacesPage({
     setRepositories((current) => upsertRepo(current, updated));
   }
 
+  async function onResume(id: string) {
+    const updated = await client.resume(id);
+    setRepositories((current) => upsertRepo(current, updated));
+  }
+
+  function closeWizard() {
+    setWizardOpen(false);
+    setInspection(null);
+    setFolderPath("");
+    setError(null);
+  }
+
   return (
     <section className="workspaces">
       <p className="page-kicker">Workspaces</p>
@@ -143,6 +159,11 @@ export function WorkspacesPage({
                 <p className="workspace-card__status">{repo.status}</p>
               </div>
               <div className="workspace-card__actions">
+                {repo.status !== "active" ? (
+                  <button type="button" className="btn-quiet" onClick={() => void onResume(repo.id)}>
+                    Resume
+                  </button>
+                ) : null}
                 <button type="button" className="btn-quiet" onClick={() => void onPause(repo.id)}>
                   Pause
                 </button>
@@ -168,7 +189,10 @@ export function WorkspacesPage({
               id="repo-folder"
               className="wizard__input"
               value={folderPath}
-              onChange={(event) => setFolderPath(event.target.value)}
+              onChange={(event) => {
+                setFolderPath(event.target.value);
+                setInspection(null);
+              }}
             />
             <button type="button" className="btn-quiet" onClick={() => void onChooseFolder()}>
               Choose folder
@@ -194,6 +218,9 @@ export function WorkspacesPage({
             </div>
           ) : null}
           {error ? <p className="wizard__error">{error}</p> : null}
+          <button type="button" className="btn-quiet" onClick={closeWizard}>
+            Cancel
+          </button>
         </div>
       ) : null}
     </section>

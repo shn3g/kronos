@@ -37,6 +37,7 @@ export interface RepositoriesClient {
   enrol(path: string, policy?: Record<string, unknown>): Promise<EnrolledRepository>;
   pause(id: string): Promise<EnrolledRepository>;
   disable(id: string): Promise<EnrolledRepository>;
+  resume(id: string): Promise<EnrolledRepository>;
 }
 
 interface EngineJsonResponse {
@@ -81,6 +82,10 @@ export function createProductionRepositoriesClient(
     },
     async disable(id: string) {
       const payload = await jsonRequest(request, "POST", `/repositories/${id}/disable`);
+      return mapRepository(payload.repository);
+    },
+    async resume(id: string) {
+      const payload = await jsonRequest(request, "POST", `/repositories/${id}/resume`);
       return mapRepository(payload.repository);
     },
   };

@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 const CLIENT_VERSION: &str = "0.1.0";
 const READY_TIMEOUT: Duration = Duration::from_secs(20);
@@ -161,8 +162,12 @@ pub fn engine_json(
 }
 
 #[tauri::command]
-pub fn pick_repository_folder() -> Option<String> {
-    None
+pub async fn pick_repository_folder(app: AppHandle) -> Option<String> {
+    app.dialog()
+        .file()
+        .set_title("Choose a git folder")
+        .blocking_pick_folder()
+        .map(|path| path.simplified().to_string())
 }
 
 fn engine_path_allowed(method: &str, path: &str) -> bool {
@@ -191,7 +196,7 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
                 (method, suffix),
                 ("GET", None)
                     | ("GET", Some("preview"))
-                    | ("POST", Some("pause" | "disable" | "remove" | "re-enrol"))
+                    | ("POST", Some("pause" | "disable" | "remove" | "re-enrol" | "resume"))
             )
         }
         _ => false,
