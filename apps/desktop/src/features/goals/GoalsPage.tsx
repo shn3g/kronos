@@ -78,6 +78,7 @@ export function GoalsPage({ engineClient, goalsClient }: GoalsPageProps) {
         client.list(),
         client.listRepositories(),
         client.pollEvents(after),
+        client.tick(),
       ]).then(([items, repos, streamed]) => {
         if (cancelled) {
           return;
@@ -116,7 +117,8 @@ export function GoalsPage({ engineClient, goalsClient }: GoalsPageProps) {
     setError(null);
     try {
       const created = await client.create(draft);
-      setGoals((current) => [created, ...current]);
+      const planned = await client.plan(created.id);
+      setGoals((current) => [planned.goal, ...current]);
     } catch {
       setError("Could not create the goal.");
     }
