@@ -1,0 +1,17 @@
+{
+  "name": "kronos",
+  "private": true,
+  "version": "0.1.0",
+  "license": "AGPL-3.0-or-later",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm --filter @kronos/desktop dev",
+    "build": "pnpm --filter @kronos/desktop build",
+    "test": "pnpm --filter @kronos/desktop test",
+    "test:e2e": "pnpm --filter @kronos/desktop test:e2e",
+    "tauri": "pnpm --filter @kronos/desktop tauri"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
