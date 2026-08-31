@@ -11,7 +11,7 @@ Hermes is not a dependency. Do not add Hermes packages, git submodules, or runti
 3. Run `pnpm install` at the repository root.
 4. Run `pnpm test` before opening a pull request.
 
-Python 3.11+ is required for engine package work. This milestone's engine tree only exposes `__version__`.
+Python 3.11+ is required for engine package work. From `engine/`, run `python -m pytest`, `python -m ruff check src tests`, and `python -m mypy`.
 
 ## Tests first
 

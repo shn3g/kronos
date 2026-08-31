@@ -27,13 +27,25 @@ export function EngineStatus({ client }: EngineStatusProps) {
 
   useEffect(() => {
     let cancelled = false;
-    void client.getState().then((next) => {
-      if (!cancelled) {
-        setState(next);
-      }
-    });
+    const apply = () => {
+      void client
+        .getState()
+        .then((next) => {
+          if (!cancelled) {
+            setState(next);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setState({ status: "unavailable" });
+          }
+        });
+    };
+    apply();
+    const interval = window.setInterval(apply, 1500);
     return () => {
       cancelled = true;
+      window.clearInterval(interval);
     };
   }, [client]);
 

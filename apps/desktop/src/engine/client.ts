@@ -14,11 +14,38 @@ export interface EngineClient {
   getState(): Promise<EngineConnectionState>;
 }
 
-export function createProductionEngineClient(): EngineClient {
+export interface ProductionEngineClientOptions {
+  readState?: () => Promise<EngineConnectionState | null>;
+}
+
+export function createProductionEngineClient(
+  options: ProductionEngineClientOptions = {},
+): EngineClient {
+  const readState = options.readState ?? readStateFromSidecar;
   return {
     async getState() {
-      // No sidecar in this milestone. Fail closed instead of reporting ready.
-      return { status: "unavailable" };
+      try {
+        const state = await readState();
+        if (state === null) {
+          return { status: "unavailable" };
+        }
+        return state;
+      } catch {
+        return { status: "unavailable" };
+      }
     },
   };
+}
+
+async function readStateFromSidecar(): Promise<EngineConnectionState | null> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const result = await invoke<EngineConnectionState | null>("engine_state");
+    if (result === null) {
+      return null;
+    }
+    return result;
+  } catch {
+    return null;
+  }
 }
