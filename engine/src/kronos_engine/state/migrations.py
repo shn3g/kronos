@@ -55,6 +55,29 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        2,
+        """
+        CREATE TABLE repositories_new (
+            id TEXT PRIMARY KEY,
+            realpath TEXT NOT NULL UNIQUE,
+            origin TEXT,
+            display_name TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('active', 'paused', 'disabled')),
+            policy_json TEXT NOT NULL,
+            enrolled_at TEXT NOT NULL
+        );
+
+        DROP TABLE goals;
+        DROP TABLE repositories;
+        ALTER TABLE repositories_new RENAME TO repositories;
+
+        CREATE TABLE goals (
+            id TEXT PRIMARY KEY,
+            repository_id TEXT NOT NULL REFERENCES repositories(id)
+        );
+        """,
+    ),
 )
 
 

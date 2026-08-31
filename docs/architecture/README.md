@@ -6,3 +6,4 @@ This folder holds file-level notes that accumulate as subsystems land.
 
 - [Desktop shell](desktop-shell.md)
 - [Engine lifecycle](engine.md)
+- [Repository enrolment](enrolment.md)

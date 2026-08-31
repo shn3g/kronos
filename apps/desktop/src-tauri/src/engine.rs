@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 const CLIENT_VERSION: &str = "0.1.0";
 const READY_TIMEOUT: Duration = Duration::from_secs(20);
@@ -83,6 +84,14 @@ impl EngineSupervisor {
         }
         next
     }
+
+    fn connection(&self) -> Option<EngineConnection> {
+        let guard = self.inner.lock().ok()?;
+        guard.connection.as_ref().map(|connection| EngineConnection {
+            base_url: connection.base_url.clone(),
+            token: connection.token.clone(),
+        })
+    }
 }
 
 impl Drop for EngineSupervisor {
@@ -102,6 +111,96 @@ impl Drop for EngineSupervisor {
 #[tauri::command]
 pub fn engine_state(state: State<EngineSupervisor>) -> EngineUiState {
     state.probe()
+}
+
+#[derive(Serialize)]
+pub struct EngineJsonResponse {
+    status: u16,
+    body: String,
+}
+
+#[tauri::command]
+pub fn engine_json(
+    state: State<EngineSupervisor>,
+    method: String,
+    path: String,
+    body: Option<serde_json::Value>,
+) -> EngineJsonResponse {
+    if !engine_path_allowed(&method, &path) {
+        return EngineJsonResponse {
+            status: 403,
+            body: "{\"detail\":\"path not allowed\"}".to_string(),
+        };
+    }
+    let Some(connection) = state.connection() else {
+        return EngineJsonResponse {
+            status: 0,
+            body: String::new(),
+        };
+    };
+    let auth = format!("Bearer {}", connection.token);
+    let base = connection.base_url.trim_end_matches('/');
+    let url = format!("{base}{path}");
+    let payload = body.and_then(|value| {
+        if value.is_null() {
+            None
+        } else {
+            Some(value.to_string())
+        }
+    });
+    let headers = [("Authorization", auth.as_str())];
+    match loopback_request(&method, &url, &headers, payload.as_deref()) {
+        Ok((status, response_body)) => EngineJsonResponse {
+            status,
+            body: response_body,
+        },
+        Err(_) => EngineJsonResponse {
+            status: 0,
+            body: String::new(),
+        },
+    }
+}
+
+#[tauri::command]
+pub async fn pick_repository_folder(app: AppHandle) -> Option<String> {
+    app.dialog()
+        .file()
+        .set_title("Choose a git folder")
+        .blocking_pick_folder()
+        .map(|path| path.simplified().to_string())
+}
+
+fn engine_path_allowed(method: &str, path: &str) -> bool {
+    let path = path.split('?').next().unwrap_or(path);
+    if !path.starts_with("/repositories") {
+        return false;
+    }
+    let rest = &path["/repositories".len()..];
+    match (method, rest) {
+        ("GET" | "POST", "" | "/") => true,
+        ("POST", "/inspect") => true,
+        (method, rest) if rest.starts_with('/') => {
+            let trimmed = &rest[1..];
+            let (id, suffix) = match trimmed.split_once('/') {
+                Some((id, extra)) => (id, Some(extra)),
+                None => (trimmed, None),
+            };
+            if id.is_empty()
+                || !id
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+            {
+                return false;
+            }
+            matches!(
+                (method, suffix),
+                ("GET", None)
+                    | ("GET", Some("preview"))
+                    | ("POST", Some("pause" | "disable" | "remove" | "re-enrol" | "resume"))
+            )
+        }
+        _ => false,
+    }
 }
 
 fn run_sidecar(app: AppHandle, inner: Arc<Mutex<EngineInner>>) {
@@ -435,6 +534,15 @@ fn parse_loopback_http_url(url: &str) -> Result<LoopbackUrl, String> {
 }
 
 fn loopback_get(url: &str, extra_headers: &[(&str, &str)]) -> Result<(u16, String), String> {
+    loopback_request("GET", url, extra_headers, None)
+}
+
+fn loopback_request(
+    method: &str,
+    url: &str,
+    extra_headers: &[(&str, &str)],
+    body: Option<&str>,
+) -> Result<(u16, String), String> {
     let parsed = parse_loopback_http_url(url)?;
     let mut stream = TcpStream::connect((parsed.host.as_str(), parsed.port))
         .map_err(|error| error.to_string())?;
@@ -444,9 +552,10 @@ fn loopback_get(url: &str, extra_headers: &[(&str, &str)]) -> Result<(u16, Strin
     stream
         .set_write_timeout(Some(PROBE_TIMEOUT))
         .map_err(|error| error.to_string())?;
+    let payload = body.unwrap_or("");
     let mut request = format!(
-        "GET {} HTTP/1.1\r\nHost: {}:{}\r\nConnection: close\r\n",
-        parsed.path, parsed.host, parsed.port
+        "{} {} HTTP/1.1\r\nHost: {}:{}\r\nConnection: close\r\n",
+        method, parsed.path, parsed.host, parsed.port
     );
     for (name, value) in extra_headers {
         request.push_str(name);
@@ -454,7 +563,12 @@ fn loopback_get(url: &str, extra_headers: &[(&str, &str)]) -> Result<(u16, Strin
         request.push_str(value);
         request.push_str("\r\n");
     }
+    if !payload.is_empty() {
+        request.push_str("Content-Type: application/json\r\n");
+        request.push_str(&format!("Content-Length: {}\r\n", payload.len()));
+    }
     request.push_str("\r\n");
+    request.push_str(payload);
     stream
         .write_all(request.as_bytes())
         .map_err(|error| error.to_string())?;

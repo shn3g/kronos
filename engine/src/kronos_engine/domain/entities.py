@@ -5,6 +5,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
+
+from kronos_engine.domain.policy import RepositoryPolicy
 
 
 class IdentifierError(ValueError):
@@ -61,9 +64,26 @@ class EventId:
         object.__setattr__(self, "value", _parse_identifier(self.value))
 
 
+class RepositoryStatus(StrEnum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    DISABLED = "disabled"
+
+
 @dataclass(frozen=True, slots=True)
 class Repository:
     id: RepositoryId
+
+
+@dataclass(frozen=True, slots=True)
+class EnrolledRepository:
+    id: RepositoryId
+    realpath: str
+    origin: str | None
+    display_name: str
+    status: RepositoryStatus
+    policy: RepositoryPolicy
+    enrolled_at: str
 
 
 @dataclass(frozen=True, slots=True)

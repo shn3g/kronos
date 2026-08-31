@@ -149,6 +149,141 @@
   line-height: 1.55;
 }
 
+.workspaces__toolbar {
+  margin-top: 28px;
+}
+
+.workspaces__empty,
+.workspace-card__meta,
+.workspace-card__status {
+  color: var(--muted);
+}
+
+.workspace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--void-raised);
+}
+
+.workspace-card__name {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.workspace-card__meta,
+.workspace-card__status {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.workspace-card__actions {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.btn-primary,
+.btn-quiet {
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.btn-primary {
+  border: 1px solid var(--hairline-strong);
+  background: var(--ink);
+  color: var(--void);
+}
+
+.btn-quiet {
+  border: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--ink);
+}
+
+.wizard {
+  margin-top: 28px;
+  padding: 18px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: rgb(255 255 255 / 0.03);
+}
+
+.wizard__title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 18px;
+}
+
+.wizard__copy,
+.wizard__preview-label,
+.wizard__error {
+  margin: 10px 0 0;
+}
+
+.wizard__label {
+  display: block;
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wizard__row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.wizard__input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--void);
+  color: var(--ink);
+}
+
+.wizard__preview {
+  margin-top: 16px;
+}
+
+.preview-file {
+  margin-top: 12px;
+}
+
+.preview-file__path {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.preview-file__diff {
+  margin: 8px 0 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--void);
+  color: var(--body);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 @media (max-width: 860px) {
   .app-shell {
     grid-template-columns: 1fr;
