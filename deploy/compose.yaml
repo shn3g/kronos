@@ -7,6 +7,7 @@ services:
       - engine-data:/var/lib/kronos/engine
     secrets:
       - controller_private_key
+      - attestation_verify_key
     environment:
       KRONOS_ROLE: engine
   reviewer:
@@ -21,12 +22,16 @@ services:
     environment:
       KRONOS_ROLE: reviewer
       KRONOS_REVIEW_CHECK_NAME: kronos-review (kronos-reviewer)
+      KRONOS_REVIEWER_PRIVATE_KEY_FILE: /run/secrets/reviewer_private_key
+      KRONOS_REVIEWER_ATTESTATION_KEY_FILE: /run/secrets/reviewer_attestation_key
 secrets:
   controller_private_key:
     file: ./secrets/controller.pem
   reviewer_private_key:
     file: ./secrets/reviewer.pem
   reviewer_attestation_key:
+    file: ./secrets/reviewer.attestation
+  attestation_verify_key:
     file: ./secrets/reviewer.attestation
 volumes:
   engine-data:

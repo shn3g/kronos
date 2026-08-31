@@ -6,9 +6,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from kronos_engine.domain.policy import parse_policy
 from tests.support import FakeRunner, policy_mapping
 
-from kronos_engine.domain.policy import parse_policy
 from kronos_reviewer.verification import VerificationError, verify_change
 
 
@@ -68,3 +68,19 @@ def test_failed_required_command_fails_verification(tmp_path: Path) -> None:
             runner=runner,
             worktree=tmp_path,
         )
+
+
+def test_fresh_process_runner_executes_argv_in_worktree(tmp_path: Path) -> None:
+    from kronos_reviewer.verification import FreshProcessRunner
+
+    marker = tmp_path / "ran.txt"
+    runner = FreshProcessRunner()
+    sandbox_id = runner.start_fresh()
+    result = runner.run(
+        ["python", "-c", f"open(r'{marker}', 'w', encoding='utf-8').write('ok')"],
+        worktree=tmp_path,
+        sandbox_id=sandbox_id,
+    )
+    assert result["exit_code"] == 0
+    assert result["sandbox_fresh"] is True
+    assert marker.read_text(encoding="utf-8") == "ok"

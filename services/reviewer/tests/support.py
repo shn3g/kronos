@@ -12,7 +12,7 @@ from typing import Any
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from kronos_engine.adapters.github.client import HttpRequest, HttpResponse
+from kronos_reviewer.http import HttpRequest, HttpResponse
 
 POLICY_PATH = ".kronos/config.yaml"
 HEAD_SHA = "c" * 40
@@ -131,6 +131,7 @@ class RecordingTransport:
     def __init__(self, *, token: str = "ghs_fixture_reviewer") -> None:
         self.token = token
         self.requests: list[HttpRequest] = []
+        self.check_status = 201
 
     def send(self, request: HttpRequest) -> HttpResponse:
         self.requests.append(request)
@@ -139,6 +140,8 @@ class RecordingTransport:
             body = {"token": self.token, "expires_at": "2099-01-01T00:00:00Z"}
             return HttpResponse(200, {}, json.dumps(body).encode())
         if request.method.upper() == "POST" and path.endswith("/check-runs"):
+            if self.check_status < 200 or self.check_status >= 300:
+                return HttpResponse(self.check_status, {}, b'{"message":"denied"}')
             payload = json.loads(request.body.decode() if request.body else "{}")
             payload["id"] = 1
             payload.setdefault("app", {"id": REVIEWER_APP_ID, "slug": "kronos-reviewer"})

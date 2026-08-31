@@ -99,6 +99,8 @@ def merge_pull(
     pull = get_pull(client, target, number)
     if pull.base == target.protected_branch:
         raise DefaultBranchWriteRefused("never auto-merge the protected default branch")
+    if pull.base != target.integration_branch:
+        raise DefaultBranchWriteRefused("auto-merge is allowed onto the integration branch only")
     if dest is not None and dest != target.integration_branch:
         raise DefaultBranchWriteRefused("auto-merge is allowed onto the integration branch only")
     client.request_json(
@@ -113,6 +115,8 @@ def _pull_ref(raw: dict[str, object], *, created: bool) -> PullRef:
     base = raw.get("base")
     head_ref = head["ref"] if isinstance(head, dict) and isinstance(head.get("ref"), str) else ""
     base_ref = base["ref"] if isinstance(base, dict) and isinstance(base.get("ref"), str) else ""
+    head_sha = head["sha"] if isinstance(head, dict) and isinstance(head.get("sha"), str) else ""
+    base_sha = base["sha"] if isinstance(base, dict) and isinstance(base.get("sha"), str) else ""
     number = raw.get("number")
     return PullRef(
         number=int(number) if isinstance(number, int) else 0,
@@ -121,4 +125,6 @@ def _pull_ref(raw: dict[str, object], *, created: bool) -> PullRef:
         base=base_ref,
         draft=bool(raw.get("draft", True)),
         created=created,
+        head_sha=head_sha,
+        base_sha=base_sha,
     )
