@@ -11,7 +11,9 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
-from kronos_engine.adapters.git.repository import GitError
+from kronos_engine.adapters.git.detection import ManifestStackDetector
+from kronos_engine.adapters.git.repository import FilesystemGitInspector, GitError
+from kronos_engine.adapters.git.worktrees import CacheRuntimeLayout
 from kronos_engine.api.models import (
     EventItem,
     EventListResponse,
@@ -37,6 +39,7 @@ from kronos_engine.config.settings import CLIENT_VERSION_HEADER, Settings, is_lo
 from kronos_engine.domain.entities import EnrolledRepository, IdentifierError, RepositoryId
 from kronos_engine.domain.policy import PolicyError, policy_to_dict
 from kronos_engine.domain.version import client_is_compatible
+from kronos_engine.ports.repository import RuntimeInsideEnrolledTree
 from kronos_engine.state.catalog import SqliteCatalog
 from kronos_engine.state.database import Database
 from kronos_engine.state.event_store import SqliteEventStore
@@ -76,7 +79,13 @@ def create_app(settings: Settings, database: Database) -> FastAPI:
     def repository_service() -> Iterator[RepositoryService]:
         conn = database.connect()
         try:
-            yield RepositoryService(SqliteRepositoryRegistry(conn), settings.paths)
+            yield RepositoryService(
+                SqliteRepositoryRegistry(conn),
+                settings.paths,
+                FilesystemGitInspector(),
+                ManifestStackDetector(),
+                CacheRuntimeLayout(),
+            )
         finally:
             conn.close()
 
@@ -133,7 +142,7 @@ def create_app(settings: Settings, database: Database) -> FastAPI:
         with repository_service() as service:
             try:
                 record = service.enrol(body.path, body.policy)
-            except (GitError, PolicyError) as error:
+            except (GitError, PolicyError, RuntimeInsideEnrolledTree) as error:
                 raise HTTPException(status_code=400, detail=str(error)) from error
             return _detail_response(service, record, include_preview=True)
 
@@ -152,7 +161,7 @@ def create_app(settings: Settings, database: Database) -> FastAPI:
         with repository_service() as service:
             record = _load(service, repository_id)
             try:
-                result = service.inspect(record.realpath)
+                result = service.preview(record.id)
             except GitError as error:
                 raise HTTPException(status_code=400, detail=str(error)) from error
             return _inspect_response(result)
@@ -179,6 +188,17 @@ def create_app(settings: Settings, database: Database) -> FastAPI:
                 raise HTTPException(status_code=404, detail="not found") from error
             return _detail_response(service, record)
 
+    @app.post("/repositories/{repository_id}/resume", response_model=RepositoryDetailResponse)
+    def resume_repository(
+        repository_id: str, _: None = Depends(require_auth)
+    ) -> RepositoryDetailResponse:
+        with repository_service() as service:
+            try:
+                record = service.resume(_parse_id(repository_id))
+            except (RepositoryNotFound, IdentifierError) as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return _detail_response(service, record)
+
     @app.post("/repositories/{repository_id}/remove")
     def remove_repository(repository_id: str, _: None = Depends(require_auth)) -> dict[str, bool]:
         with repository_service() as service:
@@ -190,11 +210,13 @@ def create_app(settings: Settings, database: Database) -> FastAPI:
 
     @app.post("/repositories/{repository_id}/re-enrol", response_model=RepositoryDetailResponse)
     def reenrol_repository(
-        repository_id: str, _: None = Depends(require_auth)
+        repository_id: str,
+        _: None = Depends(require_auth),
+        redetect: Annotated[bool, Query()] = False,
     ) -> RepositoryDetailResponse:
         with repository_service() as service:
             try:
-                record = service.reenrol(repo_id=_parse_id(repository_id))
+                record = service.reenrol(repo_id=_parse_id(repository_id), redetect=redetect)
             except (RepositoryNotFound, IdentifierError, GitError) as error:
                 status = 404 if isinstance(error, (RepositoryNotFound, IdentifierError)) else 400
                 raise HTTPException(status_code=status, detail=str(error)) from error

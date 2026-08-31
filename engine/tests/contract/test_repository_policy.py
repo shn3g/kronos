@@ -62,8 +62,8 @@ def test_models_cannot_lower_risk_or_raise_budgets() -> None:
     current = parse_policy(_minimal_policy_dict())
     lowered = _minimal_policy_dict()
     lowered["risk"] = {"floor": "low"}
-    with pytest.raises(PolicyError, match="risk"):
-        apply_model_proposal(current, lowered)
+    clamped = apply_model_proposal(current, lowered)
+    assert clamped.risk.floor == "high"
 
     raised = _minimal_policy_dict()
     raised["budgets"] = {
@@ -74,6 +74,34 @@ def test_models_cannot_lower_risk_or_raise_budgets() -> None:
     }
     with pytest.raises(PolicyError, match="budget"):
         apply_model_proposal(current, raised)
+
+
+def test_models_cannot_change_autonomy_budgets_wip_or_branches() -> None:
+    current = parse_policy(_minimal_policy_dict())
+    flipped = _minimal_policy_dict()
+    flipped["autonomy"] = {"freeze": False, "invent_issues": True, "refill_enabled": True}
+    with pytest.raises(PolicyError, match="autonomy"):
+        apply_model_proposal(current, flipped)
+
+    lowered_budget = _minimal_policy_dict()
+    lowered_budget["budgets"] = {
+        "max_attempts_per_issue": 1,
+        "max_dispatches_per_day": 12,
+        "breaker_failure_limit": 4,
+        "dry_run_meters": False,
+    }
+    with pytest.raises(PolicyError, match="budget"):
+        apply_model_proposal(current, lowered_budget)
+
+    wip = _minimal_policy_dict()
+    wip["wip"] = {"ready": 99, "running": 99}
+    with pytest.raises(PolicyError, match="wip"):
+        apply_model_proposal(current, wip)
+
+    branches = _minimal_policy_dict()
+    branches["branches"] = {"integration": "other", "protected": "main"}
+    with pytest.raises(PolicyError, match="branch"):
+        apply_model_proposal(current, branches)
 
 
 def test_clamp_size_allows_one_step_up_and_never_shrinks() -> None:

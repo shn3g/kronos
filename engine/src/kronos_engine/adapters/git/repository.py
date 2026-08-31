@@ -4,8 +4,9 @@
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
+
+from kronos_engine.ports.repository import GitSnapshot
 
 _WRITE_VERBS = frozenset(
     {
@@ -44,13 +45,9 @@ class GitWriteForbidden(RuntimeError):
     """Enrolment must not mutate git history or remotes."""
 
 
-@dataclass(frozen=True, slots=True)
-class GitSnapshot:
-    git_root: Path
-    realpath: Path
-    origin: str | None
-    current_branch: str
-    default_branch: str
+class FilesystemGitInspector:
+    def inspect(self, path: Path) -> GitSnapshot:
+        return inspect_git(path)
 
 
 def inspect_git(path: Path) -> GitSnapshot:

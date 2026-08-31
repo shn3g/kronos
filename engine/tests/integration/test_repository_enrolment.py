@@ -155,16 +155,15 @@ def test_two_fixture_repos_enrol_restart_and_stay_isolated(tmp_path: Path) -> No
         listed = httpx.get(f"{base_url}/repositories", headers=headers, timeout=5.0)
         assert listed.status_code == 200
         ids = {item["id"] for item in listed.json()["repositories"]}
-        assert len(ids) == 2
-        alpha_id, beta_id = tuple(ids)
+        assert ids == {alpha_id, beta_id}
         alpha_get = httpx.get(f"{base_url}/repositories/{alpha_id}", headers=headers, timeout=5.0)
         beta_get = httpx.get(f"{base_url}/repositories/{beta_id}", headers=headers, timeout=5.0)
-        freezes = {
-            alpha_get.json()["policy"]["autonomy"]["freeze"],
-            beta_get.json()["policy"]["autonomy"]["freeze"],
-        }
-        assert freezes == {True, False}
-        assert alpha_get.json()["repository"]["id"] != beta_get.json()["repository"]["id"]
+        assert alpha_get.status_code == 200
+        assert beta_get.status_code == 200
+        assert alpha_get.json()["policy"]["autonomy"]["freeze"] is True
+        assert beta_get.json()["policy"]["autonomy"]["freeze"] is False
+        assert alpha_get.json()["repository"]["id"] == alpha_id
+        assert beta_get.json()["repository"]["id"] == beta_id
         missing = httpx.get(f"{base_url}/repositories/repo_other", headers=headers, timeout=5.0)
         assert missing.status_code == 404
         runtime = alpha_get.json()["runtime"]
