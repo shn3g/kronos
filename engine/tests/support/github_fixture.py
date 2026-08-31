@@ -78,7 +78,7 @@ class GitHubFixture:
     _logical: list[str] = field(default_factory=list)
     _ref_writes: list[str] = field(default_factory=list)
     _logs: list[str] = field(default_factory=list)
-    _status_queue: list[tuple[int, str | None]] = field(default_factory=list)
+    _status_queue: list[tuple[int, str | None, str | None]] = field(default_factory=list)
     _always_status: int | None = None
     _etags_enabled: bool = False
     _page_fetches: int = 0
@@ -93,6 +93,10 @@ class GitHubFixture:
     _next_discussion: int = 1
     _next_pull: int = 1
     _next_ruleset: int = 1
+    repository_node_id: str = "R_kgDO_fixture"
+    general_category_id: str = "DIC_kwDO_general"
+    _graphql_queries: list[str] = field(default_factory=list)
+    _create_discussion_variables: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._branches = {
@@ -113,8 +117,8 @@ class GitHubFixture:
         if path.startswith("/repos") and self._always_status is not None:
             return self._error(self._always_status, remaining="0")
         if path.startswith("/repos") and self._status_queue:
-            status, remaining = self._status_queue.pop(0)
-            return self._error(status, remaining=remaining)
+            status, remaining, retry_after = self._status_queue.pop(0)
+            return self._error(status, remaining=remaining, retry_after=retry_after)
         response = self._route(method, path, parsed.query, request)
         self._last_status = response.status
         if (
@@ -126,10 +130,14 @@ class GitHubFixture:
             self._retried.update(self._saw_status)
         return response
 
-    def _error(self, status: int, *, remaining: str | None) -> HttpResponse:
+    def _error(
+        self, status: int, *, remaining: str | None, retry_after: str | None = None
+    ) -> HttpResponse:
         self._saw_status.add(status)
         self._last_status = status
-        headers = {"Retry-After": "0"}
+        headers: dict[str, str] = {}
+        if retry_after is not None:
+            headers["Retry-After"] = retry_after
         if remaining is not None:
             headers["X-RateLimit-Remaining"] = remaining
         return HttpResponse(status=status, headers=headers, body=b"{}")
@@ -139,6 +147,8 @@ class GitHubFixture:
     ) -> HttpResponse:
         if method == "POST" and path.endswith("/access_tokens"):
             return self._mint_token(path, request)
+        if method == "POST" and "/app-manifests/" in path and path.endswith("/conversions"):
+            return self._convert_manifest(path)
         if method == "GET" and path.startswith("/app/installations/"):
             return self._installation(path, request)
         if path == "/graphql":
@@ -175,7 +185,9 @@ class GitHubFixture:
             sha = self._branches.get(name)
             if sha is None:
                 return HttpResponse(404, {}, b"{}")
-            return self._json({"ref": f"refs/heads/{name}", "object": {"sha": sha}})
+            return self._maybe_etag(
+                {"ref": f"refs/heads/{name}", "object": {"sha": sha}}, request
+            )
         if rest == "/git/refs" and method == "POST":
             return self._create_ref(request)
         if rest == "/rulesets":
@@ -224,11 +236,41 @@ class GitHubFixture:
             }
         )
 
+    def _convert_manifest(self, path: str) -> HttpResponse:
+        code = path.rstrip("/").split("/")[-2]
+        if code == "controller-manifest":
+            body = {
+                "id": self.controller_app_id,
+                "slug": "kronos-controller",
+                "pem": TEST_CONTROLLER_PEM,
+                "name": "Kronos Controller",
+            }
+            return self._json(body)
+        if code == "reviewer-manifest":
+            body = {
+                "id": self.reviewer_app_id,
+                "slug": "kronos-reviewer",
+                "pem": TEST_REVIEWER_PEM,
+                "name": "Kronos Reviewer",
+            }
+            return self._json(body)
+        return HttpResponse(404, {}, b'{"message":"Not Found"}')
+
     def _graphql(self, request: HttpRequest) -> HttpResponse:
         payload = json.loads(request.body.decode() if request.body else "{}")
         query = str(payload.get("query") or "")
         variables = payload.get("variables") if isinstance(payload.get("variables"), dict) else {}
+        self._graphql_queries.append(query)
         if "createDiscussion" in query:
+            self._create_discussion_variables = dict(variables)
+            if variables.get("repositoryId") != self.repository_node_id:
+                return self._json(
+                    {"errors": [{"message": "Could not resolve to a node with the global id"}]}
+                )
+            if variables.get("categoryId") != self.general_category_id:
+                return self._json(
+                    {"errors": [{"message": "Could not resolve discussion category"}]}
+                )
             number = self._next_discussion
             self._next_discussion += 1
             discussion = {
@@ -244,7 +286,17 @@ class GitHubFixture:
             {
                 "data": {
                     "repository": {
-                        "discussions": {"nodes": list(self._discussions)},
+                        "id": self.repository_node_id,
+                        "discussionCategories": {
+                            "nodes": [
+                                {"id": self.general_category_id, "name": "General"},
+                                {"id": "DIC_kwDO_ideas", "name": "Ideas"},
+                            ]
+                        },
+                        "discussions": {
+                            "nodes": list(self._discussions),
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        },
                     }
                 }
             }
@@ -376,6 +428,16 @@ class GitHubFixture:
     def _json(self, payload: object) -> HttpResponse:
         return HttpResponse(200, {}, json.dumps(payload).encode())
 
+    def _maybe_etag(self, payload: object, request: HttpRequest) -> HttpResponse:
+        if not self._etags_enabled:
+            return self._json(payload)
+        etag = self._etag(payload)
+        headers = {"ETag": etag}
+        incoming = request.headers.get("If-None-Match")
+        if incoming == etag:
+            return HttpResponse(304, headers, b"")
+        return HttpResponse(200, headers, json.dumps(payload).encode())
+
     def _etag(self, payload: object) -> str:
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
         return f'W/"{digest[:16]}"'
@@ -404,8 +466,19 @@ class GitHubFixture:
     def enable_etags(self) -> None:
         self._etags_enabled = True
 
-    def queue_status(self, status: int, remaining: int | None = None) -> None:
-        self._status_queue.append((status, None if remaining is None else str(remaining)))
+    def queue_status(
+        self,
+        status: int,
+        remaining: int | None = None,
+        retry_after: int | None = None,
+    ) -> None:
+        self._status_queue.append(
+            (
+                status,
+                None if remaining is None else str(remaining),
+                None if retry_after is None else str(retry_after),
+            )
+        )
 
     def always_status(self, status: int) -> None:
         self._always_status = status
@@ -517,9 +590,25 @@ class GitHubFixture:
         bypass = ruleset.get("bypass_actors")
         return list(bypass) if isinstance(bypass, list) else []
 
+    def ruleset_by_id(self, ruleset_id: int) -> dict[str, Any] | None:
+        return next((item for item in self._rulesets if item.get("id") == ruleset_id), None)
+
+    def ruleset_named(self, name: str) -> dict[str, Any] | None:
+        return next((item for item in self._rulesets if item.get("name") == name), None)
+
+    def graphql_queries(self) -> list[str]:
+        return list(self._graphql_queries)
+
+    def last_create_discussion_variables(self) -> dict[str, Any]:
+        return dict(self._create_discussion_variables)
+
 
 def controller_stack(
-    *, secrets: InMemorySecretStore | None = None
+    *,
+    secrets: InMemorySecretStore | None = None,
+    sleep: object | None = None,
+    rng: object | None = None,
+    base_url: str = "https://api.github.com",
 ) -> tuple[GitHubForge, GitHubFixture, InstallationAuth]:
     store = secrets if secrets is not None else InMemorySecretStore()
     if secrets is None:
@@ -532,11 +621,26 @@ def controller_stack(
         ),
         "reviewer": AppCredentials(app_id=1002, installation_id=2002, role="reviewer"),
     }
+    slept: list[float] = []
+
+    def fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    sleep_fn = fake_sleep if sleep is None else sleep
     auth = InstallationAuth(
-        secrets=store, apps=apps, transport=fixture, sleep=lambda _seconds: None
+        secrets=store,
+        apps=apps,
+        transport=fixture,
+        sleep=sleep_fn,
+        base_url=base_url,
     )
     client = GitHubClient(
-        transport=fixture, auth=auth, role="controller", sleep=lambda _seconds: None
+        transport=fixture,
+        auth=auth,
+        role="controller",
+        sleep=sleep_fn,
+        base_url=base_url,
+        rng=rng if rng is not None else None,
     )
     forge = GitHubForge(
         client=client,

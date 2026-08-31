@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import random
 import time
 from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass
@@ -85,8 +86,56 @@ def is_rate_limited(status: int, headers: Mapping[str, str]) -> bool:
         return True
     if status == 403:
         remaining = headers.get("X-RateLimit-Remaining") or headers.get("x-ratelimit-remaining")
-        return remaining == "0"
+        retry_after = headers.get("Retry-After") or headers.get("retry-after")
+        return remaining == "0" or retry_after is not None
     return False
+
+
+def backoff_delay(
+    attempt: int, headers: Mapping[str, str], rng: Callable[[], float]
+) -> float:
+    retry_after = headers.get("Retry-After") or headers.get("retry-after")
+    if retry_after is not None:
+        try:
+            base = max(float(retry_after), 0.0)
+        except ValueError:
+            base = float(2 ** attempt)
+    else:
+        base = float(2 ** attempt)
+    return base + (rng() * base * 0.25)
+
+
+def send_with_backoff(
+    transport: HttpTransport,
+    request: HttpRequest,
+    *,
+    sleep: Callable[[float], None],
+    max_retries: int = MAX_RETRIES,
+    rng: Callable[[], float] | None = None,
+    audit_log: list[str] | None = None,
+) -> HttpResponse:
+    roll = rng or random.random
+    last_error: Exception | None = None
+    for attempt in range(max_retries):
+        response = transport.send(request)
+        if audit_log is not None:
+            audit_log.append(f"{request.method} {urlparse(request.url).path} auth=redacted")
+        if response.status == 304 or response.status < 400:
+            return response
+        if is_rate_limited(response.status, response.headers):
+            last_error = ForgeRateLimited("GitHub rate limited the request")
+            sleep(backoff_delay(attempt, response.headers, roll))
+            continue
+        if response.status in {500, 502, 503, 504}:
+            last_error = ForgeTransientError("GitHub returned a transient error")
+            sleep(backoff_delay(attempt, response.headers, roll))
+            continue
+        if response.status in {401, 403}:
+            raise ForgePermissionDenied("GitHub denied the request")
+        raise ForgeTransientError(f"GitHub request failed: {response.status}")
+    if isinstance(last_error, ForgeRateLimited):
+        raise last_error
+    raise last_error or ForgeTransientError("GitHub request failed")
 
 
 class GitHubClient:
@@ -100,6 +149,7 @@ class GitHubClient:
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         max_retries: int = MAX_RETRIES,
         base_url: str = "https://api.github.com",
+        rng: Callable[[], float] | None = None,
     ) -> None:
         self._transport = transport
         self._auth = auth
@@ -108,7 +158,9 @@ class GitHubClient:
         self.timeout = timeout
         self._max_retries = max_retries
         self._base_url = base_url.rstrip("/")
+        self._rng = rng
         self._etags: dict[str, str] = {}
+        self._documents: dict[str, object] = {}
         self._list_cache: dict[str, list[object]] = {}
         self.audit_log: list[str] = []
 
@@ -144,37 +196,24 @@ class GitHubClient:
         body = json.dumps(json_body).encode() if json_body is not None else None
         if body is not None:
             headers["Content-Type"] = "application/json"
-        last_error: Exception | None = None
-        for attempt in range(self._max_retries):
-            response = self._transport.send(
-                HttpRequest(
-                    method=method,
-                    url=url,
-                    headers=headers,
-                    body=body,
-                    timeout=self.timeout,
-                )
-            )
-            self.audit_log.append(f"{method} {urlparse(url).path} auth=redacted")
-            if response.status == 304 or response.status < 400:
-                etag = response.headers.get("ETag") or response.headers.get("etag")
-                if etag and method == "GET":
-                    self._etags[cache_key] = etag
-                return response
-            if is_rate_limited(response.status, response.headers):
-                last_error = ForgeRateLimited("GitHub rate limited the request")
-                self._sleep(0.0)
-                continue
-            if response.status in {500, 502, 503, 504}:
-                last_error = ForgeTransientError("GitHub returned a transient error")
-                self._sleep(0.0)
-                continue
-            if response.status in {401, 403}:
-                raise ForgePermissionDenied("GitHub denied the request")
-            raise ForgeTransientError(f"GitHub request failed: {response.status}")
-        if isinstance(last_error, ForgeRateLimited):
-            raise last_error
-        raise last_error or ForgeTransientError("GitHub request failed")
+        response = send_with_backoff(
+            self._transport,
+            HttpRequest(
+                method=method,
+                url=url,
+                headers=headers,
+                body=body,
+                timeout=self.timeout,
+            ),
+            sleep=self._sleep,
+            max_retries=self._max_retries,
+            rng=self._rng or random.random,
+            audit_log=self.audit_log,
+        )
+        etag = response.headers.get("ETag") or response.headers.get("etag")
+        if etag and method == "GET":
+            self._etags[cache_key] = etag
+        return response
 
     def request_json(
         self,
@@ -185,14 +224,22 @@ class GitHubClient:
         params: Mapping[str, str | int] | None = None,
         use_jwt: bool = False,
     ) -> object:
+        url = self.url(path, params)
+        cache_key = self._cache_key(method, url)
         response = self.request(
             method, path, json_body=json_body, params=params, use_jwt=use_jwt
         )
         if response.status == 304:
-            return self._list_cache.get(self._cache_key(method, self.url(path, params)), [])
+            if cache_key not in self._documents:
+                raise ForgeTransientError("GitHub returned 304 without a cached document")
+            return self._documents[cache_key]
         if not response.body:
-            return {}
-        return json.loads(response.body.decode())
+            payload: object = {}
+        else:
+            payload = json.loads(response.body.decode())
+        if method == "GET":
+            self._documents[cache_key] = payload
+        return payload
 
     def paginate(
         self,
@@ -211,13 +258,18 @@ class GitHubClient:
             response = self.request("GET", url, params=current_params)
             if response.status == 304:
                 cached = self._list_cache.get(cache_key)
-                return list(cached) if cached is not None else []
+                if cached is None:
+                    raise ForgeTransientError("GitHub returned 304 without a cached document")
+                return list(cached)
             payload = json.loads(response.body.decode() or "[]")
+            page_key = self._cache_key("GET", self.url(url, current_params))
+            self._documents[page_key] = payload
             if isinstance(payload, list):
                 items.extend(payload)
             url = next_link(response.headers)
             current_params = None
         self._list_cache[cache_key] = items
+        self._documents[cache_key] = items
         return items
 
     def _authorization(self, *, use_jwt: bool) -> str:
@@ -232,7 +284,7 @@ class GitHubClient:
 
     def _cache_key(self, method: str, url: str) -> str:
         parsed = urlparse(url)
-        return f"{method}:{parsed.path}"
+        return f"{method}:{parsed.path}?{parsed.query}"
 
 
 def marker_in(text: str | None, key: IdempotencyKey) -> bool:

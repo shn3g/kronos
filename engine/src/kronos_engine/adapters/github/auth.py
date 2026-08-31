@@ -18,7 +18,13 @@ from kronos_engine.domain.github import (
     CONTROLLER_PRIVATE_KEY_REF,
     REVIEWER_PRIVATE_KEY_REF,
 )
-from kronos_engine.ports.forge import AppCredentials, ForgeAuthError
+from kronos_engine.ports.forge import (
+    AppCredentials,
+    ForgeAuthError,
+    ForgePermissionDenied,
+    ForgeRateLimited,
+    ForgeTransientError,
+)
 from kronos_engine.ports.secrets import ScopedSecret, SecretStore
 
 if TYPE_CHECKING:
@@ -62,12 +68,14 @@ class InstallationAuth:
         *,
         sleep: Callable[[float], None] | None = None,
         now: Callable[[], float] | None = None,
+        base_url: str = "https://api.github.com",
     ) -> None:
         self._secrets = secrets
         self._apps = dict(apps)
         self._transport = transport
         self._sleep = sleep or time.sleep
         self._now = now or time.time
+        self._base_url = base_url.rstrip("/")
         self._cached: dict[str, ScopedSecret] = {}
 
     def mint(self, role: str) -> ScopedSecret:
@@ -83,23 +91,32 @@ class InstallationAuth:
         if creds is None or creds.installation_id <= 0:
             raise ForgeAuthError(f"{role} App is not installed")
         jwt = build_app_jwt(creds.app_id, pem, now=int(self._now()))
-        from kronos_engine.adapters.github.client import HttpRequest
-
-        response = self._transport.send(
-            HttpRequest(
-                method="POST",
-                url=(
-                    "https://api.github.com/app/installations/"
-                    f"{creds.installation_id}/access_tokens"
-                ),
-                headers={
-                    "Authorization": f"Bearer {jwt}",
-                    "Accept": "application/vnd.github+json",
-                },
-                body=b"{}",
-                timeout=30.0,
-            )
+        from kronos_engine.adapters.github.client import (
+            DEFAULT_TIMEOUT_SECONDS,
+            HttpRequest,
+            send_with_backoff,
         )
+
+        try:
+            response = send_with_backoff(
+                self._transport,
+                HttpRequest(
+                    method="POST",
+                    url=(
+                        f"{self._base_url}/app/installations/"
+                        f"{creds.installation_id}/access_tokens"
+                    ),
+                    headers={
+                        "Authorization": f"Bearer {jwt}",
+                        "Accept": "application/vnd.github+json",
+                    },
+                    body=b"{}",
+                    timeout=DEFAULT_TIMEOUT_SECONDS,
+                ),
+                sleep=self._sleep,
+            )
+        except (ForgePermissionDenied, ForgeRateLimited, ForgeTransientError) as error:
+            raise ForgeAuthError(f"{role} installation token request failed") from error
         if response.status >= 400:
             raise ForgeAuthError(f"{role} installation token request failed")
         payload = json.loads(response.body.decode() or "{}")

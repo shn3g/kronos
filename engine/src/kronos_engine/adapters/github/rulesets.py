@@ -46,7 +46,7 @@ def apply_ruleset(
         )
     existing = _load_existing(client, target)
     _assert_not_weaker(existing, proposal)
-    payload = _payload(target, proposal)
+    payload = _payload(target, proposal, existing)
     if existing is not None and _equivalent(existing, proposal):
         return RulesetRef(id=_as_int(existing.get("id")), strict=True, created=False)
     if existing is None:
@@ -71,22 +71,17 @@ def _load_existing(client: GitHubClient, target: ForgeTarget) -> dict[str, objec
     if not isinstance(listed, list):
         return None
     named: dict[str, object] | None = None
-    fallback: dict[str, object] | None = None
     for item in listed:
-        if not isinstance(item, dict):
-            continue
-        fallback = item
-        if item.get("name") == RULESET_NAME:
+        if isinstance(item, dict) and item.get("name") == RULESET_NAME:
             named = item
             break
-    chosen = named or fallback
-    if chosen is None:
+    if named is None:
         return None
     detail = client.request_json(
         "GET",
-        f"/repos/{target.owner}/{target.repo}/rulesets/{chosen['id']}",
+        f"/repos/{target.owner}/{target.repo}/rulesets/{named['id']}",
     )
-    return detail if isinstance(detail, dict) else chosen
+    return detail if isinstance(detail, dict) else named
 
 
 def _union_checks(
@@ -137,8 +132,14 @@ def _assert_not_weaker(existing: dict[str, object] | None, proposal: RulesetProp
         raise RulesetWouldWeaken("strict required status checks must stay true")
     if proposal.bypass_actors:
         raise RulesetWouldWeaken("bypass actors would weaken the ruleset")
-    if any(item.integration_id is None for item in proposal.required_checks):
-        raise RulesetWouldWeaken("integration_id is required on every required check")
+    kronos = next(
+        (item for item in proposal.required_checks if item.context == KRONOS_REVIEW_CHECK_NAME),
+        None,
+    )
+    if kronos is None or kronos.integration_id is None:
+        raise RulesetWouldWeaken(
+            "integration_id is required on kronos-review (kronos-reviewer)"
+        )
     contexts = {item.context for item in proposal.required_checks}
     if KRONOS_REVIEW_CHECK_NAME not in contexts:
         raise RulesetWouldWeaken("check name kronos-review (kronos-reviewer) is required")
@@ -168,10 +169,41 @@ def _equivalent(existing: dict[str, object], proposal: RulesetProposal) -> bool:
     return True
 
 
-def _payload(target: ForgeTarget, proposal: RulesetProposal) -> dict[str, object]:
+def _kept_rules(existing: dict[str, object] | None) -> list[object]:
+    if existing is None:
+        return []
+    rules = existing.get("rules")
+    if not isinstance(rules, list):
+        return []
+    kept: list[object] = []
+    for rule in rules:
+        if isinstance(rule, dict) and rule.get("type") != "required_status_checks":
+            kept.append(rule)
+    return kept
+
+
+def _check_payload(item: RequiredCheck) -> dict[str, object]:
+    payload: dict[str, object] = {"context": item.context}
+    if item.integration_id is not None:
+        payload["integration_id"] = item.integration_id
+    return payload
+
+
+def _payload(
+    target: ForgeTarget,
+    proposal: RulesetProposal,
+    existing: dict[str, object] | None,
+) -> dict[str, object]:
     exclude: list[str] = []
     if target.protected_branch != target.integration_branch:
         exclude = [f"refs/heads/{target.protected_branch}"]
+    status_rule = {
+        "type": "required_status_checks",
+        "parameters": {
+            "strict_required_status_checks_policy": True,
+            "required_status_checks": [_check_payload(item) for item in proposal.required_checks],
+        },
+    }
     return {
         "name": proposal.name,
         "target": "branch",
@@ -183,21 +215,7 @@ def _payload(target: ForgeTarget, proposal: RulesetProposal) -> dict[str, object
                 "exclude": exclude,
             }
         },
-        "rules": [
-            {
-                "type": "required_status_checks",
-                "parameters": {
-                    "strict_required_status_checks_policy": True,
-                    "required_status_checks": [
-                        {
-                            "context": item.context,
-                            "integration_id": item.integration_id,
-                        }
-                        for item in proposal.required_checks
-                    ],
-                },
-            }
-        ],
+        "rules": [*_kept_rules(existing), status_rule],
     }
 
 

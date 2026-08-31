@@ -423,6 +423,25 @@
   font-size: 13px;
 }
 
+.github-setup__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0 0;
+}
+
+.github-setup__links a {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.github-setup__checks {
+  margin: 12px 0 0;
+  padding-left: 1.2rem;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .github-setup .wizard {
   margin-top: 24px;
 }

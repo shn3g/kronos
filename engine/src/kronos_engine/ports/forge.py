@@ -156,6 +156,8 @@ class GithubAppStatus:
     registered: bool
     installed: bool
     verified: bool
+    app_id: int | None = None
+    slug: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -182,8 +182,8 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
         return method == "POST"
             && matches!(
                 rest,
-                "controller"
-                    | "reviewer"
+                "controller/convert"
+                    | "reviewer/convert"
                     | "controller/install"
                     | "reviewer/install"
                     | "controller/verify"
@@ -722,8 +722,9 @@ mod tests {
         assert!(!engine_path_allowed("POST", "/secrets"));
         assert!(engine_path_allowed("GET", "/github/status"));
         assert!(engine_path_allowed("GET", "/github/manifests"));
-        assert!(engine_path_allowed("POST", "/github/apps/controller"));
+        assert!(engine_path_allowed("POST", "/github/apps/controller/convert"));
         assert!(engine_path_allowed("POST", "/github/apps/reviewer/verify"));
+        assert!(!engine_path_allowed("POST", "/github/apps/controller"));
         assert!(engine_path_allowed("POST", "/github/rulesets/propose"));
         assert!(engine_path_allowed("POST", "/github/rulesets/apply"));
         assert!(!engine_path_allowed("GET", "/github/apps/controller"));
