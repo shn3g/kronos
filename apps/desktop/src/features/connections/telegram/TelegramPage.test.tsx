@@ -89,4 +89,25 @@ describe("TelegramPage", () => {
       defaultRepositoryId: "repo_alpha",
     });
   });
+
+  it("saves negative group chat ids on PUT allowlist and keeps user ids positive", async () => {
+    const user = userEvent.setup();
+    const saveAllowlist = vi.fn(async () => ({ tokenPresent: true }));
+    render(
+      <TelegramPage
+        engineClient={engine("ready")}
+        telegramClient={telegramClient({ saveAllowlist })}
+      />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Telegram" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/allowed user ids/i), "4242, -7");
+    await user.type(screen.getByLabelText(/allowed chat ids/i), "-100123");
+    await user.click(screen.getByRole("button", { name: /save allowlist/i }));
+    expect(saveAllowlist).toHaveBeenCalledWith({
+      allowedUserIds: [4242],
+      allowedChatIds: [-100123],
+      defaultRepositoryId: null,
+    });
+  });
 });
