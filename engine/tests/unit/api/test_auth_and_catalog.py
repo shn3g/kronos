@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from httpx import ASGITransport, AsyncClient
 from kronos_engine.api.app import create_app
 from kronos_engine.config.paths import resolve_paths
 from kronos_engine.config.settings import Settings
-from kronos_engine.state.database import connect
+from kronos_engine.state.database import Database
 
 
 def _settings(tmp_path: Path, token: str = "install-token") -> Settings:
@@ -33,8 +34,8 @@ def _settings(tmp_path: Path, token: str = "install-token") -> Settings:
 
 @pytest.fixture
 async def client(tmp_path: Path) -> AsyncIterator[tuple[AsyncClient, dict[str, str]]]:
-    conn = connect(tmp_path / "data" / "kronos.sqlite3")
-    app = create_app(_settings(tmp_path), conn)
+    database = Database(tmp_path / "data" / "kronos.sqlite3")
+    app = create_app(_settings(tmp_path), database)
     http = AsyncClient(
         transport=ASGITransport(app=app, client=("127.0.0.1", 50000)),
         base_url="http://127.0.0.1",
@@ -43,7 +44,6 @@ async def client(tmp_path: Path) -> AsyncIterator[tuple[AsyncClient, dict[str, s
         yield http, {"Authorization": "Bearer install-token"}
     finally:
         await http.aclose()
-        conn.close()
 
 
 def test_settings_reject_non_loopback_bind(tmp_path: Path) -> None:
@@ -98,3 +98,39 @@ async def test_health_version_catalog_and_events(
     events = await http.get("/events", headers=headers)
     assert events.status_code == 200
     assert events.json() == {"events": [], "head_seq": 0}
+
+
+@pytest.mark.asyncio
+async def test_native_probe_does_not_require_cors_preflight(
+    client: tuple[AsyncClient, dict[str, str]],
+) -> None:
+    http, headers = client
+    probe_headers = {
+        **headers,
+        "Origin": "http://localhost:1420",
+        "X-Kronos-Client-Version": "0.1.0",
+    }
+    health = await http.get("/health", headers=probe_headers)
+    assert health.status_code == 200
+    assert health.json() == {"status": "ok"}
+    version = await http.get("/version", headers=probe_headers)
+    assert version.status_code == 200
+    assert version.json()["compatible"] is True
+
+
+@pytest.mark.asyncio
+async def test_concurrent_authenticated_reads(
+    client: tuple[AsyncClient, dict[str, str]],
+) -> None:
+    http, headers = client
+
+    async def hit(path: str) -> int:
+        response = await http.get(path, headers=headers)
+        return response.status_code
+
+    results = await asyncio.gather(
+        *[hit("/events") for _ in range(4)],
+        *[hit("/repositories") for _ in range(4)],
+        *[hit("/goals") for _ in range(4)],
+    )
+    assert results == [200] * 12

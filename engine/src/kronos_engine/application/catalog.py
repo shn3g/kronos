@@ -1,21 +1,20 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Read-only catalog queries over SQLite."""
+"""Read-only catalog queries. Depends on a catalog port, not SQL."""
 
 from __future__ import annotations
 
-import sqlite3
+from collections.abc import Sequence
+
+from kronos_engine.domain.entities import Goal, Repository
+from kronos_engine.ports.catalog import Catalog
 
 
-class Catalog:
-    def __init__(self, conn: sqlite3.Connection) -> None:
-        self._conn = conn
+class CatalogService:
+    def __init__(self, catalog: Catalog) -> None:
+        self._catalog = catalog
 
-    def list_repositories(self) -> list[dict[str, str]]:
-        rows = self._conn.execute("SELECT id FROM repositories ORDER BY id").fetchall()
-        return [{"id": row["id"]} for row in rows]
+    def list_repositories(self) -> Sequence[Repository]:
+        return self._catalog.list_repositories()
 
-    def list_goals(self) -> list[dict[str, str]]:
-        rows = self._conn.execute(
-            "SELECT id, repository_id FROM goals ORDER BY id"
-        ).fetchall()
-        return [{"id": row["id"], "repository_id": row["repository_id"]} for row in rows]
+    def list_goals(self) -> Sequence[Goal]:
+        return self._catalog.list_goals()

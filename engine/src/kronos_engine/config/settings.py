@@ -62,4 +62,5 @@ def _read_or_create_token(paths: KronosPaths) -> str:
     token = secrets.token_urlsafe(32)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"auth_token": token}), encoding="utf-8")
+    path.chmod(0o600)
     return token
