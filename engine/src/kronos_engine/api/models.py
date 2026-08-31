@@ -173,6 +173,17 @@ class GithubAppStatusModel(BaseModel):
     registered: bool
     installed: bool
     verified: bool
+    app_id: int | None = None
+    slug: str | None = None
+    create_url: str = "https://github.com/settings/apps/new"
+    install_url: str | None = None
+
+
+class GithubEnrolledModel(BaseModel):
+    owner: str
+    repo: str
+    integration_branch: str
+    protected_branch: str
 
 
 class GithubStatusResponse(BaseModel):
@@ -181,6 +192,7 @@ class GithubStatusResponse(BaseModel):
     webhook_enabled: bool
     poll_mode: str
     github_cli_present: bool
+    enrolled: GithubEnrolledModel | None = None
 
 
 class GithubManifestsResponse(BaseModel):
@@ -189,22 +201,22 @@ class GithubManifestsResponse(BaseModel):
     reviewer_check_name: str
 
 
-class GithubAppRegisterRequest(BaseModel):
-    app_id: int
-    slug: str
-    private_key: str
-    gh_token: str | None = None
-
-
 class GithubAppRecordResponse(BaseModel):
     role: str
     registered: bool
     installed: bool
     verified: bool
+    app_id: int | None = None
+    slug: str | None = None
 
 
 class GithubInstallRequest(BaseModel):
     installation_id: int
+
+
+class GithubManifestConvertRequest(BaseModel):
+    code: str
+    gh_token: str | None = None
 
 
 class GithubRulesetRequest(BaseModel):

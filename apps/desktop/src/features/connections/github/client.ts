@@ -6,6 +6,17 @@ export interface GitHubAppStatus {
   registered: boolean;
   installed: boolean;
   verified: boolean;
+  appId: number | null;
+  slug: string | null;
+  createUrl: string;
+  installUrl: string | null;
+}
+
+export interface GitHubEnrolledOrigin {
+  owner: string;
+  repo: string;
+  integrationBranch: string;
+  protectedBranch: string;
 }
 
 export interface GitHubConnectionStatus {
@@ -14,11 +25,12 @@ export interface GitHubConnectionStatus {
   webhookEnabled: boolean;
   pollMode: string;
   githubCliPresent: boolean;
+  enrolled: GitHubEnrolledOrigin | null;
 }
 
 export interface GitHubManifests {
-  controller: { name: string };
-  reviewer: { name: string };
+  controller: Record<string, unknown>;
+  reviewer: Record<string, unknown>;
   reviewerCheckName: string;
 }
 
@@ -27,6 +39,8 @@ export interface GitHubAppActionResult {
   registered?: boolean;
   installed?: boolean;
   verified?: boolean;
+  appId?: number | null;
+  slug?: string;
 }
 
 export interface RulesetProposalView {
@@ -37,21 +51,20 @@ export interface RulesetProposalView {
 export interface GitHubClient {
   status(): Promise<GitHubConnectionStatus>;
   manifests(): Promise<GitHubManifests>;
-  registerApp(
-    role: GitHubAppRole,
-    draft: { appId: number; slug: string; privateKey: string },
-  ): Promise<GitHubAppActionResult>;
+  convertManifest(role: GitHubAppRole, code: string): Promise<GitHubAppActionResult>;
   recordInstallation(role: GitHubAppRole, installationId: number): Promise<GitHubAppActionResult>;
   verify(role: GitHubAppRole): Promise<GitHubAppActionResult>;
   proposeRuleset(input: {
     owner: string;
     repo: string;
     reviewerIntegrationId: number;
+    integrationBranch?: string;
   }): Promise<RulesetProposalView>;
   applyRuleset(input: {
     owner: string;
     repo: string;
     reviewerIntegrationId: number;
+    integrationBranch?: string;
     confirm: boolean;
   }): Promise<{ applied: boolean }>;
 }
@@ -77,25 +90,26 @@ export function createProductionGitHubClient(
         webhookEnabled: payload.webhook_enabled === true,
         pollMode: stringField(payload, "poll_mode") || "conditional",
         githubCliPresent: payload.github_cli_present === true,
+        enrolled: mapEnrolled(payload.enrolled),
       };
     },
     async manifests() {
       const payload = await jsonRequest(request, "GET", "/github/manifests");
       return {
-        controller: { name: stringField(asRecord(payload.controller), "name") },
-        reviewer: { name: stringField(asRecord(payload.reviewer), "name") },
+        controller: asRecord(payload.controller),
+        reviewer: asRecord(payload.reviewer),
         reviewerCheckName: stringField(payload, "reviewer_check_name"),
       };
     },
-    async registerApp(role, draft) {
-      const payload = await jsonRequest(request, "POST", `/github/apps/${role}`, {
-        app_id: draft.appId,
-        slug: draft.slug,
-        private_key: draft.privateKey,
+    async convertManifest(role, code) {
+      const payload = await jsonRequest(request, "POST", `/github/apps/${role}/convert`, {
+        code,
       });
       return {
         role: stringField(payload, "role") || role,
         registered: payload.registered === true,
+        appId: typeof payload.app_id === "number" ? payload.app_id : null,
+        slug: stringField(payload, "slug"),
       };
     },
     async recordInstallation(role, installationId) {
@@ -119,6 +133,7 @@ export function createProductionGitHubClient(
         owner: input.owner,
         repo: input.repo,
         reviewer_integration_id: input.reviewerIntegrationId,
+        integration_branch: input.integrationBranch,
       });
       const checks = Array.isArray(payload.required_checks) ? payload.required_checks : [];
       return {
@@ -138,6 +153,7 @@ export function createProductionGitHubClient(
         owner: input.owner,
         repo: input.repo,
         reviewer_integration_id: input.reviewerIntegrationId,
+        integration_branch: input.integrationBranch,
         confirm: input.confirm,
       });
       return { applied: true };
@@ -180,6 +196,25 @@ function mapAppStatus(raw: Record<string, unknown>): GitHubAppStatus {
     registered: raw.registered === true,
     installed: raw.installed === true,
     verified: raw.verified === true,
+    appId: typeof raw.app_id === "number" ? raw.app_id : null,
+    slug: typeof raw.slug === "string" ? raw.slug : null,
+    createUrl: stringField(raw, "create_url"),
+    installUrl: typeof raw.install_url === "string" ? raw.install_url : null,
+  };
+}
+
+function mapEnrolled(value: unknown): GitHubEnrolledOrigin | null {
+  const item = asRecord(value);
+  const owner = stringField(item, "owner");
+  const repo = stringField(item, "repo");
+  if (!owner || !repo) {
+    return null;
+  }
+  return {
+    owner,
+    repo,
+    integrationBranch: stringField(item, "integration_branch") || "integration",
+    protectedBranch: stringField(item, "protected_branch") || "main",
   };
 }
 

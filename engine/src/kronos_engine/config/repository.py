@@ -28,22 +28,28 @@ class EnrolmentPreview:
     pushed: bool = False
 
 
-def github_owner(origin: str | None) -> str:
+def github_owner_repo(origin: str | None) -> tuple[str, str] | None:
     if origin is None or origin.strip() == "":
-        return "@codeowners"
+        return None
     text = origin.strip().rstrip("/").removesuffix(".git")
-    marker = "github.com:"
-    slash = "github.com/"
-    if marker in text:
-        rest = text.split(marker, 1)[1]
-    elif slash in text:
-        rest = text.split(slash, 1)[1]
-    else:
+    rest: str | None = None
+    if "github.com:" in text:
+        rest = text.split("github.com:", 1)[1]
+    elif "github.com/" in text:
+        rest = text.split("github.com/", 1)[1]
+    if rest is None:
+        return None
+    parts = [item for item in rest.split("/") if item]
+    if len(parts) < 2:
+        return None
+    return parts[0], parts[1]
+
+
+def github_owner(origin: str | None) -> str:
+    parsed = github_owner_repo(origin)
+    if parsed is None:
         return "@codeowners"
-    org = rest.split("/")[0].strip()
-    if org == "":
-        return "@codeowners"
-    return f"@{org}"
+    return f"@{parsed[0]}"
 
 
 def render_enrolment_preview(

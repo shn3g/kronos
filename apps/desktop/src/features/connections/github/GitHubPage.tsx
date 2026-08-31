@@ -5,9 +5,11 @@ import type { EngineClient } from "../../../engine/client";
 import {
   createProductionGitHubClient,
   type GitHubAppRole,
+  type GitHubAppStatus,
   type GitHubClient,
   type GitHubConnectionStatus,
   type GitHubManifests,
+  type RulesetProposalView,
 } from "./client";
 
 export type { GitHubClient } from "./client";
@@ -24,6 +26,7 @@ export function GitHubPage({ engineClient, githubClient }: GitHubPageProps) {
   const [ready, setReady] = useState(false);
   const [status, setStatus] = useState<GitHubConnectionStatus | null>(null);
   const [manifests, setManifests] = useState<GitHubManifests | null>(null);
+  const [proposal, setProposal] = useState<RulesetProposalView | null>(null);
   const [confirmRuleset, setConfirmRuleset] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,6 +64,35 @@ export function GitHubPage({ engineClient, githubClient }: GitHubPageProps) {
     };
   }, [client, ready]);
 
+  useEffect(() => {
+    if (!ready || !status?.enrolled || status.reviewer.appId == null) {
+      return;
+    }
+    const enrolled = status.enrolled;
+    const reviewerId = status.reviewer.appId;
+    let cancelled = false;
+    void client
+      .proposeRuleset({
+        owner: enrolled.owner,
+        repo: enrolled.repo,
+        reviewerIntegrationId: reviewerId,
+        integrationBranch: enrolled.integrationBranch,
+      })
+      .then((nextProposal) => {
+        if (!cancelled) {
+          setProposal(nextProposal);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setError("Could not propose a ruleset for the enrolled origin.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, ready, status]);
+
   if (!ready) {
     return (
       <section className="github-setup">
@@ -74,18 +106,14 @@ export function GitHubPage({ engineClient, githubClient }: GitHubPageProps) {
     );
   }
 
-  async function onRegister(role: GitHubAppRole, form: HTMLFormElement) {
+  async function onConvert(role: GitHubAppRole, form: HTMLFormElement) {
     setError(null);
     const data = new FormData(form);
     try {
-      await client.registerApp(role, {
-        appId: Number(data.get("appId") || 0),
-        slug: String(data.get("slug") || ""),
-        privateKey: String(data.get("privateKey") || ""),
-      });
+      await client.convertManifest(role, String(data.get("code") || ""));
       setStatus(await client.status());
     } catch {
-      setError("Could not save the GitHub App.");
+      setError("Could not convert the GitHub App manifest.");
     }
   }
 
@@ -112,12 +140,17 @@ export function GitHubPage({ engineClient, githubClient }: GitHubPageProps) {
 
   async function onApplyRuleset() {
     setError(null);
+    if (!status?.enrolled || status.reviewer.appId == null) {
+      setError("Enrol a GitHub origin and convert the reviewer App first.");
+      return;
+    }
     try {
       await client.applyRuleset({
-        owner: "acme",
-        repo: "app",
-        reviewerIntegrationId: 1002,
-        confirm: true,
+        owner: status.enrolled.owner,
+        repo: status.enrolled.repo,
+        reviewerIntegrationId: status.reviewer.appId,
+        integrationBranch: status.enrolled.integrationBranch,
+        confirm: confirmRuleset,
       });
     } catch {
       setError("Could not apply the ruleset.");
@@ -142,14 +175,18 @@ export function GitHubPage({ engineClient, githubClient }: GitHubPageProps) {
       <AppCard
         title="Controller App"
         role="controller"
-        onRegister={onRegister}
+        appStatus={status?.controller}
+        manifest={manifests?.controller}
+        onConvert={onConvert}
         onInstall={onInstall}
         onVerify={onVerify}
       />
       <AppCard
         title="Reviewer App"
         role="reviewer"
-        onRegister={onRegister}
+        appStatus={status?.reviewer}
+        manifest={manifests?.reviewer}
+        onConvert={onConvert}
         onInstall={onInstall}
         onVerify={onVerify}
       />
@@ -165,6 +202,26 @@ export function GitHubPage({ engineClient, githubClient }: GitHubPageProps) {
           Proposed rulesets require the reviewer integration id and strict required checks. Kronos
           will not add bypass actors or drop existing checks.
         </p>
+        {status?.enrolled ? (
+          <p className="github-setup__meta">
+            Enrolled origin: {status.enrolled.owner}/{status.enrolled.repo}
+          </p>
+        ) : (
+          <p className="github-setup__meta">Enrol a GitHub repository before applying a ruleset.</p>
+        )}
+        {proposal ? (
+          <>
+            <p className="github-setup__meta">Strict: {proposal.strict ? "yes" : "no"}</p>
+            <ul className="github-setup__checks">
+              {proposal.requiredChecks.map((check) => (
+                <li key={check.context}>
+                  {check.context}
+                  {check.integrationId != null ? ` (${check.integrationId})` : ""}
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
         <label className="models__confirm" htmlFor="ruleset-confirm">
           <input
             id="ruleset-confirm"
@@ -176,7 +233,11 @@ export function GitHubPage({ engineClient, githubClient }: GitHubPageProps) {
           />
           I confirm this does not weaken existing protections
         </label>
-        <button type="submit" className="btn-primary" disabled={!confirmRuleset}>
+        <button
+          type="submit"
+          className="btn-primary"
+          disabled={!confirmRuleset || !status?.enrolled || status.reviewer.appId == null}
+        >
           Apply ruleset
         </button>
       </form>
@@ -191,45 +252,58 @@ export function GitHubPage({ engineClient, githubClient }: GitHubPageProps) {
 function AppCard({
   title,
   role,
-  onRegister,
+  appStatus,
+  manifest,
+  onConvert,
   onInstall,
   onVerify,
 }: {
   title: string;
   role: GitHubAppRole;
-  onRegister: (role: GitHubAppRole, form: HTMLFormElement) => Promise<void>;
+  appStatus: GitHubAppStatus | undefined;
+  manifest: Record<string, unknown> | undefined;
+  onConvert: (role: GitHubAppRole, form: HTMLFormElement) => Promise<void>;
   onInstall: (role: GitHubAppRole, form: HTMLFormElement) => Promise<void>;
   onVerify: (role: GitHubAppRole) => Promise<void>;
 }) {
   const prefix = role === "controller" ? "Controller" : "Reviewer";
+  const createUrl = appStatus?.createUrl || "https://github.com/settings/apps/new";
   return (
     <section className="wizard">
       <h2 className="wizard__title">{title}</h2>
+      <p className="github-setup__meta">App id: {appStatus?.appId ?? "not registered"}</p>
+      <p className="github-setup__meta">Slug: {appStatus?.slug ?? "not registered"}</p>
+      <p className="github-setup__meta">Registered: {appStatus?.registered ? "yes" : "no"}</p>
+      <p className="github-setup__meta">Installed: {appStatus?.installed ? "yes" : "no"}</p>
+      <p className="github-setup__meta">Verified: {appStatus?.verified ? "yes" : "no"}</p>
+      <p className="github-setup__links">
+        <a href={createUrl} target="_blank" rel="noreferrer">
+          {`Create ${role} App on GitHub`}
+        </a>
+        {appStatus?.installUrl ? (
+          <a href={appStatus.installUrl} target="_blank" rel="noreferrer">
+            {`Install ${role} App on GitHub`}
+          </a>
+        ) : null}
+      </p>
+      <form action={createUrl} method="post" target="_blank">
+        <input type="hidden" name="manifest" value={JSON.stringify(manifest ?? {})} />
+        <button type="submit" className="btn-quiet">
+          {`Create ${role} App with manifest`}
+        </button>
+      </form>
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          void onRegister(role, event.currentTarget);
+          void onConvert(role, event.currentTarget);
         }}
       >
-        <label className="wizard__label" htmlFor={`${role}-app-id`}>
-          {prefix} App ID
-          <input id={`${role}-app-id`} className="wizard__input" name="appId" />
-        </label>
-        <label className="wizard__label" htmlFor={`${role}-slug`}>
-          {prefix} slug
-          <input id={`${role}-slug`} className="wizard__input" name="slug" />
-        </label>
-        <label className="wizard__label" htmlFor={`${role}-private-key`}>
-          {prefix} private key
-          <textarea
-            id={`${role}-private-key`}
-            className="wizard__input"
-            name="privateKey"
-            rows={4}
-          />
+        <label className="wizard__label" htmlFor={`${role}-manifest-code`}>
+          {prefix} manifest code
+          <input id={`${role}-manifest-code`} className="wizard__input" name="code" />
         </label>
         <button type="submit" className="btn-primary">
-          {`Save ${role} app`}
+          {`Convert ${role}`}
         </button>
       </form>
       <form

@@ -25,9 +25,10 @@ from kronos_engine.api.models import (
     EventItem,
     EventListResponse,
     GithubAppRecordResponse,
-    GithubAppRegisterRequest,
     GithubAppStatusModel,
+    GithubEnrolledModel,
     GithubInstallRequest,
+    GithubManifestConvertRequest,
     GithubManifestsResponse,
     GithubRulesetRequest,
     GithubStatusResponse,
@@ -63,7 +64,12 @@ from kronos_engine.application.repositories import (
     RepositoryNotFound,
     RepositoryService,
 )
-from kronos_engine.config.repository import EnrolmentPreview, github_owner, render_enrolment_preview
+from kronos_engine.config.repository import (
+    EnrolmentPreview,
+    github_owner,
+    github_owner_repo,
+    render_enrolment_preview,
+)
 from kronos_engine.config.settings import CLIENT_VERSION_HEADER, Settings, is_loopback_client
 from kronos_engine.domain.entities import EnrolledRepository, IdentifierError, RepositoryId
 from kronos_engine.domain.github import APP_ROLES
@@ -74,7 +80,9 @@ from kronos_engine.indexing.service import IndexingService, IndexStatus
 from kronos_engine.ports.forge import (
     ForgeAuthError,
     ForgeTarget,
+    ForgeTransientError,
     GithubAppRecord,
+    GithubAppStatus,
     OperatorConfirmationRequired,
     RulesetWouldWeaken,
 )
@@ -416,24 +424,36 @@ def create_app(
             record = _load(repos, repository_id)
             return IndexMapResponse(text=IndexingService(settings.paths).repo_map(record.id.value))
 
+    GITHUB_APP_CREATE_URL = "https://github.com/settings/apps/new"
+
+    def _app_status_model(status: GithubAppStatus) -> GithubAppStatusModel:
+        install_url = (
+            f"https://github.com/apps/{status.slug}/installations/new" if status.slug else None
+        )
+        return GithubAppStatusModel(
+            registered=status.registered,
+            installed=status.installed,
+            verified=status.verified,
+            app_id=status.app_id,
+            slug=status.slug,
+            create_url=GITHUB_APP_CREATE_URL,
+            install_url=install_url,
+        )
+
     @app.get("/github/status", response_model=GithubStatusResponse)
     def github_status(_: None = Depends(require_auth)) -> GithubStatusResponse:
         with github_service() as service:
             status = service.status()
+            enrolled = None
+            with repository_service() as repos:
+                enrolled = _enrolled_github(repos)
             return GithubStatusResponse(
-                controller=GithubAppStatusModel(
-                    registered=status.controller.registered,
-                    installed=status.controller.installed,
-                    verified=status.controller.verified,
-                ),
-                reviewer=GithubAppStatusModel(
-                    registered=status.reviewer.registered,
-                    installed=status.reviewer.installed,
-                    verified=status.reviewer.verified,
-                ),
+                controller=_app_status_model(status.controller),
+                reviewer=_app_status_model(status.reviewer),
                 webhook_enabled=status.webhook_enabled,
                 poll_mode=status.poll_mode,
                 github_cli_present=status.github_cli_present,
+                enrolled=enrolled,
             )
 
     @app.get("/github/manifests", response_model=GithubManifestsResponse)
@@ -450,9 +470,9 @@ def create_app(
                 reviewer_check_name=str(payload["reviewer_check_name"]),
             )
 
-    @app.post("/github/apps/{role}", response_model=GithubAppRecordResponse)
-    def github_register_app(
-        role: str, body: GithubAppRegisterRequest, _: None = Depends(require_auth)
+    @app.post("/github/apps/{role}/convert", response_model=GithubAppRecordResponse)
+    def github_convert_app(
+        role: str, body: GithubManifestConvertRequest, _: None = Depends(require_auth)
     ) -> GithubAppRecordResponse:
         if role not in APP_ROLES:
             raise HTTPException(status_code=404, detail="not found")
@@ -460,12 +480,7 @@ def create_app(
             raise HTTPException(status_code=400, detail="GH_TOKEN is not accepted")
         with github_service() as service:
             try:
-                record = service.register_app(
-                    role=role,
-                    app_id=body.app_id,
-                    slug=body.slug,
-                    private_key=body.private_key,
-                )
+                record = service.convert_manifest(role=role, code=body.code)
             except ForgeAuthError as error:
                 raise HTTPException(status_code=400, detail=str(error)) from error
             return _github_record(record)
@@ -504,6 +519,8 @@ def create_app(
                 proposal = forge.propose_ruleset(body.reviewer_integration_id)
             except ForgeAuthError as error:
                 raise HTTPException(status_code=400, detail=str(error)) from error
+            except ForgeTransientError as error:
+                raise HTTPException(status_code=502, detail=str(error)) from error
             return {
                 "name": proposal.name,
                 "strict": proposal.strict,
@@ -528,6 +545,8 @@ def create_app(
                 raise HTTPException(status_code=400, detail=str(error)) from error
             except ForgeAuthError as error:
                 raise HTTPException(status_code=400, detail=str(error)) from error
+            except ForgeTransientError as error:
+                raise HTTPException(status_code=502, detail=str(error)) from error
             return {"id": applied.id, "strict": applied.strict, "created": applied.created}
 
     @app.get("/goals", response_model=GoalListResponse)
@@ -570,7 +589,24 @@ def _github_record(record: GithubAppRecord) -> GithubAppRecordResponse:
         registered=True,
         installed=record.installation_id is not None,
         verified=record.verified,
+        app_id=record.app_id,
+        slug=record.slug,
     )
+
+
+def _enrolled_github(repos: RepositoryService) -> GithubEnrolledModel | None:
+    for record in repos.list():
+        parsed = github_owner_repo(record.origin)
+        if parsed is None:
+            continue
+        owner, name = parsed
+        return GithubEnrolledModel(
+            owner=owner,
+            repo=name,
+            integration_branch=record.policy.branches.integration,
+            protected_branch=record.policy.branches.protected,
+        )
+    return None
 
 
 def _controller_forge(service: GitHubSetupService, body: GithubRulesetRequest) -> GitHubForge:
