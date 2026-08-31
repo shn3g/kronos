@@ -461,8 +461,24 @@
   margin-top: 12px;
 }
 
+.skills-page__import,
+.skills-page__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0 0;
+}
+
+.skills-page textarea.wizard__input,
+.memory-page textarea.wizard__input {
+  width: 100%;
+  min-height: 6rem;
+}
+
 .goals-page__list,
-.runs-page__list {
+.runs-page__list,
+.skills-page__list,
+.memory-page__list {
   display: grid;
   gap: 12px;
   margin: 24px 0 0;

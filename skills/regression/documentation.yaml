@@ -1,0 +1,7 @@
+skill: documentation
+prompt: Exercise the documentation skill on a small, bounded change.
+verification:
+  - keep examples executable
+  - link paths and SHAs
+forbidden:
+  - document features that were not built

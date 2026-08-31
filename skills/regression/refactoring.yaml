@@ -1,0 +1,7 @@
+skill: refactoring
+prompt: Exercise the refactoring skill on a small, bounded change.
+verification:
+  - refactor after a failing test is green
+  - keep behavior
+forbidden:
+  - rewrite while adding features

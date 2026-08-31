@@ -170,6 +170,14 @@ pub async fn pick_repository_folder(app: AppHandle) -> Option<String> {
         .map(|path| path.simplified().to_string())
 }
 
+fn skill_memory_id_ok(id: &str) -> bool {
+    !id.is_empty()
+        && !id.contains('/')
+        && id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+}
+
 fn engine_path_allowed(method: &str, path: &str) -> bool {
     let path = path.split('?').next().unwrap_or(path);
     if path == "/github/status" || path == "/github/manifests" {
@@ -228,6 +236,32 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
     }
     if path == "/events" || path == "/events/" {
         return method == "GET";
+    }
+    if path == "/skills" || path == "/skills/" {
+        return method == "GET";
+    }
+    if path == "/skills/import" || path == "/skills/import/" {
+        return method == "POST";
+    }
+    if path == "/skills/route" || path == "/skills/route/" {
+        return method == "POST";
+    }
+    if let Some(rest) = path.strip_prefix("/skills/") {
+        if let Some((id, action)) = rest.split_once('/') {
+            return method == "POST"
+                && skill_memory_id_ok(id)
+                && matches!(action, "evaluate" | "approve" | "activate" | "disable");
+        }
+        return method == "GET" && skill_memory_id_ok(rest);
+    }
+    if path == "/memory" || path == "/memory/" {
+        return method == "GET";
+    }
+    if path == "/memory/import-lessons" || path == "/memory/import-lessons/" {
+        return method == "POST";
+    }
+    if let Some(rest) = path.strip_prefix("/memory/") {
+        return method == "GET" && skill_memory_id_ok(rest);
     }
     if !path.starts_with("/repositories") {
         return false;
@@ -777,5 +811,18 @@ mod tests {
         assert!(engine_path_allowed("GET", "/runs"));
         assert!(engine_path_allowed("GET", "/events?after=0"));
         assert!(!engine_path_allowed("DELETE", "/goals"));
+        assert!(engine_path_allowed("GET", "/skills"));
+        assert!(engine_path_allowed("POST", "/skills/import"));
+        assert!(engine_path_allowed("POST", "/skills/route"));
+        assert!(engine_path_allowed("POST", "/skills/skill-tdd-core/evaluate"));
+        assert!(engine_path_allowed("POST", "/skills/skill-tdd-core/approve"));
+        assert!(engine_path_allowed("POST", "/skills/skill-tdd-core/activate"));
+        assert!(engine_path_allowed("POST", "/skills/skill-tdd-core/disable"));
+        assert!(engine_path_allowed("GET", "/skills/skill-tdd-core"));
+        assert!(!engine_path_allowed("DELETE", "/skills/skill-tdd-core"));
+        assert!(engine_path_allowed("GET", "/memory"));
+        assert!(engine_path_allowed("POST", "/memory/import-lessons"));
+        assert!(engine_path_allowed("GET", "/memory/mem-1"));
+        assert!(!engine_path_allowed("DELETE", "/memory"));
     }
 }

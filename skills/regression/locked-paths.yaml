@@ -1,0 +1,7 @@
+skill: locked-paths
+prompt: Exercise the locked-paths skill on a small, bounded change.
+verification:
+  - honor locked paths
+  - one writer at a time
+forbidden:
+  - edit locked modules anyway

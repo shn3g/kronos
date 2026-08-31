@@ -1,0 +1,7 @@
+skill: git-github
+prompt: Exercise the git-github skill on a small, bounded change.
+verification:
+  - draft PRs onto the integration branch
+  - exact head SHA
+forbidden:
+  - push the protected default branch

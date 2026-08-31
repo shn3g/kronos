@@ -1,0 +1,7 @@
+skill: backend-testing
+prompt: Exercise the backend-testing skill on a small, bounded change.
+verification:
+  - assert fail-closed status codes
+  - keep domain tests free of I/O
+forbidden:
+  - hit live network from unit tests

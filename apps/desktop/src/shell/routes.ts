@@ -30,7 +30,13 @@ export const ROUTES = [
     path: "/skills",
     name: "Skills",
     heading: "Skills",
-    summary: "Curated engineering skills will be browsed and activated here.",
+    summary: "Browse curated skills, quarantine imports, and approve activation.",
+  },
+  {
+    path: "/memory",
+    name: "Memory",
+    heading: "Memory",
+    summary: "Inspect episodic and procedural records. Imported lessons stay disabled.",
   },
   {
     path: "/models",

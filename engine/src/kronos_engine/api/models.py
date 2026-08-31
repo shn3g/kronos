@@ -301,3 +301,24 @@ class GithubRulesetRequest(BaseModel):
     protected_branch: str = "main"
     reviewer_integration_id: int
     confirm: bool = False
+
+
+class SkillImportRequest(BaseModel):
+    locator: str
+    revision: str
+    scope: str | None = None
+    repository_id: str | None = None
+
+
+class SkillApproveRequest(BaseModel):
+    human: bool = False
+
+
+class SkillRouteRequest(BaseModel):
+    query: str
+    budget_tokens: int = 200
+    selected_name: str | None = None
+
+
+class LessonImportRequest(BaseModel):
+    yaml: str

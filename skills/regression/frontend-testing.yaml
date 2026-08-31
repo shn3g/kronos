@@ -1,0 +1,7 @@
+skill: frontend-testing
+prompt: Exercise the frontend-testing skill on a small, bounded change.
+verification:
+  - query by role and label
+  - drive user events
+forbidden:
+  - assert on css class soup

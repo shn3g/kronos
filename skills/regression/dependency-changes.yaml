@@ -1,0 +1,7 @@
+skill: dependency-changes
+prompt: Exercise the dependency-changes skill on a small, bounded change.
+verification:
+  - pin dependencies
+  - check licenses
+forbidden:
+  - commit unsigned binary blobs as deps
