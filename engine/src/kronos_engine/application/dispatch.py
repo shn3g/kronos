@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from kronos_engine.adapters.git.worktrees import GitCacheWorktree
+from kronos_engine.application.notifications import NotificationService
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import RepositoryService
 from kronos_engine.domain.budgets import (
@@ -51,6 +52,7 @@ from kronos_engine.ports.leases import LeaseStore
 from kronos_engine.ports.sandbox import Sandbox
 from kronos_engine.skills.catalog import SkillCatalog
 from kronos_engine.state.goals import SqliteGoalStore
+from kronos_engine.telegram.artifacts import supported_artifact
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +90,7 @@ class DispatchService:
         clock: Callable[[], datetime],
         worktrees: GitCacheWorktree | None = None,
         skills: SkillCatalog | None = None,
+        notifications: NotificationService | None = None,
     ) -> None:
         self._store = store
         self._repos = repos
@@ -100,6 +103,7 @@ class DispatchService:
         self._clock = clock
         self._worktrees = worktrees or GitCacheWorktree()
         self._skills = skills
+        self._notifications = notifications
 
     def claim(
         self,
@@ -374,6 +378,7 @@ class DispatchService:
                 error=result.error or "executor failed",
                 status=result.status,
             )
+        self._notify_artifacts(claimed.worktree, artifacts)
         return ExecuteResult(ok=True, artifacts=artifacts, error=None, status=result.status)
 
     def record_run_failure(self, task_id: TaskId) -> None:
@@ -382,6 +387,8 @@ class DispatchService:
         repo = self._repos.get(task.repository_id)
         updated = record_failure(meter, repo.policy.budgets.breaker_failure_limit)
         self._store.save_budget_meter(task.repository_id, updated)
+        if updated.breaker_open:
+            self._notify_failure("breaker open")
 
     def record_run_success(self, task_id: TaskId) -> None:
         task = self._store.get_task(task_id)
@@ -392,6 +399,15 @@ class DispatchService:
         for run in self._store.list_runs():
             if run.task_id == task_id:
                 self._store.save_run(replace(run, pr_url=pr_url))
+        if self._notifications is None:
+            return
+        task = self._store.get_task(task_id)
+        goal = self._store.get_goal(task.goal_id)
+        self._notifications.notify_allowed_chats(
+            title=goal.title,
+            state=goal.state.value,
+            pr_url=pr_url,
+        )
 
     def _assert_dependencies_merged(self, task: TaskRecord) -> None:
         for dep in task.depends_on:
@@ -445,6 +461,25 @@ class DispatchService:
                 text=text,
                 confidence=0.6 if helpful else 0.8,
             )
+
+    def _notify_failure(self, reason: str, log_excerpt: str | None = None) -> None:
+        if self._notifications is None:
+            return
+        self._notifications.notify_failure_allowed(reason=reason, log_excerpt=log_excerpt)
+
+    def _notify_artifacts(self, worktree: Path | None, artifacts: tuple[str, ...]) -> None:
+        if self._notifications is None or worktree is None:
+            return
+        for name in artifacts:
+            path = worktree / name
+            if not path.is_file():
+                continue
+            try:
+                content = path.read_text(encoding="utf-8", errors="replace")[:4000]
+            except OSError:
+                continue
+            if supported_artifact(name, content):
+                self._notifications.notify_artifact_allowed(name=name, content=content)
 
 
 def resolve_evidence(
