@@ -204,6 +204,9 @@ class GoalEngine:
             after_pr(pull)
         merged = self._verification.merge_if_eligible(task_id, self._merge)
         if not merged.ok:
+            if merged.staged_stop:
+                task = self._store.get_task(task_id)
+                return self._from_task(task, claimed, ok=True, terminal=False)
             return self._fail(task_id, claimed, merged.reason, trip=False)
         self._dispatch.record_run_success(task_id)
         task = self._store.get_task(task_id)

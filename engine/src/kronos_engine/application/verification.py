@@ -50,6 +50,7 @@ class VerifyResult:
 class MergeAttempt:
     ok: bool
     reason: str
+    staged_stop: bool = False
 
 
 class VerificationService:
@@ -229,7 +230,12 @@ class VerificationService:
                 protected_branch=repo.policy.branches.protected,
             )
         except ModeWriteRefused as error:
-            return MergeAttempt(ok=False, reason=str(error))
+            reason = str(error)
+            return MergeAttempt(
+                ok=False,
+                reason=reason,
+                staged_stop=reason != "never write the protected default branch",
+            )
         try:
             decision = merge.merge_if_eligible(task.pr_number)
         except MergeRefused as error:
