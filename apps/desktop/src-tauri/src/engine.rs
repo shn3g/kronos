@@ -19,6 +19,8 @@ use tauri_plugin_dialog::DialogExt;
 const CLIENT_VERSION: &str = "0.1.0";
 const READY_TIMEOUT: Duration = Duration::from_secs(20);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+/// Enrolment and index rebuild can exceed the health-probe budget.
+const ENGINE_JSON_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Serialize)]
 #[serde(tag = "status", rename_all = "camelCase")]
@@ -149,7 +151,13 @@ pub fn engine_json(
         }
     });
     let headers = [("Authorization", auth.as_str())];
-    match loopback_request(&method, &url, &headers, payload.as_deref()) {
+    match loopback_request(
+        &method,
+        &url,
+        &headers,
+        payload.as_deref(),
+        ENGINE_JSON_TIMEOUT,
+    ) {
         Ok((status, response_body)) => EngineJsonResponse {
             status,
             body: response_body,
@@ -213,7 +221,13 @@ pub fn import_telegram_bot_token(
     let url = format!("{base}/telegram/token");
     let payload = serde_json::json!({ "token": token }).to_string();
     let headers = [("Authorization", auth.as_str())];
-    match loopback_request("POST", &url, &headers, Some(payload.as_str())) {
+    match loopback_request(
+        "POST",
+        &url,
+        &headers,
+        Some(payload.as_str()),
+        ENGINE_JSON_TIMEOUT,
+    ) {
         Ok((status, response_body)) => EngineJsonResponse {
             status,
             body: response_body,
@@ -717,7 +731,7 @@ fn parse_loopback_http_url(url: &str) -> Result<LoopbackUrl, String> {
 }
 
 fn loopback_get(url: &str, extra_headers: &[(&str, &str)]) -> Result<(u16, String), String> {
-    loopback_request("GET", url, extra_headers, None)
+    loopback_request("GET", url, extra_headers, None, PROBE_TIMEOUT)
 }
 
 fn loopback_request(
@@ -725,15 +739,16 @@ fn loopback_request(
     url: &str,
     extra_headers: &[(&str, &str)],
     body: Option<&str>,
+    timeout: Duration,
 ) -> Result<(u16, String), String> {
     let parsed = parse_loopback_http_url(url)?;
     let mut stream = TcpStream::connect((parsed.host.as_str(), parsed.port))
         .map_err(|error| error.to_string())?;
     stream
-        .set_read_timeout(Some(PROBE_TIMEOUT))
+        .set_read_timeout(Some(timeout))
         .map_err(|error| error.to_string())?;
     stream
-        .set_write_timeout(Some(PROBE_TIMEOUT))
+        .set_write_timeout(Some(timeout))
         .map_err(|error| error.to_string())?;
     let payload = body.unwrap_or("");
     let mut request = format!(

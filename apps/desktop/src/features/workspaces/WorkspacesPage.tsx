@@ -108,8 +108,9 @@ export function WorkspacesPage({
       setRepositories((current) => upsertRepo(current, enrolled));
       setWizardOpen(false);
       setInspection(null);
-    } catch {
-      setError("Could not enrol that repository.");
+    } catch (error) {
+      const detail = error instanceof Error && error.message ? ` (${error.message})` : "";
+      setError(`Could not enrol that repository.${detail}`);
     }
   }
 
