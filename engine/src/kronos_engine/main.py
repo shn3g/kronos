@@ -26,7 +26,7 @@ def main() -> None:
     sock = _bind_loopback(settings.bind_host, settings.bind_port)
     host, port = sock.getsockname()[:2]
     ready_url = f"http://[{host}]:{port}" if ":" in str(host) else f"http://{host}:{port}"
-    app = create_app(settings, database)
+    app = create_app(settings, database, telegram_auto_poll=True)
     config = uvicorn.Config(app, host=host, port=port, log_config=None)
     server = _ReadyServer(config, ready_url)
     server.run(sockets=[sock])

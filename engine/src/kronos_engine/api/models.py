@@ -322,3 +322,23 @@ class SkillRouteRequest(BaseModel):
 
 class LessonImportRequest(BaseModel):
     yaml: str
+
+
+class TelegramTokenRequest(BaseModel):
+    token: str
+
+
+class TelegramAllowlistRequest(BaseModel):
+    allowed_user_ids: list[int]
+    allowed_chat_ids: list[int]
+    default_repository_id: str | None = None
+
+
+class TelegramStatusResponse(BaseModel):
+    token_present: bool
+    allowed_user_ids: list[int]
+    allowed_chat_ids: list[int]
+    default_repository_id: str | None = None
+    last_update_offset: int
+    botfather_url: str
+    setup_steps: list[str]

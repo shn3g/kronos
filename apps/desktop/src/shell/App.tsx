@@ -11,6 +11,7 @@ import { pickRepositoryFolder } from "../features/workspaces/client";
 import { ModelsPage } from "../features/models/ModelsPage";
 import { IndexPage } from "../features/index/IndexPage";
 import { GitHubPage } from "../features/connections/github/GitHubPage";
+import { TelegramPage } from "../features/connections/telegram/TelegramPage";
 import { GoalsPage } from "../features/goals/GoalsPage";
 import { RunsPage } from "../features/runs/RunsPage";
 import { SkillsPage } from "../features/skills/SkillsPage";
@@ -80,7 +81,10 @@ export function App({ engineClient }: AppProps) {
           ) : path === "/index" ? (
             <IndexPage engineClient={client} />
           ) : path === "/connections" ? (
-            <GitHubPage engineClient={client} />
+            <>
+              <GitHubPage engineClient={client} />
+              <TelegramPage engineClient={client} />
+            </>
           ) : (
             <>
               <p className="page-kicker">{active.name}</p>
