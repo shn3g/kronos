@@ -40,6 +40,7 @@ def test_compose_runs_reviewer_with_isolated_mounts_and_credentials() -> None:
     assert "controller_private_key" not in reviewer
     assert "reviewer_private_key" not in engine
     assert "reviewer_attestation_key" not in engine
+    assert "attestation_verify_key" in engine
     assert "GH_TOKEN" not in reviewer or 'GH_TOKEN: ""' in reviewer or "GH_TOKEN:" not in reviewer
     assert "kronos-review (kronos-reviewer)" in text
     assert "hermes" not in text.lower()

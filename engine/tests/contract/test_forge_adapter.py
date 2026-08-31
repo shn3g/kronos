@@ -15,6 +15,7 @@ from kronos_engine.ports.forge import (
     DefaultBranchWriteRefused,
     ForgeAuthError,
     ForgeRateLimited,
+    ForgeTransientError,
     IdempotencyKey,
     OperatorConfirmationRequired,
     RequiredCheck,
@@ -507,4 +508,32 @@ def test_merge_pull_is_integration_only_and_promotion_never_writes_default() -> 
     assert promotion.draft is True
     assert fixture.merge_calls() == (pull.number,)
     assert "main" not in fixture.ref_writes()
+
+
+def test_merge_pull_refuses_third_branch_base_even_without_dest() -> None:
+    forge, fixture, _auth = controller_stack()
+    pull = fixture.seed_pull(
+        head="kronos/side",
+        base="release",
+        head_sha="c" * 40,
+    )
+    with pytest.raises(DefaultBranchWriteRefused, match="integration"):
+        forge.merge_pull(pull["number"], sha=pull["head"]["sha"])
+    assert fixture.merge_calls() == ()
+
+
+def test_merge_pull_refuses_stale_sha_when_head_moved() -> None:
+    forge, fixture, _auth = controller_stack()
+    forge.create_feature_branch("kronos/moved", IdempotencyKey("branch:moved"))
+    pull = forge.open_draft_pr(
+        "Move me",
+        "Fixes #2",
+        "kronos/moved",
+        IdempotencyKey("pr:moved"),
+    )
+    old = fixture.branch_sha("kronos/moved")
+    fixture.move_pull_head(pull.number, "e" * 40)
+    with pytest.raises(ForgeTransientError, match="409"):
+        forge.merge_pull(pull.number, sha=old)
+    assert fixture.merge_calls() == ()
 

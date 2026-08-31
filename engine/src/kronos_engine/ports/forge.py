@@ -95,6 +95,8 @@ class PullRef:
     base: str
     draft: bool
     created: bool
+    head_sha: str = ""
+    base_sha: str = ""
 
 
 @dataclass(frozen=True, slots=True)
