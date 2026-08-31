@@ -20,6 +20,9 @@ const routes = [
   { name: "Models", heading: "Models" },
   { name: "Index", heading: "Index" },
   { name: "Connections", heading: "Connections" },
+  { name: "Settings", heading: "Settings" },
+  { name: "Updates", heading: "Updates" },
+  { name: "Notifications", heading: "Notifications" },
 ] as const;
 
 describe("App shell", () => {

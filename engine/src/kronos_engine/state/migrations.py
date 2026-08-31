@@ -289,6 +289,33 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        9,
+        """
+        CREATE TABLE dead_letters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE ops_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            otel_export INTEGER NOT NULL DEFAULT 0,
+            langfuse_export INTEGER NOT NULL DEFAULT 0
+        );
+
+        INSERT INTO ops_settings(id, otel_export, langfuse_export) VALUES (1, 0, 0);
+
+        CREATE TABLE ops_degradation (
+            kind TEXT NOT NULL,
+            target TEXT NOT NULL,
+            detail TEXT NOT NULL,
+            PRIMARY KEY (kind, target)
+        );
+        """,
+    ),
 )
 
 

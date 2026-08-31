@@ -56,6 +56,24 @@ export const ROUTES = [
     heading: "Connections",
     summary: "Create and install GitHub Apps and connect Telegram. Fail closed without an engine.",
   },
+  {
+    path: "/settings",
+    name: "Settings",
+    heading: "Settings",
+    summary: "Doctor, backup, and export toggles. Secrets never pass through the WebView.",
+  },
+  {
+    path: "/updates",
+    name: "Updates",
+    heading: "Updates",
+    summary: "Version, checksums, SBOM, and rollback. Unsigned when signing keys are absent.",
+  },
+  {
+    path: "/notifications",
+    name: "Notifications",
+    heading: "Notifications",
+    summary: "Paused work and degraded indexes. Fail closed without an engine.",
+  },
 ] as const;
 
 export type RoutePath = (typeof ROUTES)[number]["path"];
