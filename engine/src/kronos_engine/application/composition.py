@@ -18,6 +18,7 @@ from kronos_engine.application.github_setup import GitHubSetupService
 from kronos_engine.application.goal_engine import GoalEngine
 from kronos_engine.application.goals import GoalService
 from kronos_engine.application.merge import MergeService
+from kronos_engine.application.notifications import NotificationService
 from kronos_engine.application.planning import IndexedPlanner, Planner, PlanningService
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.recovery import RecoveryService
@@ -52,6 +53,7 @@ def build_goal_engine(
     gates: GateRunner | None = None,
     forge: object | None = None,
     clock: Callable[[], datetime] | None = None,
+    notifications: NotificationService | None = None,
 ) -> GoalEngine:
     tick = clock or (lambda: datetime.now(tz=UTC))
     store = SqliteGoalStore(conn)  # type: ignore[arg-type]
@@ -69,7 +71,7 @@ def build_goal_engine(
         CacheRuntimeLayout(),
         indexer=indexer,
     )
-    goals = GoalService(store, repos, recorder)
+    goals = GoalService(store, repos, recorder, notifications=notifications)
     chosen_planner = planner or IndexedPlanner(indexer)
     chosen_executor = executor or ControlledOpenExecutor()
     chosen_gates = gates or ProcessGateRunner()
@@ -101,6 +103,7 @@ def build_goal_engine(
         settings.paths.cache,
         clock=tick,
         skills=skills,
+        notifications=notifications,
     )
     verification = VerificationService(
         store,
@@ -114,7 +117,8 @@ def build_goal_engine(
     recovery = RecoveryService(store, recorder)
     scheduler = GoalScheduler(store, goals, leases, clock=tick)
     return GoalEngine(
-        store, planning, dispatch, verification, recovery, merge, scheduler, clock=tick
+        store, planning, dispatch, verification, recovery, merge, scheduler, clock=tick,
+        notifications=notifications,
     )
 
 

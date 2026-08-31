@@ -18,7 +18,7 @@ from kronos_engine.adapters.git.repository import FilesystemGitInspector, GitErr
 from kronos_engine.adapters.git.worktrees import CacheRuntimeLayout
 from kronos_engine.adapters.github import GitHubForge
 from kronos_engine.adapters.github.client import HttpTransport, HttpxTransport
-from kronos_engine.adapters.secrets.os_store import OsSecretStore
+from kronos_engine.adapters.secrets.os_store import OsSecretStore, SecretStoreError
 from kronos_engine.adapters.tools import DefaultToolDetector
 from kronos_engine.api.models import (
     AssignmentsRequest,
@@ -226,6 +226,7 @@ def create_app(
                 SqliteGoalStore(conn),
                 repos,
                 Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn)),
+                notifications=_notifications_for(conn),
             )
         finally:
             conn.close()
@@ -261,6 +262,7 @@ def create_app(
                 executor=executor,
                 gates=gates,
                 forge=goal_forge,
+                notifications=_notifications_for(conn),
             )
         finally:
             conn.close()
@@ -311,6 +313,24 @@ def create_app(
         def send_message(self, chat_id: int, text: str) -> None:
             _ = chat_id, text
 
+    def _bot_token() -> str | None:
+        try:
+            return store.get(BOT_TOKEN_REF)
+        except SecretStoreError:
+            return None
+
+    def _telegram_transport_for(token: str | None) -> TelegramTransport:
+        if telegram_transport is not None:
+            return telegram_transport
+        if token:
+            return HttpxTelegramTransport(token)
+        return _NullTelegramTransport()
+
+    def _notifications_for(conn: object) -> NotificationService:
+        telegram_store = SqliteTelegramStore(conn)  # type: ignore[arg-type]
+        client = TelegramBotClient(store, _telegram_transport_for(_bot_token()))
+        return NotificationService(client, telegram_store)
+
     @contextmanager
     def telegram_connector() -> Iterator[TelegramConnector]:
         conn = database.connect()
@@ -322,28 +342,22 @@ def create_app(
                 ManifestStackDetector(),
                 CacheRuntimeLayout(),
             )
+            telegram_store = SqliteTelegramStore(conn)
+            client = TelegramBotClient(store, _telegram_transport_for(_bot_token()))
+            notifications = NotificationService(client, telegram_store)
             goals = GoalService(
                 SqliteGoalStore(conn),
                 repos,
                 Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn)),
+                notifications=notifications,
             )
-            telegram_store = SqliteTelegramStore(conn)
-            token = store.get(BOT_TOKEN_REF)
-            transport: TelegramTransport
-            if telegram_transport is not None:
-                transport = telegram_transport
-            elif token:
-                transport = HttpxTelegramTransport(token)
-            else:
-                transport = _NullTelegramTransport()
-            client = TelegramBotClient(store, transport)
             yield TelegramConnector(
                 client=client,
                 store=telegram_store,
                 secrets=store,
                 goals=goals,
                 repos=repos,
-                notifications=NotificationService(client, telegram_store),
+                notifications=notifications,
             )
         finally:
             conn.close()

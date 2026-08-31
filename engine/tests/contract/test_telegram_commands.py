@@ -56,21 +56,23 @@ def _stack(tmp_path: Path, *, default_repo: str | None = None):
         ManifestStackDetector(),
         CacheRuntimeLayout(),
     )
+    store = SqliteTelegramStore(conn)
+    store.save_allowlist((ALLOWED_USER,), (ALLOWED_CHAT,), default_repository_id=default_repo)
+    client = TelegramBotClient(secrets, fixture)
+    notifier = NotificationService(client, store)
     goals = GoalService(
         SqliteGoalStore(conn),
         repos,
         Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn)),
+        notifications=notifier,
     )
-    store = SqliteTelegramStore(conn)
-    store.save_allowlist((ALLOWED_USER,), (ALLOWED_CHAT,), default_repository_id=default_repo)
-    client = TelegramBotClient(secrets, fixture)
     connector = TelegramConnector(
         client=client,
         store=store,
         secrets=secrets,
         goals=goals,
         repos=repos,
-        notifications=NotificationService(client, store),
+        notifications=notifier,
     )
     return connector, fixture, goals, repos, store, conn
 
@@ -294,6 +296,45 @@ def test_formatting_redacts_secret_shaped_values_and_keeps_pr_links() -> None:
     assert "paused" in message
     assert "pull/4" in message
     assert "breaker" in message
+
+
+def test_desktop_goal_service_notifies_allowed_chats_without_manual_notify(
+    tmp_path: Path,
+) -> None:
+    _connector, fixture, goals, repos, _store, conn = _stack(tmp_path)
+    repo_id = _enrol_named(tmp_path, repos, "alpha")
+    fixture.sent.clear()
+    created = goals.create(
+        GoalSpec(
+            repository_id=RepositoryId(repo_id),
+            title="Desktop ship",
+            success_criteria="merged",
+            non_goals="docs",
+            risk_ceiling="low",
+            source=GoalSource.DESKTOP,
+            max_attempts=3,
+        )
+    )
+    created_body = "\n".join(fixture.texts_to(ALLOWED_CHAT))
+    assert fixture.sent
+    assert "Desktop ship" in created_body
+    assert "draft" in created_body.lower()
+    fixture.sent.clear()
+    goals.transition(created.id, GoalState.PLANNED)
+    planned_body = "\n".join(fixture.texts_to(ALLOWED_CHAT))
+    assert "planned" in planned_body.lower()
+    fixture.sent.clear()
+    goals.transition(
+        created.id,
+        GoalState.PAUSED,
+        reason=f"forge failed {BOT_TOKEN} ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+    )
+    paused_body = "\n".join(fixture.texts_to(ALLOWED_CHAT))
+    assert "paused" in paused_body.lower()
+    assert BOT_TOKEN not in paused_body
+    assert "ghp_" not in paused_body
+    assert "[redacted]" in paused_body
+    conn.close()
 
 
 def test_unsupported_artifacts_are_refused() -> None:

@@ -91,15 +91,16 @@ def _connector(
         ManifestStackDetector(),
         CacheRuntimeLayout(),
     )
-    goals = GoalService(
-        SqliteGoalStore(conn),
-        repos,
-        Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn)),
-    )
     store = SqliteTelegramStore(conn)
     store.save_allowlist(allow_users, allow_chats, default_repository_id=default_repo)
     client = TelegramBotClient(secrets, fixture)
     notifier = NotificationService(client, store)
+    goals = GoalService(
+        SqliteGoalStore(conn),
+        repos,
+        Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn)),
+        notifications=notifier,
+    )
     connector = TelegramConnector(
         client=client,
         store=store,

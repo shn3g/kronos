@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 from kronos_engine.application.dispatch import ClaimResult, DispatchService
 from kronos_engine.application.merge import MergeService
+from kronos_engine.application.notifications import NotificationService
 from kronos_engine.application.planning import PlanningService
 from kronos_engine.application.recovery import RecoveryService
 from kronos_engine.application.verification import VerificationService
@@ -44,6 +45,7 @@ class GoalEngine:
         scheduler: GoalScheduler,
         *,
         clock: Callable[[], datetime] | None = None,
+        notifications: NotificationService | None = None,
     ) -> None:
         self._store = store
         self._planning = planning
@@ -53,6 +55,7 @@ class GoalEngine:
         self._merge = merge
         self._scheduler = scheduler
         self._clock = clock or (lambda: datetime.now(tz=UTC))
+        self._notifications = notifications
 
     def plan(self, goal_id: GoalId) -> object:
         return self._planning.plan(goal_id)
@@ -145,6 +148,7 @@ class GoalEngine:
         if not claimed.ok:
             if claimed.failed_step != "freeze":
                 paused = self._recovery.pause_or_stop(task_id, claimed.reason, claimed.reason)
+                self._notify_failure(claimed.reason, claimed.reason)
                 return self._from_task(paused, claimed, ok=False, terminal=True)
             return TickResult(
                 ok=False,
@@ -215,6 +219,7 @@ class GoalEngine:
         if trip:
             self._dispatch.record_run_failure(task_id)
         paused = self._recovery.pause_or_stop(task_id, reason, evidence or reason)
+        self._notify_failure(reason, evidence)
         return self._from_task(paused, claimed, ok=False, terminal=True)
 
     def _from_task(
@@ -239,6 +244,7 @@ class GoalEngine:
         return None
 
     def _plan_failed(self, error: Exception) -> TickResult:
+        self._notify_failure(str(error), str(error))
         return TickResult(
             ok=False,
             status="plan_failed",
@@ -248,3 +254,8 @@ class GoalEngine:
             claim_steps=(),
             terminal=False,
         )
+
+    def _notify_failure(self, reason: str, log_excerpt: str | None = None) -> None:
+        if self._notifications is None:
+            return
+        self._notifications.notify_failure_allowed(reason=reason, log_excerpt=log_excerpt)
