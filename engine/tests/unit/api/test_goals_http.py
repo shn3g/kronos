@@ -129,7 +129,12 @@ POLICY_LIVE = {
         "lint": [],
         "build": [],
     },
-    "autonomy": {"freeze": False, "invent_issues": False, "refill_enabled": False},
+    "autonomy": {
+        "freeze": False,
+        "invent_issues": False,
+        "refill_enabled": False,
+        "mode": "merge_integration",
+    },
     "paths": {"locked_prefixes": []},
     "risk": {"floor": "low"},
     "budgets": {

@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Imported as disabled candidates. Propose is not activate.
+lessons:
+  - id: lesson-2026-08-24-visible-dod
+    text: Every UI change carries a stated demo path and a smoke assertion. Do not merge invisible definition of done.
+    helpful: 0
+    harmful: 0
+    source_pr: "243"
+    created: "2026-08-24"
+  - id: lesson-2026-08-25-runtime-from-git
+    text: Restore operator runtime from git when a wrapper imports scripts that exist only on an unmerged branch.
+    helpful: 0
+    harmful: 0
+    source_pr: "255"
+    created: "2026-08-25"
+  - id: lesson-2026-08-24-gate-audit
+    text: Audit merged integration PRs for a reviewer App check on the exact head SHA. Comments and labels are not identity.
+    helpful: 0
+    harmful: 0
+    source_pr: "audit"
+    created: "2026-08-24"

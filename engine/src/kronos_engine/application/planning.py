@@ -13,7 +13,7 @@ from kronos_engine.application.repositories import RepositoryService
 from kronos_engine.domain.budgets import check_budget
 from kronos_engine.domain.entities import GoalId
 from kronos_engine.domain.goals import GoalRecord, GoalState, InvalidTransition, transition_goal
-from kronos_engine.domain.policy import RISK_STEPS
+from kronos_engine.domain.policy import RISK_STEPS, refuse_mode_write
 from kronos_engine.domain.risk import apply_planner_risk
 from kronos_engine.domain.tasks import (
     SchemaError,
@@ -75,6 +75,8 @@ class PlanningService:
         check_budget(meter, repo.policy, task_attempts=0)
         graph = parse_task_graph(self._planner.plan(goal))
         detect_cycle(graph)
+        if len(graph.nodes) > 1:
+            refuse_mode_write(repo.policy.autonomy.mode, "multi_task")
         ready = self._store.count_wip(repo.id, (TaskState.READY, TaskState.PROPOSED))
         if ready + len(graph.nodes) > repo.policy.wip.ready:
             raise WipExceeded("ready WIP cap would be exceeded")

@@ -14,6 +14,7 @@ def test_templates_include_fuses_workflow_and_codeowners() -> None:
     workflow = (TEMPLATES_ROOT / "github" / "kronos-pr.yml").read_text(encoding="utf-8")
     assert "freeze: true" in config
     assert "invent_issues: false" in config
+    assert "mode: observe" in config
     assert "hermes" not in config.lower()
     assert "hermes" not in workflow.lower()
     assert "kronos-pr" in workflow
