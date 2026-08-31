@@ -74,7 +74,10 @@ class LocalEmbeddingAdapter:
         except ImportError:
             return None
         features = numpy.asarray(_hash_features(texts, int(shape[1])), dtype=numpy.float32)
-        outputs = run(None, {spec.name: features})
+        try:
+            outputs = run(None, {spec.name: features})
+        except Exception:
+            return None
         if not outputs:
             return None
         return [[float(value) for value in row] for row in outputs[0]]
@@ -111,7 +114,7 @@ class LocalEmbeddingAdapter:
                 sess_options=options,
                 providers=["CPUExecutionProvider"],
             )
-        except (OSError, ValueError, RuntimeError):
+        except Exception:
             return None
         loaded: object = session
         self._sessions[kind] = loaded
