@@ -34,8 +34,10 @@ from kronos_engine.api.models import (
     GithubStatusResponse,
     GoalCreateRequest,
     GoalDetailResponse,
+    GoalIngestRequest,
     GoalListResponse,
     GoalModel,
+    GoalTickResponse,
     HealthResponse,
     IndexMapResponse,
     IndexSearchHit,
@@ -57,20 +59,24 @@ from kronos_engine.api.models import (
     TaskModel,
     VersionResponse,
 )
+from kronos_engine.application.composition import build_goal_engine
 from kronos_engine.application.event_query import EventQuery
 from kronos_engine.application.github_setup import GitHubSetupService
+from kronos_engine.application.goal_engine import GoalEngine
 from kronos_engine.application.goals import GoalService
 from kronos_engine.application.model_profiles import (
     ModelProfileService,
     ProviderDraft,
     RoleAssignmentError,
 )
+from kronos_engine.application.planning import Planner
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import (
     InspectResult,
     RepositoryNotFound,
     RepositoryService,
 )
+from kronos_engine.application.verification import GateRunner
 from kronos_engine.config.repository import (
     EnrolmentPreview,
     github_owner,
@@ -78,13 +84,23 @@ from kronos_engine.config.repository import (
     render_enrolment_preview,
 )
 from kronos_engine.config.settings import CLIENT_VERSION_HEADER, Settings, is_loopback_client
+from kronos_engine.domain.budgets import BreakerTripped, BudgetExceeded
 from kronos_engine.domain.entities import EnrolledRepository, GoalId, IdentifierError, RepositoryId
 from kronos_engine.domain.github import APP_ROLES
-from kronos_engine.domain.goals import GoalRecord, GoalSource, GoalSpec, GoalValidationError
+from kronos_engine.domain.goals import (
+    GoalRecord,
+    GoalSource,
+    GoalSpec,
+    GoalValidationError,
+    InvalidTransition,
+)
 from kronos_engine.domain.models import ModelProfile
 from kronos_engine.domain.policy import PolicyError, policy_to_dict
+from kronos_engine.domain.tasks import SchemaError, WipExceeded
 from kronos_engine.domain.version import client_is_compatible
+from kronos_engine.domain.workflow import UnresolvedEvidence
 from kronos_engine.indexing.service import IndexingService, IndexStatus
+from kronos_engine.ports.executor import Executor
 from kronos_engine.ports.forge import (
     ForgeAuthError,
     ForgeTarget,
@@ -114,6 +130,10 @@ def create_app(
     tool_detector: ToolDetector | None = None,
     secret_store: SecretStore | None = None,
     github_transport: HttpTransport | None = None,
+    planner: Planner | None = None,
+    executor: Executor | None = None,
+    gates: GateRunner | None = None,
+    goal_forge: object | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -171,6 +191,23 @@ def create_app(
     detector = tool_detector or DefaultToolDetector()
     store = secret_store or OsSecretStore(settings.paths.config)
     github_http = github_transport or HttpxTransport()
+
+    @contextmanager
+    def goal_engine() -> Iterator[GoalEngine]:
+        conn = database.connect()
+        try:
+            yield build_goal_engine(
+                conn,
+                settings,
+                store,
+                github_http,
+                planner=planner,
+                executor=executor,
+                gates=gates,
+                forge=goal_forge,
+            )
+        finally:
+            conn.close()
 
     @contextmanager
     def github_service() -> Iterator[GitHubSetupService]:
@@ -589,6 +626,7 @@ def create_app(
                 risk_ceiling=body.risk_ceiling,
                 source=source,
                 schedule=body.schedule,
+                max_attempts=body.max_attempts,
             )
         except (GoalValidationError, IdentifierError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
@@ -623,6 +661,93 @@ def create_app(
                     for item in tasks
                 ],
             )
+
+    @app.post("/goals/{goal_id}/plan", response_model=GoalDetailResponse)
+    def plan_goal(goal_id: str, _: None = Depends(require_auth)) -> GoalDetailResponse:
+        try:
+            ident = GoalId(goal_id)
+        except IdentifierError as error:
+            raise HTTPException(status_code=404, detail="not found") from error
+        with goal_engine() as engine:
+            try:
+                engine.plan(ident)
+                goal = engine.get_goal(ident)
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            except InvalidTransition as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            except (
+                SchemaError,
+                UnresolvedEvidence,
+                WipExceeded,
+                BudgetExceeded,
+                BreakerTripped,
+                GoalValidationError,
+            ) as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            tasks = engine.list_tasks(goal.id)
+            return GoalDetailResponse(
+                goal=_goal_model(goal),
+                tasks=[
+                    TaskModel(
+                        id=item.id.value,
+                        goal_id=item.goal_id.value,
+                        title=item.title,
+                        state=item.state.value,
+                        kind=item.kind.value,
+                        stop_reason=item.stop_reason,
+                        pr_url=item.pr_url,
+                        pr_base=item.pr_base,
+                    )
+                    for item in tasks
+                ],
+            )
+
+    @app.post("/goals/tick", response_model=GoalTickResponse)
+    def tick_goals(_: None = Depends(require_auth)) -> GoalTickResponse:
+        with goal_engine() as engine:
+            result = engine.tick()
+            return GoalTickResponse(
+                ok=result.ok,
+                status=result.status,
+                reason=result.reason,
+                task_id=result.task_id,
+                pr_url=result.pr_url,
+                terminal=result.terminal,
+            )
+
+    @app.post("/goals/ingest", response_model=GoalModel)
+    def ingest_goal(body: GoalIngestRequest, _: None = Depends(require_auth)) -> GoalModel:
+        try:
+            repo_id = _parse_id(body.repository_id)
+            if body.source == "github_issue":
+                with goal_engine() as engine:
+                    created = engine.ingest_github_issue(
+                        repository_id=repo_id,
+                        title=body.title,
+                        body=body.body or body.success_criteria,
+                        non_goals=body.non_goals,
+                        risk_ceiling=body.risk_ceiling,
+                        max_attempts=body.max_attempts,
+                    )
+            elif body.source == "schedule":
+                with goal_engine() as engine:
+                    created = engine.ingest_schedule(
+                        repository_id=repo_id,
+                        title=body.title,
+                        success_criteria=body.success_criteria or body.body,
+                        non_goals=body.non_goals,
+                        schedule=body.schedule or "",
+                        max_attempts=body.max_attempts,
+                        risk_ceiling=body.risk_ceiling,
+                    )
+            else:
+                raise HTTPException(status_code=400, detail="unknown ingest source")
+        except GoalValidationError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail="not found") from error
+        return _goal_model(created)
 
     @app.get("/runs", response_model=RunListResponse)
     def list_runs(_: None = Depends(require_auth)) -> RunListResponse:
@@ -830,4 +955,5 @@ def _goal_model(goal: GoalRecord) -> GoalModel:
         non_goals=goal.non_goals,
         stop_reason=goal.stop_reason,
         schedule=goal.schedule,
+        max_attempts=goal.max_attempts,
     )

@@ -36,6 +36,7 @@ function clients(overrides: Partial<GoalsPageClients> = {}): GoalsPageClients {
         nonGoals: "rewrite packaging",
         stopReason: null,
         schedule: null,
+        maxAttempts: 3,
       },
     ],
     create: async () => {
@@ -53,6 +54,7 @@ function clients(overrides: Partial<GoalsPageClients> = {}): GoalsPageClients {
         nonGoals: "rewrite packaging",
         stopReason: null,
         schedule: null,
+        maxAttempts: 3,
       },
       tasks: [
         {
@@ -67,6 +69,7 @@ function clients(overrides: Partial<GoalsPageClients> = {}): GoalsPageClients {
         },
       ],
     }),
+    pollEvents: async () => ({ events: [], headSeq: 0 }),
     ...overrides,
   };
 }
@@ -86,9 +89,14 @@ describe("GoalsPage", () => {
 
   it("lists goals and tasks when the engine is ready", async () => {
     const user = userEvent.setup();
-    render(<GoalsPage engineClient={engine("ready")} goalsClient={clients()} />);
+    const pollEvents = vi.fn(async () => ({ events: [], headSeq: 0 }));
+    render(
+      <GoalsPage engineClient={engine("ready")} goalsClient={clients({ pollEvents })} />,
+    );
 
     expect(await screen.findByText("Fix add")).toBeInTheDocument();
+    expect(await screen.findByLabelText(/attempt budget/i)).toBeInTheDocument();
+    expect(pollEvents).toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: /fix add/i }));
     expect(await screen.findByText(/https:\/\/github.com\/acme\/app\/pull\/1/)).toBeInTheDocument();
   });

@@ -22,6 +22,7 @@ describe("createProductionGoalsClient", () => {
               success_criteria: "pass",
               non_goals: "scope",
               stop_reason: null,
+              max_attempts: 3,
             },
           ],
         }),
@@ -40,6 +41,7 @@ describe("createProductionGoalsClient", () => {
         nonGoals: "scope",
         stopReason: null,
         schedule: null,
+        maxAttempts: 3,
       },
     ]);
   });

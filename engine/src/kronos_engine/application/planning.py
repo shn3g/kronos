@@ -3,13 +3,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Protocol
 
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import RepositoryService
+from kronos_engine.domain.budgets import check_budget
 from kronos_engine.domain.entities import GoalId
-from kronos_engine.domain.goals import GoalRecord, GoalState
+from kronos_engine.domain.goals import GoalRecord, GoalState, InvalidTransition, transition_goal
 from kronos_engine.domain.policy import RISK_STEPS
 from kronos_engine.domain.risk import apply_planner_risk
 from kronos_engine.domain.tasks import (
@@ -23,6 +26,7 @@ from kronos_engine.domain.tasks import (
     detect_cycle,
     parse_task_graph,
 )
+from kronos_engine.domain.workflow import require_evidence
 from kronos_engine.state.goals import SqliteGoalStore
 
 
@@ -37,15 +41,22 @@ class PlanningService:
         repos: RepositoryService,
         recorder: Recorder,
         planner: Planner,
+        *,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._store = store
         self._repos = repos
         self._recorder = recorder
         self._planner = planner
+        self._clock = clock or (lambda: datetime.now(tz=UTC))
 
     def plan(self, goal_id: GoalId) -> TaskGraph:
         goal = self._store.get_goal(goal_id)
+        if goal.state not in {GoalState.DRAFT, GoalState.PLANNED}:
+            raise InvalidTransition(f"cannot plan goal from {goal.state}")
         repo = self._repos.get(goal.repository_id)
+        meter = self._store.budget_meter(repo.id, self._clock().date().isoformat())
+        check_budget(meter, repo.policy, task_attempts=0)
         graph = parse_task_graph(self._planner.plan(goal))
         detect_cycle(graph)
         ready = self._store.count_wip(repo.id, (TaskState.READY, TaskState.PROPOSED))
@@ -53,6 +64,7 @@ class PlanningService:
             raise WipExceeded("ready WIP cap would be exceeded")
         clamped: list[TaskNode] = []
         for node in graph.nodes:
+            require_evidence(node.kind.value, node.evidence, node.exemption)
             assert_scope_unlocked(node.scope_paths, repo.policy.paths.locked_prefixes)
             risk = apply_planner_risk(repo.policy.risk.floor, node.risk)
             if _step(risk) > _step(goal.risk_ceiling):
@@ -92,7 +104,7 @@ class PlanningService:
                 )
             )
         if goal.state is GoalState.DRAFT:
-            planned = _with_state(goal, GoalState.PLANNED)
+            planned = replace(goal, state=transition_goal(goal.state, GoalState.PLANNED))
             self._store.save_goal(planned)
             self._recorder.emit(
                 "goal.transitioned",
@@ -112,20 +124,40 @@ class PlanningService:
         return bound
 
 
-def _with_state(goal: GoalRecord, state: GoalState) -> GoalRecord:
-    return GoalRecord(
-        id=goal.id,
-        repository_id=goal.repository_id,
-        title=goal.title,
-        success_criteria=goal.success_criteria,
-        non_goals=goal.non_goals,
-        risk_ceiling=goal.risk_ceiling,
-        source=goal.source,
-        state=state,
-        schedule=goal.schedule,
-        stop_reason=goal.stop_reason,
-        created_at=goal.created_at,
-    )
+class IndexedPlanner:
+    """Deterministic one-task plan from the first indexed source path."""
+
+    def __init__(self, indexer: object) -> None:
+        self._indexer = indexer
+
+    def plan(self, goal: object) -> dict[str, object]:
+        assert isinstance(goal, GoalRecord)
+        chunks = getattr(self._indexer, "list_chunks")(goal.repository_id.value)
+        source = None
+        for chunk in chunks:
+            path = str(getattr(chunk, "path", "")).replace("\\", "/")
+            if path and "/tests/" not in f"/{path}/" and not path.startswith("tests/"):
+                source = chunk
+                break
+        if source is None:
+            raise SchemaError("index has no source path for evidence")
+        path = str(source.path)
+        line = int(getattr(source, "start_line", 1) or 1)
+        return {
+            "tasks": [
+                {
+                    "id": f"task_{goal.id.value}",
+                    "title": goal.title,
+                    "kind": "implementation",
+                    "depends_on": [],
+                    "evidence": [{"path": path, "line": line}],
+                    "size": "S",
+                    "baseline_size": "S",
+                    "risk": "low",
+                    "scope_paths": [path],
+                }
+            ]
+        }
 
 
 def _step(value: str) -> int:

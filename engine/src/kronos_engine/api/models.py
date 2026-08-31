@@ -77,6 +77,7 @@ class GoalModel(BaseModel):
     non_goals: str
     stop_reason: str | None = None
     schedule: str | None = None
+    max_attempts: int = 3
 
 
 class GoalListResponse(BaseModel):
@@ -90,6 +91,28 @@ class GoalCreateRequest(BaseModel):
     non_goals: str
     risk_ceiling: str
     source: str = "desktop"
+    schedule: str | None = None
+    max_attempts: int
+
+
+class GoalTickResponse(BaseModel):
+    ok: bool
+    status: str
+    reason: str
+    task_id: str | None = None
+    pr_url: str | None = None
+    terminal: bool = False
+
+
+class GoalIngestRequest(BaseModel):
+    source: str
+    repository_id: str
+    title: str
+    non_goals: str
+    risk_ceiling: str
+    max_attempts: int
+    body: str = ""
+    success_criteria: str = ""
     schedule: str | None = None
 
 

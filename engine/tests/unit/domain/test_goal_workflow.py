@@ -41,11 +41,19 @@ from kronos_engine.domain.tasks import (
 from kronos_engine.domain.workflow import (
     CLAIM_STEPS,
     ClaimRequiresTaskId,
+    EmptyTestCommands,
+    MissingWorktree,
     NoTestStop,
     ScheduledSpawnForbidden,
+    TddGateError,
+    UnresolvedEvidence,
+    assert_red_green,
     forbid_unbound_spawn,
+    require_evidence,
     require_explicit_task_id,
     require_reproduction_artifact,
+    require_test_commands,
+    require_worktree_path,
 )
 
 
@@ -58,6 +66,7 @@ def test_goal_requires_repository_criteria_nongoals_budget_risk_and_source() -> 
             non_goals="rewrite the parser",
             risk_ceiling="low",
             source=GoalSource.DESKTOP,
+            max_attempts=3,
         )
     with pytest.raises(GoalValidationError, match="non-goals"):
         GoalSpec(
@@ -67,6 +76,7 @@ def test_goal_requires_repository_criteria_nongoals_budget_risk_and_source() -> 
             non_goals="",
             risk_ceiling="low",
             source=GoalSource.API,
+            max_attempts=3,
         )
     with pytest.raises(GoalValidationError, match="schedule"):
         GoalSpec(
@@ -76,6 +86,17 @@ def test_goal_requires_repository_criteria_nongoals_budget_risk_and_source() -> 
             non_goals="rewrite the parser",
             risk_ceiling="low",
             source=GoalSource.SCHEDULE,
+            max_attempts=3,
+        )
+    with pytest.raises(GoalValidationError, match="budget"):
+        GoalSpec(
+            repository_id=RepositoryId("repo_a"),
+            title="Fix add",
+            success_criteria="add returns a+b",
+            non_goals="rewrite the parser",
+            risk_ceiling="medium",
+            source=GoalSource.CLI,
+            max_attempts=0,
         )
     spec = GoalSpec(
         repository_id=RepositoryId("repo_a"),
@@ -84,8 +105,10 @@ def test_goal_requires_repository_criteria_nongoals_budget_risk_and_source() -> 
         non_goals="rewrite the parser",
         risk_ceiling="medium",
         source=GoalSource.CLI,
+        max_attempts=3,
     )
     assert spec.source is GoalSource.CLI
+    assert spec.max_attempts == 3
 
 
 def test_goal_and_task_reject_invalid_transitions() -> None:
@@ -199,10 +222,44 @@ def test_budget_cap_and_breaker_are_deterministic() -> None:
 def test_no_test_implementation_is_a_stop_docs_exemption_passes() -> None:
     with pytest.raises(NoTestStop, match="no-test"):
         require_reproduction_artifact("implementation", ("src/app.py",), None)
-    require_reproduction_artifact("docs", ("README.md",), "docs")
+    with pytest.raises(NoTestStop, match="no-test"):
+        require_reproduction_artifact("implementation", ("notes_repro.md",), None)
+    require_reproduction_artifact("docs", ("README.md",), None)
+    require_reproduction_artifact("config", ("pyproject.toml",), None)
     require_reproduction_artifact(
         "implementation", ("tests/test_repro.py", "src/app.py"), None
     )
+    require_reproduction_artifact("implementation", ("pkg/math_test.py",), None)
+
+
+def test_empty_evidence_refuses_implementation_docs_may_skip() -> None:
+    with pytest.raises(UnresolvedEvidence, match="empty evidence"):
+        require_evidence("implementation", (), None)
+    require_evidence("docs", (), None)
+    require_evidence("config", (), "config")
+    require_evidence(
+        "implementation",
+        (EvidenceLocator(path="pkg/math.py", line=1),),
+        None,
+    )
+
+
+def test_accept_requires_worktree_red_green_and_configured_tests() -> None:
+    with pytest.raises(MissingWorktree, match="worktree"):
+        require_worktree_path(None)
+    with pytest.raises(MissingWorktree, match="worktree"):
+        require_worktree_path("")
+    with pytest.raises(MissingWorktree, match="worktree"):
+        require_worktree_path(".")
+    assert require_worktree_path("/cache/worktrees/repo/task") == "/cache/worktrees/repo/task"
+    with pytest.raises(EmptyTestCommands, match="empty"):
+        require_test_commands(())
+    require_test_commands(("pytest", "-q"))
+    with pytest.raises(TddGateError, match="red"):
+        assert_red_green(red_failed=False, green_passed=True)
+    with pytest.raises(TddGateError, match="green"):
+        assert_red_green(red_failed=True, green_passed=False)
+    assert_red_green(red_failed=True, green_passed=True)
 
 
 def test_task_graph_parse_keeps_evidence_and_ids() -> None:

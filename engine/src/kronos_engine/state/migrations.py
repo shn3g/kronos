@@ -195,6 +195,12 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        6,
+        """
+        ALTER TABLE goals ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 3;
+        """,
+    ),
 )
 
 
