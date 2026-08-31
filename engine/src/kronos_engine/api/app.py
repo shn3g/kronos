@@ -14,14 +14,23 @@ from fastapi.responses import JSONResponse
 from kronos_engine.adapters.git.detection import ManifestStackDetector
 from kronos_engine.adapters.git.repository import FilesystemGitInspector, GitError
 from kronos_engine.adapters.git.worktrees import CacheRuntimeLayout
+from kronos_engine.adapters.secrets.os_store import OsSecretStore
+from kronos_engine.adapters.tools import DefaultToolDetector
 from kronos_engine.api.models import (
+    AssignmentsResponse,
+    DetectedToolModel,
     EventItem,
     EventListResponse,
     GoalListResponse,
     HealthResponse,
     InspectResponse,
+    ModelsSnapshotResponse,
     PathRequest,
     PreviewFileModel,
+    ProfileModel,
+    ProviderCreateRequest,
+    ProviderCreateResponse,
+    ProviderModel,
     RepositoryDetailResponse,
     RepositoryListResponse,
     RepositoryRecord,
@@ -29,6 +38,11 @@ from kronos_engine.api.models import (
 )
 from kronos_engine.application.catalog import CatalogService
 from kronos_engine.application.event_query import EventQuery
+from kronos_engine.application.model_profiles import (
+    ModelProfileService,
+    ProviderDraft,
+    RoleAssignmentError,
+)
 from kronos_engine.application.repositories import (
     InspectResult,
     RepositoryNotFound,
@@ -37,16 +51,27 @@ from kronos_engine.application.repositories import (
 from kronos_engine.config.repository import EnrolmentPreview, github_owner, render_enrolment_preview
 from kronos_engine.config.settings import CLIENT_VERSION_HEADER, Settings, is_loopback_client
 from kronos_engine.domain.entities import EnrolledRepository, IdentifierError, RepositoryId
+from kronos_engine.domain.models import ModelProfile
 from kronos_engine.domain.policy import PolicyError, policy_to_dict
 from kronos_engine.domain.version import client_is_compatible
+from kronos_engine.ports.model_provider import ToolDetector
+from kronos_engine.ports.model_registry import ProviderConfig
 from kronos_engine.ports.repository import RuntimeInsideEnrolledTree
+from kronos_engine.ports.secrets import SecretStore
 from kronos_engine.state.catalog import SqliteCatalog
 from kronos_engine.state.database import Database
 from kronos_engine.state.event_store import SqliteEventStore
+from kronos_engine.state.model_profiles import SqliteModelRegistry
 from kronos_engine.state.repositories import SqliteRepositoryRegistry
 
 
-def create_app(settings: Settings, database: Database) -> FastAPI:
+def create_app(
+    settings: Settings,
+    database: Database,
+    *,
+    tool_detector: ToolDetector | None = None,
+    secret_store: SecretStore | None = None,
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         yield
@@ -86,6 +111,17 @@ def create_app(settings: Settings, database: Database) -> FastAPI:
                 ManifestStackDetector(),
                 CacheRuntimeLayout(),
             )
+        finally:
+            conn.close()
+
+    detector = tool_detector or DefaultToolDetector()
+    store = secret_store or OsSecretStore(settings.paths.config)
+
+    @contextmanager
+    def model_service() -> Iterator[ModelProfileService]:
+        conn = database.connect()
+        try:
+            yield ModelProfileService(SqliteModelRegistry(conn), store)
         finally:
             conn.close()
 
@@ -222,6 +258,54 @@ def create_app(settings: Settings, database: Database) -> FastAPI:
                 raise HTTPException(status_code=status, detail=str(error)) from error
             return _detail_response(service, record, include_preview=True)
 
+    @app.get("/models", response_model=ModelsSnapshotResponse)
+    def models_snapshot(_: None = Depends(require_auth)) -> ModelsSnapshotResponse:
+        with model_service() as service:
+            return ModelsSnapshotResponse(
+                detected=[
+                    DetectedToolModel(kind=item.kind, label=item.label, present=item.present)
+                    for item in detector.detect()
+                ],
+                providers=[_provider_model(item) for item in service.list_providers()],
+                profiles=[_profile_model(item) for item in service.list_profiles()],
+                assignments=service.assignments().as_dict(),
+            )
+
+    @app.post("/models/providers", response_model=ProviderCreateResponse)
+    def create_provider(
+        body: ProviderCreateRequest, _: None = Depends(require_auth)
+    ) -> ProviderCreateResponse:
+        with model_service() as service:
+            provider = service.register_provider(
+                ProviderDraft(
+                    kind=body.kind,
+                    display_name=body.display_name,
+                    base_url=body.base_url,
+                    billed=body.billed,
+                    api_key=body.api_key,
+                )
+            )
+            profiles = [
+                item for item in service.list_profiles() if item.provider_id == provider.id
+            ]
+            if not profiles:
+                raise HTTPException(status_code=500, detail="provider profile was not created")
+            return ProviderCreateResponse(
+                provider=_provider_model(provider),
+                profile=_profile_model(profiles[0]),
+            )
+
+    @app.put("/models/assignments", response_model=AssignmentsResponse)
+    def assign_models(
+        body: dict[str, str], _: None = Depends(require_auth)
+    ) -> AssignmentsResponse:
+        with model_service() as service:
+            try:
+                assigned = service.assign(body)
+            except RoleAssignmentError as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            return AssignmentsResponse(assignments=assigned.as_dict())
+
     @app.get("/goals", response_model=GoalListResponse)
     def goals(_: None = Depends(require_auth)) -> GoalListResponse:
         with catalog_service() as catalog:
@@ -334,4 +418,26 @@ def _detail_response(
         wrote_files=False,
         committed=False,
         pushed=False,
+    )
+
+
+def _provider_model(provider: ProviderConfig) -> ProviderModel:
+    return ProviderModel(
+        id=provider.id,
+        kind=provider.kind,
+        display_name=provider.display_name,
+        base_url=provider.base_url,
+        billed=provider.billed,
+    )
+
+
+def _profile_model(profile: ModelProfile) -> ProfileModel:
+    return ProfileModel(
+        id=profile.id,
+        display_name=profile.display_name,
+        role=profile.role,
+        provider_id=profile.provider_id,
+        model_id=profile.model_id,
+        billed=profile.billed,
+        approved_fallbacks=list(profile.approved_fallbacks),
     )
