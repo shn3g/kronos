@@ -34,6 +34,15 @@ def test_redact_text_strips_tokens_pems_and_env_values() -> None:
     assert cleaned.count("[redacted]") >= 4
 
 
+def test_redact_text_strips_lowercase_hex_auth_tokens() -> None:
+    token = "a1b2c3d4e5f6789012345678abcdef01"
+    assert len(token) == 32
+    assert token == token.lower()
+    cleaned = redact_text(f"auth_token {token} leaked in free text")
+    assert token not in cleaned
+    assert "[redacted]" in cleaned
+
+
 def test_redact_mapping_redacts_nested_secret_fields() -> None:
     payload = {
         "event": "external.wrote",

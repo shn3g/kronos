@@ -78,6 +78,12 @@ export function SettingsPage({ engineClient, settingsClient }: SettingsPageProps
     setSettings(saved);
   }
 
+  async function onToggleLangfuse() {
+    const next = { ...settings, langfuseExport: !settings.langfuseExport };
+    const saved = await client.save(next);
+    setSettings(saved);
+  }
+
   async function onDoctor() {
     const report = await client.doctor();
     setFindings(report.findings);
@@ -105,6 +111,16 @@ export function SettingsPage({ engineClient, settingsClient }: SettingsPageProps
           }}
         />
         OpenTelemetry export
+      </label>
+      <label className="models__confirm">
+        <input
+          type="checkbox"
+          checked={settings.langfuseExport}
+          onChange={() => {
+            void onToggleLangfuse();
+          }}
+        />
+        Langfuse export
       </label>
       <div className="workspaces__toolbar">
         <button type="button" className="btn-quiet" onClick={() => void onDoctor()}>

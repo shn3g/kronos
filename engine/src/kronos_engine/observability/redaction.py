@@ -135,13 +135,10 @@ def _looks_high_entropy(token: str) -> bool:
         return False
     if token.startswith("[") and token.endswith("]"):
         return False
+    if len(token) >= 32 and all(ch in "0123456789abcdef" for ch in token):
+        return True
     charset = set(token)
     if len(charset) < 8:
-        return False
-    has_lower = any(ch.islower() for ch in token)
-    has_upper = any(ch.isupper() for ch in token)
-    has_digit = any(ch.isdigit() for ch in token)
-    if not (has_lower and has_upper and has_digit):
         return False
     counts: dict[str, int] = {}
     for ch in token:

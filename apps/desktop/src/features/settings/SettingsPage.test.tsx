@@ -41,6 +41,7 @@ describe("SettingsPage", () => {
     render(<SettingsPage engineClient={engine("ready")} settingsClient={clients()} />);
     expect(await screen.findByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
     expect(await screen.findByLabelText(/opentelemetry export/i)).not.toBeChecked();
+    expect(screen.getByLabelText(/langfuse export/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /run doctor/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /backup/i })).toBeInTheDocument();
     expect(screen.queryByLabelText(/bot token/i)).not.toBeInTheDocument();
