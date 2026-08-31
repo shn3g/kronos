@@ -4,5 +4,7 @@ import { afterEach } from "vitest";
 
 afterEach(() => {
   cleanup();
-  window.location.hash = "";
+  if (typeof window !== "undefined") {
+    window.location.hash = "";
+  }
 });
