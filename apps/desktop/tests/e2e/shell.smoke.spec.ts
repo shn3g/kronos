@@ -35,4 +35,17 @@ test("web shell shows engine unavailable and primary routes", async ({ page }) =
     page.getByText(/connect a compatible engine to inspect task runs/i),
   ).toBeVisible();
   await expect(page.getByRole("status")).toContainText("Engine unavailable");
+  await page.getByRole("link", { name: "Skills" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Skills" })).toBeVisible();
+  await expect(
+    page.getByText(/connect a compatible engine to browse, quarantine, and activate skills/i),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: /activate/i })).toHaveCount(0);
+  await page.getByRole("link", { name: "Memory" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Memory" })).toBeVisible();
+  await expect(
+    page.getByText(/connect a compatible engine to inspect episodic and procedural records/i),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: /import as disabled candidates/i })).toHaveCount(0);
+  await expect(page.getByRole("status")).toContainText("Engine unavailable");
 });

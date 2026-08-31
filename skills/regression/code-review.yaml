@@ -1,0 +1,7 @@
+skill: code-review
+prompt: Exercise the code-review skill on a small, bounded change.
+verification:
+  - review the diff and tests
+  - reject missing evidence
+forbidden:
+  - approve from author identity

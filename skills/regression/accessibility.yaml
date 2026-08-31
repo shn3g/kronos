@@ -1,0 +1,7 @@
+skill: accessibility
+prompt: Exercise the accessibility skill on a small, bounded change.
+verification:
+  - every control needs a name
+  - keyboard must reach it
+forbidden:
+  - rely on color alone

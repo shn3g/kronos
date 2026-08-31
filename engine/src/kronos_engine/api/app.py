@@ -44,6 +44,7 @@ from kronos_engine.api.models import (
     IndexSearchResponse,
     IndexStatusResponse,
     InspectResponse,
+    LessonImportRequest,
     ModelsSnapshotResponse,
     PathRequest,
     PreviewFileModel,
@@ -56,6 +57,9 @@ from kronos_engine.api.models import (
     RepositoryRecord,
     RunListResponse,
     RunModel,
+    SkillApproveRequest,
+    SkillImportRequest,
+    SkillRouteRequest,
     TaskModel,
     VersionResponse,
 )
@@ -100,6 +104,8 @@ from kronos_engine.domain.tasks import SchemaError, WipExceeded
 from kronos_engine.domain.version import client_is_compatible
 from kronos_engine.domain.workflow import UnresolvedEvidence
 from kronos_engine.indexing.service import IndexingService, IndexStatus
+from kronos_engine.memory.promotion import PromotionBlocked
+from kronos_engine.memory.records import MemoryRecord, MemoryRejected
 from kronos_engine.ports.executor import Executor
 from kronos_engine.ports.forge import (
     ForgeAuthError,
@@ -114,6 +120,19 @@ from kronos_engine.ports.model_provider import ToolDetector
 from kronos_engine.ports.model_registry import ProviderConfig
 from kronos_engine.ports.repository import RuntimeInsideEnrolledTree
 from kronos_engine.ports.secrets import SecretStore
+from kronos_engine.skills.catalog import (
+    HumanApprovalRequired,
+    SkillCatalog,
+    bundled_skills_root,
+    skill_to_dict,
+)
+from kronos_engine.skills.evaluation import evaluate_skill
+from kronos_engine.skills.quarantine import (
+    MutableRevisionError,
+    NetworkFetchForbidden,
+    SkillSourcePort,
+    SkillStillQuarantined,
+)
 from kronos_engine.state.database import Database
 from kronos_engine.state.event_store import SqliteEventStore
 from kronos_engine.state.github_apps import SqliteGithubAppStore
@@ -134,6 +153,8 @@ def create_app(
     executor: Executor | None = None,
     gates: GateRunner | None = None,
     goal_forge: object | None = None,
+    skills_root: Path | None = None,
+    skill_source: SkillSourcePort | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -226,6 +247,23 @@ def create_app(
         conn = database.connect()
         try:
             yield ModelProfileService(SqliteModelRegistry(conn), store)
+        finally:
+            conn.close()
+
+    chosen_skills_root = skills_root or bundled_skills_root()
+
+    @contextmanager
+    def skill_catalog() -> Iterator[SkillCatalog]:
+        conn = database.connect()
+        try:
+            catalog = SkillCatalog(
+                conn,
+                skills_root=chosen_skills_root,
+                store_dir=settings.paths.cache / "skills",
+                source=skill_source,
+            )
+            catalog.load_core()
+            yield catalog
         finally:
             conn.close()
 
@@ -787,6 +825,147 @@ def create_app(
                 head_seq=head_seq,
             )
 
+    @app.get("/skills")
+    def list_skills(_: None = Depends(require_auth)) -> dict[str, object]:
+        with skill_catalog() as catalog:
+            return {"skills": [skill_to_dict(item) for item in catalog.list()]}
+
+    @app.post("/skills/import")
+    def import_skill(
+        body: SkillImportRequest, _: None = Depends(require_auth)
+    ) -> dict[str, object]:
+        with skill_catalog() as catalog:
+            try:
+                skill = catalog.import_pack(
+                    body.locator,
+                    body.revision,
+                    scope=body.scope,
+                    repository_id=body.repository_id,
+                )
+            except (
+                MutableRevisionError,
+                NetworkFetchForbidden,
+                SkillStillQuarantined,
+                FileNotFoundError,
+            ) as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            return skill_to_dict(skill)
+
+    @app.get("/skills/{skill_id}")
+    def get_skill(skill_id: str, _: None = Depends(require_auth)) -> dict[str, object]:
+        with skill_catalog() as catalog:
+            try:
+                return skill_to_dict(catalog.get(skill_id), include_body=True)
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+
+    @app.post("/skills/{skill_id}/evaluate")
+    def evaluate_installed_skill(
+        skill_id: str, _: None = Depends(require_auth)
+    ) -> dict[str, object]:
+        with skill_catalog() as catalog:
+            try:
+                skill = catalog.evaluate(skill_id)
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            result = evaluate_skill(skill)
+            payload = skill_to_dict(skill)
+            payload["evaluation"] = {
+                "passed": result.passed,
+                "security_passed": result.security_passed,
+                "regression_passed": result.regression_passed,
+                "reasons": list(result.reasons),
+            }
+            return payload
+
+    @app.post("/skills/{skill_id}/approve")
+    def approve_skill(
+        skill_id: str, body: SkillApproveRequest, _: None = Depends(require_auth)
+    ) -> dict[str, object]:
+        with skill_catalog() as catalog:
+            try:
+                skill = catalog.approve(skill_id, human=body.human)
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            except (HumanApprovalRequired, SkillStillQuarantined) as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            return skill_to_dict(skill)
+
+    @app.post("/skills/{skill_id}/activate")
+    def activate_skill(skill_id: str, _: None = Depends(require_auth)) -> dict[str, object]:
+        with skill_catalog() as catalog:
+            try:
+                skill = catalog.activate(skill_id)
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            except (SkillStillQuarantined, HumanApprovalRequired, PromotionBlocked) as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            return skill_to_dict(skill)
+
+    @app.post("/skills/{skill_id}/disable")
+    def disable_skill(skill_id: str, _: None = Depends(require_auth)) -> dict[str, object]:
+        with skill_catalog() as catalog:
+            try:
+                skill = catalog.disable(skill_id, "operator")
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return skill_to_dict(skill)
+
+    @app.post("/skills/route")
+    def route_installed_skills(
+        body: SkillRouteRequest, _: None = Depends(require_auth)
+    ) -> dict[str, object]:
+        with skill_catalog() as catalog:
+            routed = catalog.route(
+                body.query,
+                budget_tokens=body.budget_tokens,
+                selected_name=body.selected_name,
+            )
+            selected = None
+            if routed.selected is not None:
+                selected = {
+                    "name": routed.selected.name,
+                    "description": routed.selected.description,
+                    "body": routed.selected.body,
+                }
+            return {
+                "summaries": [
+                    {
+                        "name": item.name,
+                        "description": item.description,
+                        "body": item.body,
+                    }
+                    for item in routed.summaries
+                ],
+                "selected": selected,
+                "omitted": list(routed.omitted),
+                "tokens_used": routed.tokens_used,
+            }
+
+    @app.get("/memory")
+    def list_memory(_: None = Depends(require_auth)) -> dict[str, object]:
+        with skill_catalog() as catalog:
+            return {"records": [_memory_dict(item) for item in catalog.procedural.list()]}
+
+    @app.post("/memory/import-lessons")
+    def import_lessons(
+        body: LessonImportRequest, _: None = Depends(require_auth)
+    ) -> dict[str, object]:
+        with skill_catalog() as catalog:
+            try:
+                records = catalog.procedural.import_klikday_lessons(body.yaml)
+            except MemoryRejected as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            return {"records": [_memory_dict(item) for item in records]}
+
+    @app.get("/memory/{record_id}")
+    def get_memory(record_id: str, _: None = Depends(require_auth)) -> dict[str, object]:
+        with skill_catalog() as catalog:
+            record = catalog.procedural.get(record_id) or catalog.episodic.get(record_id)
+            if record is None:
+                raise HTTPException(status_code=404, detail="not found")
+            return _memory_dict(record)
+
     return app
 
 
@@ -957,3 +1136,20 @@ def _goal_model(goal: GoalRecord) -> GoalModel:
         schedule=goal.schedule,
         max_attempts=goal.max_attempts,
     )
+
+
+def _memory_dict(record: MemoryRecord) -> dict[str, object]:
+    status = record.status.value if hasattr(record.status, "value") else record.status
+    return {
+        "id": record.id,
+        "kind": record.kind,
+        "text": record.text,
+        "source_sha": record.source_sha,
+        "outcome": record.outcome,
+        "confidence": record.confidence,
+        "helpful": record.helpful,
+        "harmful": record.harmful,
+        "status": status,
+        "skill_id": record.skill_id,
+        "independent_sources": list(record.independent_sources),
+    }

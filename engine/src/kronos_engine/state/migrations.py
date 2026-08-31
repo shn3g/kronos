@@ -201,6 +201,64 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         ALTER TABLE goals ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 3;
         """,
     ),
+    (
+        7,
+        """
+        CREATE TABLE skills (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            revision TEXT NOT NULL,
+            locator TEXT NOT NULL,
+            status TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            repository_id TEXT,
+            manifest_json TEXT NOT NULL,
+            body TEXT NOT NULL,
+            scan_json TEXT NOT NULL,
+            contract_json TEXT,
+            pack_path TEXT,
+            installed_at TEXT NOT NULL
+        );
+
+        CREATE TABLE memory_records (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            text TEXT NOT NULL,
+            source_sha TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            helpful INTEGER NOT NULL,
+            harmful INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            skill_id TEXT,
+            independent_sources_json TEXT NOT NULL,
+            provenance_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            run_id TEXT,
+            task_id TEXT
+        );
+
+        CREATE TABLE memory_vectors (
+            record_id TEXT PRIMARY KEY REFERENCES memory_records(id),
+            kind TEXT NOT NULL,
+            dim INTEGER NOT NULL,
+            embedding BLOB NOT NULL
+        );
+
+        CREATE VIRTUAL TABLE memory_fts USING fts5(
+            record_id UNINDEXED,
+            text
+        );
+
+        CREATE TABLE skill_outcomes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            skill_id TEXT NOT NULL,
+            source_sha TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            recorded_at TEXT NOT NULL
+        );
+        """,
+    ),
 )
 
 

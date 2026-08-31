@@ -1,0 +1,7 @@
+skill: tdd
+prompt: Exercise the tdd skill on a small, bounded change.
+verification:
+  - failing test before implementation
+  - do not skip the red step
+forbidden:
+  - implement before a failing test
