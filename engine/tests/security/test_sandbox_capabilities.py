@@ -10,32 +10,63 @@ from tests.contract.test_repository_policy import _minimal_policy_dict
 from tests.support.executor_fixtures import synthetic_request
 
 from kronos_engine.adapters.executors.controlled import ControlledOpenExecutor
-from kronos_engine.adapters.sandboxes.container import ContainerSandbox
+from kronos_engine.adapters.sandboxes.factory import default_sandbox, sandbox_for_policy
 from kronos_engine.adapters.sandboxes.local_unsafe import LocalUnsafeSandbox
+from kronos_engine.adapters.sandboxes.process_jail import ProcessJailSandbox
 from kronos_engine.domain.models import AttemptLimitExceeded
 from kronos_engine.domain.policy import PolicyError, parse_policy
 from kronos_engine.ports.sandbox import (
+    CapabilityUnsupportedError,
     PathEscapeError,
+    SandboxUnavailableError,
     SecretAccessError,
     UnsafeSandboxMergeRefused,
 )
 
 
-def test_default_sandbox_is_secret_free_network_off_non_root_and_limited() -> None:
-    sandbox = ContainerSandbox(Path("."))
+def test_default_sandbox_is_an_in_process_jail_without_false_isolation() -> None:
+    sandbox = default_sandbox(Path("."))
+    assert isinstance(sandbox, ProcessJailSandbox)
     caps = sandbox.capabilities()
-    assert caps.network is False
+    assert "jail" in caps.label.lower()
+    assert "container" not in caps.label.lower()
+    assert caps.network is True
+    assert caps.root is True
     assert caps.secrets is False
-    assert caps.root is False
     assert caps.unsafe is False
-    assert caps.memory_mb >= 1
-    assert caps.cpu_limit > 0
-    assert caps.timeout_seconds > 0
+    assert caps.memory_mb == 0
+    assert caps.cpu_limit == 0.0
     assert caps.allows_autonomous_merge is False
 
 
+def test_docker_runtime_is_not_selected_until_it_confines() -> None:
+    with pytest.raises(SandboxUnavailableError, match="Docker|SWE-ReX|confine"):
+        sandbox_for_policy("docker", Path("."))
+
+
+def test_jail_fails_closed_when_network_or_root_drop_is_requested(tmp_path: Path) -> None:
+    worktree = tmp_path / "wt"
+    sandbox = ProcessJailSandbox(worktree)
+    with pytest.raises(CapabilityUnsupportedError, match="network"):
+        ControlledOpenExecutor().run(
+            synthetic_request(worktree, network=False, root=True), sandbox
+        )
+    with pytest.raises(CapabilityUnsupportedError, match="root"):
+        ControlledOpenExecutor().run(
+            synthetic_request(worktree, network=True, root=False), sandbox
+        )
+
+
+def test_secrets_false_rejects_secret_shaped_extra_env(tmp_path: Path) -> None:
+    sandbox = ProcessJailSandbox(tmp_path / "wt")
+    with pytest.raises(SecretAccessError, match="secret|credential|token"):
+        sandbox.worker_environment({"PATH": "/usr/bin", "OPENAI_API_KEY": "sk-extra"})
+    env = sandbox.worker_environment({"PATH": "/usr/bin", "LANG": "C"})
+    assert env == {"PATH": "/usr/bin", "LANG": "C"}
+
+
 def test_secret_access_fails_deterministically(tmp_path: Path) -> None:
-    sandbox = ContainerSandbox(tmp_path / "wt")
+    sandbox = ProcessJailSandbox(tmp_path / "wt")
     with pytest.raises(SecretAccessError, match="secret|credential|token"):
         sandbox.worker_environment(
             {
@@ -48,7 +79,7 @@ def test_secret_access_fails_deterministically(tmp_path: Path) -> None:
 
 
 def test_controller_and_reviewer_credential_leak_fails(tmp_path: Path) -> None:
-    sandbox = ContainerSandbox(tmp_path / "wt")
+    sandbox = ProcessJailSandbox(tmp_path / "wt")
     for key in (
         "KRONOS_AUTH_TOKEN",
         "GITHUB_APP_PRIVATE_KEY",
@@ -62,7 +93,7 @@ def test_controller_and_reviewer_credential_leak_fails(tmp_path: Path) -> None:
 def test_path_escape_fails_deterministically(tmp_path: Path) -> None:
     worktree = tmp_path / "cache" / "worktrees" / "repo_alpha" / "task_1"
     worktree.mkdir(parents=True)
-    sandbox = ContainerSandbox(worktree)
+    sandbox = ProcessJailSandbox(worktree)
     with pytest.raises(PathEscapeError):
         sandbox.write_text("../outside.txt", "nope")
     with pytest.raises(PathEscapeError):
@@ -76,7 +107,7 @@ def test_path_escape_fails_deterministically(tmp_path: Path) -> None:
 
 def test_executor_rejects_escaped_artifact_path(tmp_path: Path) -> None:
     worktree = tmp_path / "wt"
-    sandbox = ContainerSandbox(worktree)
+    sandbox = ProcessJailSandbox(worktree)
     request = synthetic_request(worktree, artifact="../escape.txt")
     with pytest.raises(PathEscapeError):
         ControlledOpenExecutor().run(request, sandbox)
@@ -85,7 +116,7 @@ def test_executor_rejects_escaped_artifact_path(tmp_path: Path) -> None:
 
 def test_unlimited_retries_fail_before_the_worker_runs(tmp_path: Path) -> None:
     worktree = tmp_path / "wt"
-    sandbox = ContainerSandbox(worktree)
+    sandbox = ProcessJailSandbox(worktree)
     with pytest.raises(AttemptLimitExceeded, match="unlimited"):
         ControlledOpenExecutor().run(synthetic_request(worktree, max_attempts=0), sandbox)
 

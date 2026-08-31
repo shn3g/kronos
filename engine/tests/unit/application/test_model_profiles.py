@@ -57,11 +57,44 @@ def test_assignments_require_all_four_roles(tmp_path: Path) -> None:
     )
     with pytest.raises(RoleAssignmentError, match="missing"):
         service.assign({"planner": profile.id})
-    assigned = service.assign({role: profile.id for role in MODEL_ROLES})
+    assigned = service.assign({role: profile.id for role in MODEL_ROLES}, confirm_shared_roles=True)
     assert assigned.planner == profile.id
     assert assigned.coder == profile.id
     assert assigned.reviewer == profile.id
     assert assigned.embedding == profile.id
+
+
+def test_register_provider_seeds_four_role_profiles(tmp_path: Path) -> None:
+    service, _store = _service(tmp_path)
+    service.register_provider(
+        ProviderDraft(
+            kind="openai_compatible",
+            display_name="Ollama",
+            base_url="http://127.0.0.1:11434/v1",
+            billed=False,
+            api_key=None,
+        )
+    )
+    roles = {item.role for item in service.list_profiles()}
+    assert roles == set(MODEL_ROLES)
+
+
+def test_assign_rejects_role_mismatch_without_confirm(tmp_path: Path) -> None:
+    service, _store = _service(tmp_path)
+    service.register_provider(
+        ProviderDraft(
+            kind="openai_compatible",
+            display_name="Ollama",
+            base_url="http://127.0.0.1:11434/v1",
+            billed=False,
+        )
+    )
+    profiles = {item.role: item.id for item in service.list_profiles()}
+    with pytest.raises(RoleAssignmentError, match="role|confirm"):
+        service.assign({role: profiles["coder"] for role in MODEL_ROLES})
+    assigned = service.assign(profiles)
+    assert assigned.coder == profiles["coder"]
+    assert assigned.planner == profiles["planner"]
 
 
 def test_scoped_secret_is_short_lived_and_not_on_the_provider(tmp_path: Path) -> None:

@@ -3,14 +3,29 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from typing import Protocol
+
+
+class SecretExpiredError(RuntimeError):
+    """Raised when a scoped secret is used after its TTL."""
 
 
 @dataclass(frozen=True, slots=True)
 class ScopedSecret:
     value: str
     ttl_seconds: int
+    issued_at: float = field(default_factory=time.monotonic)
+
+    def expired(self, now: float | None = None) -> bool:
+        clock = time.monotonic() if now is None else now
+        return clock >= self.issued_at + self.ttl_seconds
+
+    def require_fresh(self, now: float | None = None) -> str:
+        if self.expired(now):
+            raise SecretExpiredError("scoped secret expired")
+        return self.value
 
     def __repr__(self) -> str:
         return f"ScopedSecret(ttl_seconds={self.ttl_seconds}, value=redacted)"

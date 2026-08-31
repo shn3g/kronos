@@ -52,18 +52,19 @@ class ModelProfileService:
         self._registry.save_provider(provider)
         if draft.api_key:
             self._secrets.put(secret_ref, draft.api_key)
-        self._registry.save_profile(
-            ModelProfile(
-                id=f"prof_{provider_id}",
-                display_name=draft.display_name,
-                role="coder",
-                provider_id=provider_id,
-                model_id="default",
-                billed=draft.billed,
-                approved_fallbacks=(),
-                limits=DEFAULT_LIMITS,
+        for role in MODEL_ROLES:
+            self._registry.save_profile(
+                ModelProfile(
+                    id=f"prof_{provider_id}_{role}",
+                    display_name=f"{draft.display_name} ({role})",
+                    role=role,
+                    provider_id=provider_id,
+                    model_id="default",
+                    billed=draft.billed,
+                    approved_fallbacks=(),
+                    limits=DEFAULT_LIMITS,
+                )
             )
-        )
         return provider
 
     def save_profile(self, profile: ModelProfile) -> ModelProfile:
@@ -76,14 +77,25 @@ class ModelProfileService:
     def list_profiles(self) -> tuple[ModelProfile, ...]:
         return tuple(self._registry.list_profiles())
 
-    def assign(self, assignments: Mapping[str, str]) -> RoleAssignments:
+    def assign(
+        self, assignments: Mapping[str, str], *, confirm_shared_roles: bool = False
+    ) -> RoleAssignments:
         missing = [role for role in MODEL_ROLES if role not in assignments or not assignments[role]]
         if missing:
             raise RoleAssignmentError(f"missing role assignments: {missing}")
-        known = {profile.id for profile in self._registry.list_profiles()}
+        known = {profile.id: profile for profile in self._registry.list_profiles()}
         unknown = [role for role, profile_id in assignments.items() if profile_id not in known]
         if unknown:
             raise RoleAssignmentError(f"unknown profiles for roles: {unknown}")
+        mismatched = [
+            role
+            for role, profile_id in assignments.items()
+            if role in MODEL_ROLES and known[profile_id].role != role
+        ]
+        if mismatched and not confirm_shared_roles:
+            raise RoleAssignmentError(
+                "profile role does not match slot; confirm shared local model"
+            )
         result = RoleAssignments(
             planner=assignments["planner"],
             coder=assignments["coder"],
