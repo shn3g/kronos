@@ -1,6 +1,6 @@
 # Desktop shell
 
-The Tauri 2 client in `apps/desktop` is a local UI over an injected `EngineClient`. Production wiring returns **engine unavailable** until the engine milestone ships a live sidecar.
+The Tauri 2 client in `apps/desktop` locates a loopback engine through `engine_connection` and probes `/health` plus `/version`. Without a sidecar (Vite/Playwright web preview), production wiring stays **engine unavailable**.
 
 ## Playwright
 
