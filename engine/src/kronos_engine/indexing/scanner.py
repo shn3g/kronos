@@ -143,11 +143,15 @@ def diff_paths(
     while index < len(parts):
         status = parts[index]
         index += 1
-        if status.startswith("R") or status.startswith("C"):
+        if status.startswith("R"):
             old = parts[index].replace("\\", "/")
             new = parts[index + 1].replace("\\", "/")
             index += 2
             changes.append(("R", new, old))
+        elif status.startswith("C"):
+            new = parts[index + 1].replace("\\", "/")
+            index += 2
+            changes.append(("A", new, ""))
         else:
             path = parts[index].replace("\\", "/")
             index += 1
@@ -170,8 +174,7 @@ def _should_skip_path(posix: str, exclude_prefixes: tuple[str, ...]) -> bool:
     if any(part in _VENDOR_PARTS for part in parts):
         return True
     for prefix in exclude_prefixes:
-        normalized = prefix.replace("\\", "/").lstrip("/")
-        if posix == normalized.rstrip("/") or posix.startswith(normalized):
+        if _matches_prefix(posix, prefix):
             return True
     return False
 
@@ -180,8 +183,17 @@ def _looks_secret(path: str, text: str) -> bool:
     name = path.rsplit("/", 1)[-1].lower()
     if name in _SECRET_NAMES or name.startswith(".env"):
         return True
-    sample = text[:50_000]
-    return any(pattern.search(sample) for pattern in _SECRET_PATTERNS)
+    return any(pattern.search(text) for pattern in _SECRET_PATTERNS)
+
+
+def _matches_prefix(posix: str, prefix: str) -> bool:
+    normalized = prefix.replace("\\", "/").lstrip("/")
+    if not normalized:
+        return False
+    stripped = normalized.rstrip("/")
+    if posix == stripped:
+        return True
+    return posix.startswith(stripped + "/")
 
 
 def _tracked_paths(root: Path, commit: str) -> tuple[str, ...]:

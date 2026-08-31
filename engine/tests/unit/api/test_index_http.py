@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from tests.retrieval.support import golden_fixture
+from tests.retrieval.support import golden_fixture, write_and_commit
 from tests.support.git_fixtures import init_git_repo
 
 from kronos_engine.api.app import create_app
@@ -114,3 +114,37 @@ async def test_index_http_rebuild_search_and_isolation(
     mapped = await http.get(f"/repositories/{alpha_id}/index/map", headers=headers)
     assert mapped.status_code == 200
     assert mapped.json()["text"]
+
+
+@pytest.mark.asyncio
+async def test_enrol_builds_index_and_refresh_indexes_new_commits(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    http, headers, tmp_path = client
+    root = init_git_repo(
+        tmp_path / "fresh",
+        files={"src/keep.py": "def keep():\n    return 1\n"},
+    )
+    enrolled = await http.post("/repositories", headers=headers, json={"path": str(root)})
+    assert enrolled.status_code == 200
+    repo_id = enrolled.json()["repository"]["id"]
+
+    status = await http.get(f"/repositories/{repo_id}/index", headers=headers)
+    assert status.status_code == 200
+    body = status.json()
+    assert body["ready"] is True
+    assert body["chunk_count"] > 0
+
+    write_and_commit(root, {"src/added.py": "REFRESH_TOKEN_VALUE = 1\n"}, "add module")
+    unauth = await http.post(f"/repositories/{repo_id}/index/refresh")
+    assert unauth.status_code == 401
+    refreshed = await http.post(f"/repositories/{repo_id}/index/refresh", headers=headers)
+    assert refreshed.status_code == 200
+    assert refreshed.json()["ready"] is True
+    search = await http.get(
+        f"/repositories/{repo_id}/index/search",
+        headers=headers,
+        params={"q": "REFRESH_TOKEN_VALUE"},
+    )
+    assert search.status_code == 200
+    assert any("added.py" in item["path"] for item in search.json()["items"])

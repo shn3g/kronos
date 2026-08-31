@@ -9,6 +9,14 @@ from tests.support.git_fixtures import init_git_repo
 from kronos_engine.config.paths import KronosPaths, resolve_paths
 from kronos_engine.domain.policy import default_policy
 
+TINY_EMBED_ONNX = Path(__file__).resolve().parent / "fixtures" / "tiny_embed.onnx"
+
+
+def write_tiny_embedding_onnx(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(TINY_EMBED_ONNX.read_bytes())
+    return path
+
 
 def kronos_paths(tmp_path: Path) -> KronosPaths:
     paths = resolve_paths(
