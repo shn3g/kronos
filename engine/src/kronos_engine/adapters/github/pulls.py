@@ -49,6 +49,65 @@ def open_draft_pr(
     return _pull_ref(payload, created=True)
 
 
+def open_promotion_pr(
+    client: GitHubClient,
+    target: ForgeTarget,
+    title: str,
+    body: str,
+    head: str,
+    key: IdempotencyKey,
+) -> PullRef:
+    if head == target.protected_branch:
+        raise DefaultBranchWriteRefused("refusing a pull from the protected default branch")
+    path = f"/repos/{target.owner}/{target.repo}/pulls"
+    for raw in client.paginate(path, params={"state": "all"}):
+        if not isinstance(raw, dict):
+            continue
+        if marker_in(str(raw.get("body") or ""), key):
+            return _pull_ref(raw, created=False)
+    payload = client.request_json(
+        "POST",
+        path,
+        json_body={
+            "title": title,
+            "body": f"{body}\n\n{provenance_marker(key)}",
+            "head": head,
+            "base": target.protected_branch,
+            "draft": True,
+        },
+    )
+    assert isinstance(payload, dict)
+    return _pull_ref(payload, created=True)
+
+
+def get_pull(client: GitHubClient, target: ForgeTarget, number: int) -> PullRef:
+    payload = client.request_json("GET", f"/repos/{target.owner}/{target.repo}/pulls/{number}")
+    assert isinstance(payload, dict)
+    return _pull_ref(payload, created=False)
+
+
+def merge_pull(
+    client: GitHubClient,
+    target: ForgeTarget,
+    number: int,
+    *,
+    sha: str,
+    dest: str | None = None,
+) -> None:
+    if dest == target.protected_branch:
+        raise DefaultBranchWriteRefused("never auto-merge the protected default branch")
+    pull = get_pull(client, target, number)
+    if pull.base == target.protected_branch:
+        raise DefaultBranchWriteRefused("never auto-merge the protected default branch")
+    if dest is not None and dest != target.integration_branch:
+        raise DefaultBranchWriteRefused("auto-merge is allowed onto the integration branch only")
+    client.request_json(
+        "PUT",
+        f"/repos/{target.owner}/{target.repo}/pulls/{number}/merge",
+        json_body={"sha": sha, "merge_method": "squash"},
+    )
+
+
 def _pull_ref(raw: dict[str, object], *, created: bool) -> PullRef:
     head = raw.get("head")
     base = raw.get("base")

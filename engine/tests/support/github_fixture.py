@@ -93,6 +93,8 @@ class GitHubFixture:
     _next_discussion: int = 1
     _next_pull: int = 1
     _next_ruleset: int = 1
+    _next_check: int = 1
+    _merges: list[int] = field(default_factory=list)
     repository_node_id: str = "R_kgDO_fixture"
     general_category_id: str = "DIC_kwDO_general"
     _graphql_queries: list[str] = field(default_factory=list)
@@ -204,6 +206,28 @@ class GitHubFixture:
                 return self._json(found)
             if method == "PUT":
                 return self._update_ruleset(ruleset_id, request)
+        if rest == "/check-runs" and method == "POST":
+            return self._create_check_run(request)
+        if rest.startswith("/commits/") and rest.endswith("/check-runs") and method == "GET":
+            sha = rest.split("/")[2]
+            return self._json(
+                {
+                    "total_count": len(
+                        [item for item in self._check_runs if item.get("head_sha") == sha]
+                    ),
+                    "check_runs": [
+                        item for item in self._check_runs if item.get("head_sha") == sha
+                    ],
+                }
+            )
+        if rest.startswith("/pulls/") and rest.endswith("/merge") and method == "PUT":
+            return self._merge_pull(rest, request)
+        if rest.startswith("/pulls/") and method == "GET" and rest.count("/") == 2:
+            number = int(rest.split("/")[2])
+            found = next((item for item in self._pulls if item["number"] == number), None)
+            if found is None:
+                return HttpResponse(404, {}, b"{}")
+            return self._json(found)
         return HttpResponse(404, {}, b"{}")
 
     def _mint_token(self, path: str, request: HttpRequest) -> HttpResponse:
@@ -377,14 +401,22 @@ class GitHubFixture:
                 return self._json(pull)
         number = self._next_pull
         self._next_pull += 1
+        head_name = str(payload.get("head") or "")
+        base_name = str(payload.get("base") or "")
         pull = {
             "number": number,
             "title": payload.get("title"),
             "body": body,
             "draft": bool(payload.get("draft", True)),
             "html_url": f"https://github.com/{self.owner}/{self.repo}/pull/{number}",
-            "head": {"ref": payload.get("head")},
-            "base": {"ref": payload.get("base")},
+            "head": {
+                "ref": head_name,
+                "sha": self._branches.get(head_name, DEFAULT_SHA),
+            },
+            "base": {
+                "ref": base_name,
+                "sha": self._branches.get(base_name, DEFAULT_SHA),
+            },
         }
         self._pulls.append(pull)
         self._logical.append("open_draft_pr")
@@ -424,6 +456,49 @@ class GitHubFixture:
         if "apply_ruleset" not in self._logical:
             self._logical.append("apply_ruleset")
         return self._json(payload)
+
+    def _create_check_run(self, request: HttpRequest) -> HttpResponse:
+        payload = json.loads(request.body.decode() if request.body else "{}")
+        role = self._last_token_role
+        if role == "reviewer":
+            app_id = self.reviewer_app_id
+            slug = "kronos-reviewer"
+            posted_by = "reviewer"
+        elif role == "controller":
+            app_id = self.controller_app_id
+            slug = "kronos-controller"
+            posted_by = "controller"
+        else:
+            app_id = None
+            slug = None
+            posted_by = "worker"
+        check_id = self._next_check
+        self._next_check += 1
+        check = {
+            "id": check_id,
+            "name": payload.get("name"),
+            "head_sha": payload.get("head_sha"),
+            "status": payload.get("status", "completed"),
+            "conclusion": payload.get("conclusion"),
+            "app": None if app_id is None else {"id": app_id, "slug": slug},
+            "posted_by": posted_by,
+        }
+        self._check_runs.append(check)
+        self._logical.append("post_check_run")
+        return HttpResponse(201, {}, json.dumps(check).encode())
+
+    def _merge_pull(self, rest: str, request: HttpRequest) -> HttpResponse:
+        number = int(rest.split("/")[2])
+        pull = next((item for item in self._pulls if item["number"] == number), None)
+        if pull is None:
+            return HttpResponse(404, {}, b"{}")
+        base_ref = str((pull.get("base") or {}).get("ref") or "")
+        if base_ref == self.default_branch:
+            return HttpResponse(422, {}, b'{"message":"protected"}')
+        payload = json.loads(request.body.decode() if request.body else "{}")
+        self._merges.append(number)
+        self._logical.append("merge_pull")
+        return self._json({"merged": True, "sha": payload.get("sha")})
 
     def _json(self, payload: object) -> HttpResponse:
         return HttpResponse(200, {}, json.dumps(payload).encode())
@@ -542,6 +617,35 @@ class GitHubFixture:
 
     def check_runs(self) -> list[dict[str, Any]]:
         return list(self._check_runs)
+
+    def seed_check_run(
+        self,
+        *,
+        name: str,
+        head_sha: str,
+        app_id: int | None,
+        conclusion: str = "success",
+        posted_by: str = "reviewer",
+    ) -> None:
+        slug = "kronos-reviewer" if posted_by == "reviewer" else posted_by
+        self._check_runs.append(
+            {
+                "id": self._next_check,
+                "name": name,
+                "head_sha": head_sha,
+                "status": "completed",
+                "conclusion": conclusion,
+                "app": None if app_id is None else {"id": app_id, "slug": slug},
+                "posted_by": posted_by,
+            }
+        )
+        self._next_check += 1
+
+    def merge_calls(self) -> tuple[int, ...]:
+        return tuple(self._merges)
+
+    def branch_sha(self, name: str) -> str:
+        return self._branches[name]
 
     def applied_ruleset(self) -> dict[str, Any] | None:
         return self._rulesets[-1] if self._rulesets else None

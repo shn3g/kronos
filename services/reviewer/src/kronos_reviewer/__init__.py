@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Kronos reviewer package placeholder."""
+"""Kronos isolated reviewer process."""
 
-__version__ = "0.0.0"
+from __future__ import annotations
+
+__version__ = "0.1.0"
