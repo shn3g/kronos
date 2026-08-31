@@ -1,8 +1,8 @@
 # kronos-engine
 
-Local Kronos control-plane. FastAPI is the HTTP composition root. Domain types have no I/O. SQLite WAL stores events, the outbox, leases, and enrolled repositories.
+Local Kronos control-plane. FastAPI is the HTTP composition root. Domain types have no I/O. SQLite WAL stores events, the outbox, leases, enrolled repositories, and model profile assignments. Secrets are stored separately from provider configuration.
 
-Authenticated routes: `/health`, `/version`, `/repositories` (list, inspect, enrol, pause, disable, remove, re-enrol, preview), `/goals`, `/events`. Enrolment never commits, pushes, or writes `.kronos/` into the working tree.
+Authenticated routes: `/health`, `/version`, `/repositories` (list, inspect, enrol, pause, disable, remove, re-enrol, preview), `/models` (detect, register providers, assign roles), `/goals`, `/events`. Enrolment never commits, pushes, or writes `.kronos/` into the working tree. Completions never silently fall back to an unapproved or paid model.
 
 ## Run
 
