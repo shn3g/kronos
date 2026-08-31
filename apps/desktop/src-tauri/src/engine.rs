@@ -172,6 +172,24 @@ pub async fn pick_repository_folder(app: AppHandle) -> Option<String> {
 
 fn engine_path_allowed(method: &str, path: &str) -> bool {
     let path = path.split('?').next().unwrap_or(path);
+    if path == "/github/status" || path == "/github/manifests" {
+        return method == "GET";
+    }
+    if path == "/github/rulesets/propose" || path == "/github/rulesets/apply" {
+        return method == "POST";
+    }
+    if let Some(rest) = path.strip_prefix("/github/apps/") {
+        return method == "POST"
+            && matches!(
+                rest,
+                "controller"
+                    | "reviewer"
+                    | "controller/install"
+                    | "reviewer/install"
+                    | "controller/verify"
+                    | "reviewer/verify"
+            );
+    }
     if path == "/models" || path == "/models/" {
         return method == "GET";
     }
@@ -702,6 +720,13 @@ mod tests {
         assert!(engine_path_allowed("PUT", "/models/assignments"));
         assert!(!engine_path_allowed("GET", "/models/assignments"));
         assert!(!engine_path_allowed("POST", "/secrets"));
+        assert!(engine_path_allowed("GET", "/github/status"));
+        assert!(engine_path_allowed("GET", "/github/manifests"));
+        assert!(engine_path_allowed("POST", "/github/apps/controller"));
+        assert!(engine_path_allowed("POST", "/github/apps/reviewer/verify"));
+        assert!(engine_path_allowed("POST", "/github/rulesets/propose"));
+        assert!(engine_path_allowed("POST", "/github/rulesets/apply"));
+        assert!(!engine_path_allowed("GET", "/github/apps/controller"));
         assert!(engine_path_allowed("GET", "/repositories"));
         assert!(engine_path_allowed("GET", "/repositories/repo_alpha/index"));
         assert!(engine_path_allowed(

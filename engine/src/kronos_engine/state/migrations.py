@@ -107,6 +107,18 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        4,
+        """
+        CREATE TABLE github_apps (
+            role TEXT PRIMARY KEY CHECK (role IN ('controller', 'reviewer')),
+            app_id INTEGER NOT NULL,
+            slug TEXT NOT NULL,
+            installation_id INTEGER,
+            verified_at TEXT
+        );
+        """,
+    ),
 )
 
 

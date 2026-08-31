@@ -5,10 +5,13 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
 permissions:
   contents: read
+  checks: read
 jobs:
   kronos-policy:
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
-      - name: Point at committed Kronos policy
-        run: echo "Independent review is installed with the GitHub Apps sub-plan."
+      - name: Require Kronos reviewer check
+        env:
+          KRONOS_REVIEW_CHECK_NAME: kronos-review (kronos-reviewer)
+        run: echo "Independent review publishes kronos-review (kronos-reviewer) on the exact head SHA. Comments and labels are not identity."

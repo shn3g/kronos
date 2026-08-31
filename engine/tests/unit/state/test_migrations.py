@@ -26,7 +26,7 @@ def test_migrations_are_numbered_and_idempotent(tmp_path: Path) -> None:
             row[0]
             for row in conn.execute("SELECT version FROM schema_migrations ORDER BY version")
         ]
-        assert versions == [1, 2, 3]
+        assert versions == [1, 2, 3, 4]
         assert versions == sorted(set(versions))
     finally:
         conn.close()
@@ -49,6 +49,7 @@ def test_control_plane_tables_exist(tmp_path: Path) -> None:
             "model_providers",
             "model_profiles",
             "model_assignments",
+            "github_apps",
         } <= names
     finally:
         conn.close()

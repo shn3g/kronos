@@ -1,0 +1,19 @@
+{
+  "name": "Kronos Reviewer",
+  "url": "https://github.com/shn3g/kronos",
+  "hook_attributes": {
+    "url": "http://127.0.0.1/github/hooks",
+    "active": false
+  },
+  "redirect_url": "http://127.0.0.1/github/setup",
+  "callback_urls": ["http://127.0.0.1/github/setup"],
+  "description": "Publishes the required check kronos-review (kronos-reviewer) on the exact head SHA after independent verification. Comments, labels, and personal access tokens are not identity.",
+  "public": false,
+  "default_events": [],
+  "default_permissions": {
+    "checks": "write",
+    "contents": "read",
+    "pull_requests": "read",
+    "metadata": "read"
+  }
+}
