@@ -1,16 +1,18 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from tests.support.secrets import InMemorySecretStore
 
 from kronos_engine.api.app import create_app
 from kronos_engine.config.paths import resolve_paths
 from kronos_engine.config.settings import Settings
 from kronos_engine.domain.models import MODEL_ROLES
+from kronos_engine.ports.model_provider import DetectedTool
 from kronos_engine.state.database import Database
 
 
@@ -38,10 +40,28 @@ class _QuietDetector:
         return ()
 
 
-@pytest.fixture
-async def client(tmp_path: Path) -> AsyncIterator[tuple[AsyncClient, dict[str, str], Path]]:
+class _LocalDetector:
+    def detect(self) -> Sequence[DetectedTool]:
+        return (
+            DetectedTool(
+                kind="openai_compatible",
+                label="http://127.0.0.1:11434/v1",
+                present=True,
+            ),
+            DetectedTool(kind="cursor_cli", label="cursor-agent", present=True),
+        )
+
+
+async def _app_client(
+    tmp_path: Path, detector: object
+) -> AsyncIterator[tuple[AsyncClient, dict[str, str], Path]]:
     database = Database(tmp_path / "data" / "kronos.sqlite3")
-    app = create_app(_settings(tmp_path), database, tool_detector=_QuietDetector())
+    app = create_app(
+        _settings(tmp_path),
+        database,
+        tool_detector=detector,  # type: ignore[arg-type]
+        secret_store=InMemorySecretStore(),
+    )
     http = AsyncClient(
         transport=ASGITransport(app=app, client=("127.0.0.1", 50000)),
         base_url="http://127.0.0.1",
@@ -50,6 +70,20 @@ async def client(tmp_path: Path) -> AsyncIterator[tuple[AsyncClient, dict[str, s
         yield http, {"Authorization": "Bearer install-token"}, tmp_path
     finally:
         await http.aclose()
+
+
+@pytest.fixture
+async def client(tmp_path: Path) -> AsyncIterator[tuple[AsyncClient, dict[str, str], Path]]:
+    async for item in _app_client(tmp_path, _QuietDetector()):
+        yield item
+
+
+@pytest.fixture
+async def detected_client(
+    tmp_path: Path,
+) -> AsyncIterator[tuple[AsyncClient, dict[str, str], Path]]:
+    async for item in _app_client(tmp_path, _LocalDetector()):
+        yield item
 
 
 @pytest.mark.asyncio
@@ -64,6 +98,7 @@ async def test_models_endpoints_fail_closed_and_hide_secrets(
     assert listed.status_code == 200
     body = listed.json()
     assert set(body["assignments"]) == set(MODEL_ROLES)
+    assert body["profiles"] == []
     assert "api_key" not in str(body)
 
     created = await http.post(
@@ -81,23 +116,55 @@ async def test_models_endpoints_fail_closed_and_hide_secrets(
     created_body = created.json()
     assert "sk-http-secret" not in str(created_body)
     provider_id = created_body["provider"]["id"]
-    profile_id = created_body["profile"]["id"]
+    profiles = {item["role"]: item["id"] for item in created_body["profiles"]}
+    assert set(profiles) == set(MODEL_ROLES)
 
     assigned = await http.put(
         "/models/assignments",
         headers=headers,
-        json={role: profile_id for role in MODEL_ROLES},
+        json=profiles,
     )
     assert assigned.status_code == 200
     snapshot = (await http.get("/models", headers=headers)).json()
-    assert snapshot["assignments"]["planner"] == profile_id
-    assert snapshot["assignments"]["coder"] == profile_id
-    assert snapshot["assignments"]["reviewer"] == profile_id
-    assert snapshot["assignments"]["embedding"] == profile_id
+    assert snapshot["assignments"]["planner"] == profiles["planner"]
+    assert snapshot["assignments"]["coder"] == profiles["coder"]
+    assert snapshot["assignments"]["reviewer"] == profiles["reviewer"]
+    assert snapshot["assignments"]["embedding"] == profiles["embedding"]
     assert snapshot["providers"][0]["id"] == provider_id
     assert "sk-http-secret" not in str(snapshot)
     db_bytes = (tmp_path / "data" / "kronos.sqlite3").read_bytes()
     assert b"sk-http-secret" not in db_bytes
 
-    missing = await http.put("/models/assignments", headers=headers, json={"planner": profile_id})
+    missing = await http.put(
+        "/models/assignments", headers=headers, json={"planner": profiles["planner"]}
+    )
     assert missing.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_empty_ready_engine_can_register_detected_local_provider_then_assign(
+    detected_client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    http, headers, _tmp_path = detected_client
+    empty = (await http.get("/models", headers=headers)).json()
+    assert empty["profiles"] == []
+    assert empty["providers"] == []
+    labels = {item["label"] for item in empty["detected"]}
+    assert "http://127.0.0.1:11434/v1" in labels
+    assert "cursor-agent" in labels
+
+    created = await http.post(
+        "/models/providers",
+        headers=headers,
+        json={
+            "kind": "openai_compatible",
+            "display_name": "http://127.0.0.1:11434/v1",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "billed": False,
+        },
+    )
+    assert created.status_code == 200
+    profiles = {item["role"]: item["id"] for item in created.json()["profiles"]}
+    assigned = await http.put("/models/assignments", headers=headers, json=profiles)
+    assert assigned.status_code == 200
+    assert assigned.json()["assignments"]["coder"] == profiles["coder"]

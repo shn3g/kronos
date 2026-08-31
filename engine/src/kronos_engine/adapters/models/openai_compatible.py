@@ -10,8 +10,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlparse
 
-from kronos_engine.domain.models import select_completion_model
+from kronos_engine.domain.models import assert_cost_allowed, select_completion_model
 from kronos_engine.ports.model_provider import CompletionRequest, CompletionResult, TokenUsage
 from kronos_engine.ports.secrets import ScopedSecret
 
@@ -88,14 +89,19 @@ class OpenAICompatibleProvider:
     def complete(
         self, request: CompletionRequest, secret: ScopedSecret | None
     ) -> CompletionResult:
+        _assert_http_url(self._base_url)
+        token = secret.require_fresh() if secret is not None else None
         model = select_completion_model(
             request.profile,
             fallback_model_id=request.fallback_model_id,
             fallback_billed=request.fallback_billed,
+            provider_billed=self._billed,
         )
+        billed = self._billed or request.profile.billed
+        assert_cost_allowed(request.profile.limits, estimated_cost=0.0, billed=billed)
         headers: dict[str, str] = {"Content-Type": "application/json"}
-        if secret is not None:
-            headers["Authorization"] = f"Bearer {secret.value}"
+        if token is not None:
+            headers["Authorization"] = f"Bearer {token}"
         status, payload = self._transport.post(
             f"{self._base_url}/chat/completions",
             {
@@ -110,8 +116,13 @@ class OpenAICompatibleProvider:
             raise RuntimeError(f"openai-compatible completion failed: {status}")
         text = _choice_text(payload)
         tokens = _usage_tokens(payload)
-        _ = self._billed
         return CompletionResult(text=text, usage=TokenUsage(tokens=tokens))
+
+
+def _assert_http_url(url: str) -> None:
+    scheme = urlparse(url).scheme.lower()
+    if scheme not in {"http", "https"}:
+        raise ValueError("only http and https base URLs are allowed")
 
 
 def _choice_text(payload: dict[str, object]) -> str:
@@ -146,6 +157,7 @@ def _urlopen_json(
     payload: dict[str, object] | None = None,
     headers: dict[str, str] | None = None,
 ) -> tuple[int, dict[str, object]]:
+    _assert_http_url(url)
     body = None if payload is None else json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(url, data=body, method=method, headers=headers or {})
     try:

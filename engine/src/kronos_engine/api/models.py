@@ -125,6 +125,15 @@ class ProviderCreateRequest(BaseModel):
 class ProviderCreateResponse(BaseModel):
     provider: ProviderModel
     profile: ProfileModel
+    profiles: list[ProfileModel]
+
+
+class AssignmentsRequest(BaseModel):
+    planner: str = ""
+    coder: str = ""
+    reviewer: str = ""
+    embedding: str = ""
+    confirm_shared_roles: bool = False
 
 
 class AssignmentsResponse(BaseModel):

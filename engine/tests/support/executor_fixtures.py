@@ -25,6 +25,9 @@ def synthetic_request(
     max_attempts: int = 3,
     worker_env: dict[str, str] | None = None,
     autonomous_merge: bool = False,
+    network: bool = True,
+    root: bool = True,
+    secrets: bool = False,
 ) -> ExecutorRequest:
     worktree.mkdir(parents=True, exist_ok=True)
     return ExecutorRequest(
@@ -38,9 +41,9 @@ def synthetic_request(
             expected_content=content,
         ),
         capabilities=ExecutorCapabilities(
-            network=False,
-            secrets=False,
-            root=False,
+            network=network,
+            secrets=secrets,
+            root=root,
             autonomous_merge=autonomous_merge,
         ),
         limits=ResourceLimits(

@@ -3,19 +3,21 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
 
 from kronos_engine.adapters.models.openai_compatible import OpenAICompatibleProvider
 from kronos_engine.domain.models import (
+    CostCeilingExceeded,
     ModelProfile,
     PaidFallbackRefused,
     ResourceLimits,
     UnapprovedFallbackError,
 )
 from kronos_engine.ports.model_provider import CompletionRequest
-from kronos_engine.ports.secrets import ScopedSecret
+from kronos_engine.ports.secrets import ScopedSecret, SecretExpiredError
 
 
 class _Transport:
@@ -127,6 +129,99 @@ def test_paid_fallback_fails_deterministically() -> None:
             ),
             secret=ScopedSecret(value="sk-paid", ttl_seconds=30),
         )
+    assert transport.calls == []
+
+
+def test_paid_fallback_refused_when_provider_is_billed_even_if_flag_is_false() -> None:
+    transport = _Transport()
+    provider = OpenAICompatibleProvider(
+        base_url="https://api.openai.com/v1",
+        billed=True,
+        transport=transport,
+    )
+    profile = ModelProfile(
+        id="prof_coder",
+        display_name="Local coder",
+        role="coder",
+        provider_id="prov_openai",
+        model_id="llama3",
+        billed=False,
+        approved_fallbacks=("gpt-4",),
+        limits=ResourceLimits(
+            max_tokens=128,
+            max_attempts=3,
+            timeout_seconds=15.0,
+            cost_ceiling=0.0,
+        ),
+    )
+    with pytest.raises(PaidFallbackRefused):
+        provider.complete(
+            CompletionRequest(
+                profile=profile,
+                prompt="hello",
+                fallback_model_id="gpt-4",
+                fallback_billed=False,
+            ),
+            secret=ScopedSecret(value="sk-paid", ttl_seconds=30),
+        )
+    assert transport.calls == []
+
+
+def test_expired_scoped_secret_is_refused_before_http() -> None:
+    transport = _Transport()
+    provider = OpenAICompatibleProvider(
+        base_url="http://127.0.0.1:11434/v1",
+        billed=False,
+        transport=transport,
+    )
+    secret = ScopedSecret(value="sk-expired", ttl_seconds=15, issued_at=time.monotonic() - 60)
+    with pytest.raises(SecretExpiredError):
+        provider.complete(
+            CompletionRequest(profile=_profile(), prompt="hello"),
+            secret=secret,
+        )
+    assert transport.calls == []
+
+
+def test_billed_provider_fails_closed_when_cost_ceiling_is_zero() -> None:
+    transport = _Transport()
+    provider = OpenAICompatibleProvider(
+        base_url="https://api.openai.com/v1",
+        billed=True,
+        transport=transport,
+    )
+    profile = ModelProfile(
+        id="prof_paid",
+        display_name="Paid coder",
+        role="coder",
+        provider_id="prov_openai",
+        model_id="gpt-4",
+        billed=True,
+        approved_fallbacks=(),
+        limits=ResourceLimits(
+            max_tokens=128,
+            max_attempts=3,
+            timeout_seconds=15.0,
+            cost_ceiling=0.0,
+        ),
+    )
+    with pytest.raises(CostCeilingExceeded):
+        provider.complete(
+            CompletionRequest(profile=profile, prompt="hello"),
+            secret=ScopedSecret(value="sk-paid", ttl_seconds=30),
+        )
+    assert transport.calls == []
+
+
+def test_complete_rejects_file_url_scheme() -> None:
+    transport = _Transport()
+    provider = OpenAICompatibleProvider(
+        base_url="file:///tmp/models",
+        billed=False,
+        transport=transport,
+    )
+    with pytest.raises(ValueError, match="http"):
+        provider.complete(CompletionRequest(profile=_profile(), prompt="hello"), secret=None)
     assert transport.calls == []
 
 

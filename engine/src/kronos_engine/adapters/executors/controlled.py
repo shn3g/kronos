@@ -12,6 +12,11 @@ class ControlledOpenExecutor:
     def run(self, request: ExecutorRequest, sandbox: Sandbox) -> ExecutorResult:
         if request.capabilities.autonomous_merge:
             sandbox.authorize_autonomous_merge()
+        sandbox.enforce_capabilities(
+            network=request.capabilities.network,
+            secrets=request.capabilities.secrets,
+            root=request.capabilities.root,
+        )
         assert_finite_attempts(request.limits.max_attempts)
         sandbox.resolve(request.context.expected_artifact)
         sandbox.worker_environment(request.worker_env)
