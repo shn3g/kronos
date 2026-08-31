@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { probeEngineState, type EngineLocateResult } from "../api/kronosClient";
-
 export type EngineConnectionState =
   | { status: "unavailable" }
   | { status: "starting" }
@@ -17,24 +15,21 @@ export interface EngineClient {
 }
 
 export interface ProductionEngineClientOptions {
-  locate?: () => Promise<EngineLocateResult | null>;
+  readState?: () => Promise<EngineConnectionState | null>;
 }
 
 export function createProductionEngineClient(
   options: ProductionEngineClientOptions = {},
 ): EngineClient {
-  const locate = options.locate ?? locateEngineFromSidecar;
+  const readState = options.readState ?? readStateFromSidecar;
   return {
     async getState() {
       try {
-        const located = await locate();
-        if (located === null) {
+        const state = await readState();
+        if (state === null) {
           return { status: "unavailable" };
         }
-        return await probeEngineState({
-          baseUrl: located.baseUrl,
-          token: located.token,
-        });
+        return state;
       } catch {
         return { status: "unavailable" };
       }
@@ -42,11 +37,11 @@ export function createProductionEngineClient(
   };
 }
 
-async function locateEngineFromSidecar(): Promise<EngineLocateResult | null> {
+async function readStateFromSidecar(): Promise<EngineConnectionState | null> {
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    const result = await invoke<EngineLocateResult | null>("engine_connection");
-    if (result === null || result.baseUrl.length === 0 || result.token.length === 0) {
+    const result = await invoke<EngineConnectionState | null>("engine_state");
+    if (result === null) {
       return null;
     }
     return result;

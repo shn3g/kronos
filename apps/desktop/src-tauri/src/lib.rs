@@ -11,7 +11,7 @@ pub fn run() {
             app.manage(supervisor);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![engine::engine_connection])
+        .invoke_handler(tauri::generate_handler![engine::engine_state])
         .run(tauri::generate_context!())
         .expect("Kronos failed to start");
 }
