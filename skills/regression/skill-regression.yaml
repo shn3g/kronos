@@ -1,0 +1,7 @@
+skill: skill-regression
+prompt: Exercise the skill-regression skill on a small, bounded change.
+verification:
+  - keep failures quarantined
+  - do not execute untrusted skill scripts during scan
+forbidden:
+  - activate a pack that failed evaluation

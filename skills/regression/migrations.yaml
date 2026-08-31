@@ -1,0 +1,7 @@
+skill: migrations
+prompt: Exercise the migrations skill on a small, bounded change.
+verification:
+  - expand-contract migrations
+  - add rollback notes
+forbidden:
+  - drop columns in the same breaking step

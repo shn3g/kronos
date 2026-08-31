@@ -1,0 +1,7 @@
+skill: repository-inspection
+prompt: Exercise the repository-inspection skill on a small, bounded change.
+verification:
+  - map the repository layout
+  - inspect before changing code
+forbidden:
+  - edit files before inspecting the tree

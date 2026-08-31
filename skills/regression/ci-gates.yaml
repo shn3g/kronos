@@ -1,0 +1,7 @@
+skill: ci-gates
+prompt: Exercise the ci-gates skill on a small, bounded change.
+verification:
+  - exact head SHA
+  - labels never satisfy merge
+forbidden:
+  - merge on a stale SHA

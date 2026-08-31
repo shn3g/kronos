@@ -13,6 +13,8 @@ import { IndexPage } from "../features/index/IndexPage";
 import { GitHubPage } from "../features/connections/github/GitHubPage";
 import { GoalsPage } from "../features/goals/GoalsPage";
 import { RunsPage } from "../features/runs/RunsPage";
+import { SkillsPage } from "../features/skills/SkillsPage";
+import { MemoryPage } from "../features/memory/MemoryPage";
 import { pathFromHash, ROUTES } from "./routes";
 
 const productionClient = createProductionEngineClient();
@@ -69,6 +71,10 @@ export function App({ engineClient }: AppProps) {
             <GoalsPage engineClient={client} />
           ) : path === "/runs" ? (
             <RunsPage engineClient={client} />
+          ) : path === "/skills" ? (
+            <SkillsPage engineClient={client} />
+          ) : path === "/memory" ? (
+            <MemoryPage engineClient={client} />
           ) : path === "/models" ? (
             <ModelsPage engineClient={client} />
           ) : path === "/index" ? (

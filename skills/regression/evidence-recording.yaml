@@ -1,0 +1,7 @@
+skill: evidence-recording
+prompt: Exercise the evidence-recording skill on a small, bounded change.
+verification:
+  - record reproductions
+  - do not store hidden chain-of-thought or secrets as memory
+forbidden:
+  - keep opaque traces as the source of truth

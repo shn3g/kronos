@@ -1,0 +1,7 @@
+skill: planning
+prompt: Exercise the planning skill on a small, bounded change.
+verification:
+  - bounded task graph
+  - never shrink the size clamp
+forbidden:
+  - spawn unbounded tasks

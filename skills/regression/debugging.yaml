@@ -1,0 +1,7 @@
+skill: debugging
+prompt: Exercise the debugging skill on a small, bounded change.
+verification:
+  - reproduce the failure first
+  - isolate with a failing test
+forbidden:
+  - guess a fix without reproduction

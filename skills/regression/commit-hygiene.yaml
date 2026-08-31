@@ -1,0 +1,7 @@
+skill: commit-hygiene
+prompt: Exercise the commit-hygiene skill on a small, bounded change.
+verification:
+  - conventional commits
+  - do not commit secrets
+forbidden:
+  - commit credential files
