@@ -36,7 +36,7 @@ export const ROUTES = [
     path: "/models",
     name: "Models",
     heading: "Models",
-    summary: "Planner, coder, reviewer, and embedding profiles will be assigned here.",
+    summary: "Assign planner, coder, reviewer, and embedding profiles. Fail closed without an engine.",
   },
   {
     path: "/connections",
