@@ -116,5 +116,21 @@ async def test_enrolment_endpoints_list_isolate_and_keep_preview_only(
     preview = await http.get(f"/repositories/{alpha_id}/preview", headers=headers)
     assert preview.status_code == 200
     assert preview.json()["wrote_files"] is False
+    stored_preview = await http.get(f"/repositories/{beta_id}/preview", headers=headers)
+    assert stored_preview.status_code == 200
+    assert stored_preview.json()["policy"]["autonomy"]["freeze"] is False
+    config = next(
+        item["content"]
+        for item in stored_preview.json()["preview"]
+        if item["path"] == ".kronos/config.yaml"
+    )
+    assert "freeze: false" in config
+    resumed = await http.post(f"/repositories/{alpha_id}/resume", headers=headers)
+    assert resumed.status_code == 200
+    assert resumed.json()["repository"]["status"] == "active"
+    assert resumed.json()["policy"]["autonomy"]["freeze"] is True
+    reenrolled = await http.post(f"/repositories/{beta_id}/re-enrol", headers=headers)
+    assert reenrolled.status_code == 200
+    assert reenrolled.json()["policy"]["autonomy"]["freeze"] is False
     assert not (alpha / ".kronos").exists()
     assert not (beta / ".kronos").exists()

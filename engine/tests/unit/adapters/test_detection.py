@@ -47,6 +47,40 @@ def test_detect_stack_reads_manifests_without_running_repo_code(tmp_path: Path) 
     assert not (root / "PWNED").exists()
 
 
+def test_detect_stack_unions_commands_from_each_language(tmp_path: Path) -> None:
+    root = init_git_repo(
+        tmp_path / "polyglot",
+        files={
+            "package.json": (
+                '{"name":"app","scripts":{"test":"vitest","lint":"eslint .","build":"tsc"}}'
+            ),
+            "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+            "pyproject.toml": (
+                "[project]\nname='app'\n[tool.pytest.ini_options]\ntestpaths=['tests']\n"
+                "[tool.ruff]\nline-length=100\n"
+            ),
+            "Cargo.toml": "[package]\nname='app'\nversion='0.1.0'\nedition='2021'\n",
+        },
+    )
+    stack = detect_stack(root)
+    assert "javascript" in stack.languages
+    assert "python" in stack.languages
+    assert "rust" in stack.languages
+    setup = " ".join(stack.commands.setup)
+    test = " ".join(stack.commands.test)
+    lint = " ".join(stack.commands.lint)
+    build = " ".join(stack.commands.build)
+    assert "pnpm" in setup
+    assert "pip" in setup
+    assert "pnpm" in test
+    assert "pytest" in test
+    assert "cargo" in test
+    assert "pnpm" in lint
+    assert "ruff" in lint
+    assert "pnpm" in build
+    assert "cargo" in build
+
+
 def test_detect_python_stack_from_pyproject(tmp_path: Path) -> None:
     root = init_git_repo(
         tmp_path / "py-app",

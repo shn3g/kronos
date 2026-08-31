@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 POLICY_SCHEMA_VERSION = 1
 
@@ -224,11 +224,16 @@ def apply_model_proposal(
     current: RepositoryPolicy, proposal: Mapping[str, object]
 ) -> RepositoryPolicy:
     proposed = parse_policy(proposal)
-    if _step_index(RISK_STEPS, proposed.risk.floor) < _step_index(RISK_STEPS, current.risk.floor):
-        raise PolicyError("models cannot lower risk")
-    if _budget_raised(current.budgets, proposed.budgets):
-        raise PolicyError("models cannot raise budgets")
-    return proposed
+    if proposed.autonomy != current.autonomy:
+        raise PolicyError("models cannot change autonomy")
+    if proposed.budgets != current.budgets:
+        raise PolicyError("models cannot change budgets")
+    if proposed.wip != current.wip:
+        raise PolicyError("models cannot change wip")
+    if proposed.branches != current.branches:
+        raise PolicyError("models cannot change branches")
+    risk = RiskPolicy(floor=clamp_risk(current.risk.floor, proposed.risk.floor))
+    return replace(proposed, risk=risk)
 
 
 def clamp_size(baseline: str, proposed: str) -> str:
@@ -255,14 +260,6 @@ def clamp_value(current: str, proposed: str) -> str:
 
 def refuse_budget_write(operation: str) -> None:
     raise BudgetWriteRefused(f"budget write refused until metering exists: {operation}")
-
-
-def _budget_raised(current: Budgets, proposed: Budgets) -> bool:
-    return (
-        proposed.max_attempts_per_issue > current.max_attempts_per_issue
-        or proposed.max_dispatches_per_day > current.max_dispatches_per_day
-        or proposed.breaker_failure_limit > current.breaker_failure_limit
-    )
 
 
 def _step_index(steps: tuple[str, ...], value: str) -> int:

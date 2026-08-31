@@ -10,9 +10,6 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from kronos_engine.adapters.git.detection import detect_stack
-from kronos_engine.adapters.git.repository import inspect_git
-from kronos_engine.adapters.git.worktrees import repository_worktree_root
 from kronos_engine.config.paths import KronosPaths
 from kronos_engine.config.repository import EnrolmentPreview, github_owner, render_enrolment_preview
 from kronos_engine.domain.entities import EnrolledRepository, RepositoryId, RepositoryStatus
@@ -23,7 +20,12 @@ from kronos_engine.domain.policy import (
     parse_policy,
     policy_to_dict,
 )
-from kronos_engine.ports.repository import RepositoryRegistry
+from kronos_engine.ports.repository import (
+    GitInspector,
+    RepositoryRegistry,
+    RuntimeLayout,
+    StackDetector,
+)
 
 
 class RepositoryNotFound(LookupError):
@@ -52,13 +54,23 @@ class InspectResult:
 
 
 class RepositoryService:
-    def __init__(self, registry: RepositoryRegistry, paths: KronosPaths) -> None:
+    def __init__(
+        self,
+        registry: RepositoryRegistry,
+        paths: KronosPaths,
+        inspector: GitInspector,
+        detector: StackDetector,
+        runtime: RuntimeLayout,
+    ) -> None:
         self._registry = registry
         self._paths = paths
+        self._inspector = inspector
+        self._detector = detector
+        self._runtime = runtime
 
     def inspect(self, path: str) -> InspectResult:
-        snapshot = inspect_git(Path(path))
-        stack = detect_stack(snapshot.git_root)
+        snapshot = self._inspector.inspect(Path(path))
+        stack = self._detector.detect(snapshot.git_root)
         policy = default_policy(
             integration_branch=snapshot.default_branch,
             protected_branch=snapshot.default_branch,
@@ -109,7 +121,7 @@ class RepositoryService:
             enrolled_at=enrolled_at,
         )
         self._registry.save(record)
-        self._ensure_runtime(record.id)
+        self._ensure_runtime(record.id, record.realpath)
         return record
 
     def list(self) -> Sequence[EnrolledRepository]:
@@ -127,6 +139,9 @@ class RepositoryService:
     def disable(self, repo_id: RepositoryId) -> EnrolledRepository:
         return self._set_status(repo_id, RepositoryStatus.DISABLED)
 
+    def resume(self, repo_id: RepositoryId) -> EnrolledRepository:
+        return self._set_status(repo_id, RepositoryStatus.ACTIVE)
+
     def remove(self, repo_id: RepositoryId) -> None:
         record = self.get(repo_id)
         self._registry.delete(record.id)
@@ -138,13 +153,39 @@ class RepositoryService:
         self,
         repo_id: RepositoryId | None = None,
         path: str | None = None,
+        *,
+        redetect: bool = False,
     ) -> EnrolledRepository:
         if path is not None:
             return self.enrol(path)
         if repo_id is None:
             raise ValueError("reenrol requires a path or repository id")
         record = self.get(repo_id)
-        return self.enrol(record.realpath)
+        if redetect:
+            return self.enrol(record.realpath)
+        return self.resume(record.id)
+
+    def preview(self, repo_id: RepositoryId) -> InspectResult:
+        record = self.get(repo_id)
+        inspection = self.inspect(record.realpath)
+        preview = render_enrolment_preview(
+            Path(record.realpath),
+            record.policy,
+            github_owner(record.origin),
+        )
+        return InspectResult(
+            git_root=inspection.git_root,
+            origin=record.origin,
+            current_branch=inspection.current_branch,
+            default_branch=inspection.default_branch,
+            languages=inspection.languages,
+            package_managers=inspection.package_managers,
+            policy=record.policy,
+            preview=preview,
+            wrote_files=False,
+            committed=False,
+            pushed=False,
+        )
 
     def apply_model_policy(
         self,
@@ -159,7 +200,7 @@ class RepositoryService:
 
     def runtime_paths(self, repo_id: RepositoryId) -> RuntimePaths:
         state_dir = self._paths.data / "repositories" / repo_id.value
-        worktrees = repository_worktree_root(self._paths.cache, repo_id)
+        worktrees = self._runtime.worktree_root(self._paths.cache, repo_id)
         return RuntimePaths(state_dir=str(state_dir), worktrees=str(worktrees))
 
     def _set_status(self, repo_id: RepositoryId, status: RepositoryStatus) -> EnrolledRepository:
@@ -168,10 +209,13 @@ class RepositoryService:
         self._registry.save(updated)
         return updated
 
-    def _ensure_runtime(self, repo_id: RepositoryId) -> None:
+    def _ensure_runtime(self, repo_id: RepositoryId, enrolled_root: str) -> None:
         runtime = self.runtime_paths(repo_id)
-        Path(runtime.state_dir).mkdir(parents=True, exist_ok=True)
-        Path(runtime.worktrees).mkdir(parents=True, exist_ok=True)
+        self._runtime.ensure_dirs(
+            Path(runtime.state_dir),
+            Path(runtime.worktrees),
+            Path(enrolled_root),
+        )
 
 
 def stable_repository_id(realpath: str) -> RepositoryId:

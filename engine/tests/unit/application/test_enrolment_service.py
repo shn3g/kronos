@@ -1,16 +1,22 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 from __future__ import annotations
 
+import os
+import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 from tests.support.git_fixtures import init_git_repo
 
 import kronos_engine.application.repositories as repositories_mod
-from kronos_engine.application.repositories import RepositoryService
+from kronos_engine.adapters.git.detection import ManifestStackDetector
+from kronos_engine.adapters.git.repository import FilesystemGitInspector
+from kronos_engine.adapters.git.worktrees import CacheRuntimeLayout
+from kronos_engine.application.repositories import RepositoryService, stable_repository_id
 from kronos_engine.config.paths import resolve_paths
 from kronos_engine.domain.entities import RepositoryId
-from kronos_engine.domain.policy import PolicyError
+from kronos_engine.domain.policy import Commands, PolicyError
 from kronos_engine.state.database import Database
 from kronos_engine.state.repositories import SqliteRepositoryRegistry
 
@@ -30,7 +36,13 @@ def _service(tmp_path: Path) -> RepositoryService:
         directory.mkdir(parents=True, exist_ok=True)
     database = Database(paths.database)
     conn = database.connect()
-    return RepositoryService(registry=SqliteRepositoryRegistry(conn), paths=paths)
+    return RepositoryService(
+        registry=SqliteRepositoryRegistry(conn),
+        paths=paths,
+        inspector=FilesystemGitInspector(),
+        detector=ManifestStackDetector(),
+        runtime=CacheRuntimeLayout(),
+    )
 
 
 def test_enrol_inspect_and_lifecycle_keep_runtime_out_of_the_tree(tmp_path: Path) -> None:
@@ -151,3 +163,171 @@ def test_application_repositories_do_not_execute_sql() -> None:
     source = Path(repositories_mod.__file__).read_text(encoding="utf-8")
     assert "sqlite3" not in source
     assert "SELECT" not in source
+
+
+def test_application_repositories_depend_on_ports_not_adapters() -> None:
+    assert repositories_mod.__file__ is not None
+    source = Path(repositories_mod.__file__).read_text(encoding="utf-8")
+    assert "kronos_engine.adapters" not in source
+    assert ".mkdir(" not in source
+
+
+def test_repository_service_uses_injected_ports(tmp_path: Path) -> None:
+    paths = resolve_paths(
+        environ={
+            "KRONOS_DATA_HOME": str(tmp_path / "data"),
+            "KRONOS_CONFIG_HOME": str(tmp_path / "config"),
+            "KRONOS_CACHE_HOME": str(tmp_path / "cache"),
+            "KRONOS_LOG_HOME": str(tmp_path / "logs"),
+        }
+    )
+    for directory in (paths.data, paths.config, paths.cache, paths.logs):
+        directory.mkdir(parents=True, exist_ok=True)
+    root = tmp_path / "not-a-git-folder"
+    root.mkdir()
+    runtime = _FakeRuntime()
+    service = RepositoryService(
+        registry=SqliteRepositoryRegistry(Database(paths.database).connect()),
+        paths=paths,
+        inspector=_FakeInspector(root),
+        detector=_FakeDetector(),
+        runtime=runtime,
+    )
+    enrolled = service.enrol(str(root), policy_overrides={"autonomy": {"freeze": False}})
+    assert enrolled.policy.autonomy.freeze is False
+    assert runtime.ensured
+    assert Path(runtime.ensured[0][2]) == root
+
+
+def test_resume_keeps_stored_policy_after_pause(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    root = init_git_repo(tmp_path / "paused", origin="https://github.com/acme/paused.git")
+    enrolled = service.enrol(str(root), policy_overrides={"autonomy": {"freeze": False}})
+    paused = service.pause(enrolled.id)
+    assert paused.status.value == "paused"
+    resumed = service.resume(enrolled.id)
+    assert resumed.status.value == "active"
+    assert resumed.policy.autonomy.freeze is False
+
+
+def test_reenrol_by_id_keeps_policy_unless_redetect_requested(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    root = init_git_repo(tmp_path / "kept", origin="https://github.com/acme/kept.git")
+    enrolled = service.enrol(str(root), policy_overrides={"autonomy": {"freeze": False}})
+    kept = service.reenrol(repo_id=enrolled.id)
+    assert kept.id == enrolled.id
+    assert kept.policy.autonomy.freeze is False
+    redetected = service.reenrol(repo_id=enrolled.id, redetect=True)
+    assert redetected.id == enrolled.id
+    assert redetected.policy.autonomy.freeze is True
+
+
+def test_enrol_refuses_runtime_directories_inside_the_tree(tmp_path: Path) -> None:
+    root = init_git_repo(tmp_path / "inside", origin="https://github.com/acme/inside.git")
+    paths = resolve_paths(
+        environ={
+            "KRONOS_DATA_HOME": str(root / "data"),
+            "KRONOS_CONFIG_HOME": str(tmp_path / "config"),
+            "KRONOS_CACHE_HOME": str(root / "cache"),
+            "KRONOS_LOG_HOME": str(tmp_path / "logs"),
+        }
+    )
+    for directory in (paths.config, paths.logs):
+        directory.mkdir(parents=True, exist_ok=True)
+    database = Database(paths.database)
+    conn = database.connect()
+    service = RepositoryService(
+        registry=SqliteRepositoryRegistry(conn),
+        paths=paths,
+        inspector=FilesystemGitInspector(),
+        detector=ManifestStackDetector(),
+        runtime=CacheRuntimeLayout(),
+    )
+    with pytest.raises(ValueError, match="outside"):
+        service.enrol(str(root))
+    assert not (root / "cache" / "worktrees").exists()
+
+
+def test_symlink_or_junction_enrol_uses_one_stable_id(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    real = init_git_repo(tmp_path / "real-app", origin="https://github.com/acme/real-app.git")
+    link = _directory_link(real, tmp_path / "links" / "alias-app")
+    via_link = service.enrol(str(link), policy_overrides={"autonomy": {"freeze": False}})
+    via_real = service.enrol(str(real))
+    assert via_link.id == via_real.id
+    assert via_link.id == stable_repository_id(str(real.resolve()))
+    assert Path(via_real.realpath).resolve() == real.resolve()
+
+
+@dataclass(frozen=True, slots=True)
+class _Snap:
+    git_root: Path
+    realpath: Path
+    origin: str | None
+    current_branch: str
+    default_branch: str
+
+
+@dataclass(frozen=True, slots=True)
+class _Stack:
+    languages: tuple[str, ...]
+    package_managers: tuple[str, ...]
+    commands: Commands
+
+
+class _FakeInspector:
+    def __init__(self, root: Path) -> None:
+        self._root = root
+
+    def inspect(self, path: Path) -> _Snap:
+        _ = path
+        return _Snap(
+            git_root=self._root,
+            realpath=self._root,
+            origin=None,
+            current_branch="main",
+            default_branch="main",
+        )
+
+
+class _FakeDetector:
+    def detect(self, root: Path) -> _Stack:
+        _ = root
+        return _Stack(
+            languages=("python",),
+            package_managers=("pip",),
+            commands=Commands(setup=(), test=(), lint=(), build=()),
+        )
+
+
+class _FakeRuntime:
+    def __init__(self) -> None:
+        self.ensured: list[tuple[str, str, str]] = []
+
+    def worktree_root(self, cache_root: Path, repository_id: RepositoryId) -> Path:
+        return cache_root / "worktrees" / repository_id.value
+
+    def ensure_dirs(self, state_dir: Path, worktrees: Path, enrolled_root: Path) -> None:
+        self.ensured.append((str(state_dir), str(worktrees), str(enrolled_root)))
+        state_dir.mkdir(parents=True, exist_ok=True)
+        worktrees.mkdir(parents=True, exist_ok=True)
+
+
+def _directory_link(target: Path, link: Path) -> Path:
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.symlink(target, link, target_is_directory=True)
+        return link
+    except OSError:
+        if os.name != "nt":
+            raise
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            check=False,
+            capture_output=True,
+            text=True,
+            shell=False,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"cannot create directory link: {result.stderr or result.stdout}")
+        return link
