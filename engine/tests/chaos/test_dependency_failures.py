@@ -64,13 +64,21 @@ class _TimeoutGates:
 
 
 def test_process_kill_does_not_duplicate_external_writes(tmp_path: Path) -> None:
-    harness = GoalHarness(tmp_path, "restart")
-    outcome = harness.run_until_merge()
-    assert outcome.status == TaskState.MERGED.value
+    harness = GoalHarness(tmp_path, "happy")
+    harness.setup_goal()
+    interrupted = harness.engine.advance(harness.task_id, holder_id="worker-1", stop_after="pr")
+    assert interrupted.ok is True
     assert harness.fixture.count_pulls() == 1
-    assert harness.fixture.merge_calls()
-    replay = [item.type for item in harness.events.list_after(0)]
-    assert "goal.created" in replay
+    first_conn = harness.conn
+    restarted = harness.reconnect()
+    assert restarted.conn is not first_conn
+    restarted._simulate_reviewer()
+    merged = restarted.verification.merge_if_eligible(restarted.task_id, restarted.merge)
+    assert merged.ok is True
+    assert restarted.fixture.count_pulls() == 1
+    assert restarted.fixture.merge_calls()
+    restarted.engine.advance(restarted.task_id, holder_id="worker-2")
+    assert restarted.fixture.count_pulls() == 1
 
 
 def test_model_outage_pauses_without_github_writes(tmp_path: Path) -> None:
@@ -100,15 +108,13 @@ def test_ci_timeout_pauses_safely(tmp_path: Path) -> None:
     harness = GoalHarness(tmp_path, "happy")
     harness.setup_goal()
     harness.verification._gates = _TimeoutGates()
-    claimed = harness.dispatch.claim(harness.task_id, dry_run=False, holder_id="worker-1")
-    executed = harness.dispatch.execute(claimed, phase="red")
-    paused = harness.recovery.pause_or_stop(
-        harness.task_id, "ci timeout", "ci timeout"
-    )
-    assert paused.state is TaskState.PAUSED
-    assert "timeout" in (paused.stop_reason or "").lower()
-    _ = executed
+    result = harness.engine.advance(harness.task_id, holder_id="worker-1")
+    assert result.ok is False
+    task = harness.store.get_task(harness.task_id)
+    assert task.state is TaskState.PAUSED
+    assert "timeout" in (task.stop_reason or result.reason or "").lower()
     assert harness.fixture.merge_calls() == ()
+    assert harness.fixture.count_pulls() == 0
 
 
 def test_disk_full_pauses_without_external_write(tmp_path: Path) -> None:
@@ -120,12 +126,13 @@ def test_disk_full_pauses_without_external_write(tmp_path: Path) -> None:
         return _DiskFullSandbox(original(worktree))
 
     harness.dispatch._sandbox_factory = full
-    claimed = harness.dispatch.claim(harness.task_id, dry_run=False, holder_id="worker-1")
-    executed = harness.dispatch.execute(claimed, phase="red")
-    assert executed.ok is False
-    paused = harness.recovery.pause_or_stop(harness.task_id, "disk full", "disk full")
-    assert paused.state is TaskState.PAUSED
+    result = harness.engine.advance(harness.task_id, holder_id="worker-1")
+    assert result.ok is False
+    task = harness.store.get_task(harness.task_id)
+    assert task.state is TaskState.PAUSED
+    assert "disk" in (task.stop_reason or result.reason or "").lower()
     assert harness.fixture.count_pulls() == 0
+    assert harness.fixture.merge_calls() == ()
 
 
 def test_corrupt_cache_degrades_index_and_pauses(tmp_path: Path) -> None:

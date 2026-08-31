@@ -18,7 +18,7 @@ from kronos_engine.adapters.git.worktrees import CacheRuntimeLayout
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import RepositoryService
 from kronos_engine.config.settings import Settings
-from kronos_engine.domain.entities import Lease
+from kronos_engine.domain.entities import IdentifierError, Lease, TaskId
 from kronos_engine.domain.version import client_is_compatible
 from kronos_engine.indexing.service import IndexingService
 from kronos_engine.observability.redaction import redact_mapping, redact_text
@@ -188,11 +188,23 @@ class DoctorService:
 
     def restore(self, archive: Path, *, client_version: str) -> RestoreResult:
         archive_db = Path(archive) / "kronos.sqlite3"
-        if archive_db.is_file():
-            self._settings.paths.database.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(archive_db, self._settings.paths.database)
-        report = self.check(client_version=client_version)
-        return RestoreResult(ready=report.ready, health=report.health, compatible=report.compatible)
+        dest = self._settings.paths.database
+        compatible = client_is_compatible(
+            client_version, self._settings.min_client_version, self._settings.engine_version
+        )
+        if not archive_db.is_file():
+            return RestoreResult(ready=False, health="failed", compatible=compatible)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(archive_db, dest)
+        restored = self._open_restored(dest)
+        if restored is None:
+            return RestoreResult(ready=False, health="failed", compatible=compatible)
+        try:
+            if not compatible:
+                return RestoreResult(ready=False, health="failed", compatible=False)
+            return RestoreResult(ready=True, health="ok", compatible=True)
+        finally:
+            restored.close()
 
     def record_dead_letter(
         self, event_type: str, payload: dict[str, object], reason: str
@@ -271,7 +283,8 @@ class DoctorService:
         budgets: list[dict[str, object]] = [
             {
                 "repository_id": repo_id,
-                "attempts": meter.attempts,
+                "attempts": meter.daily_dispatches,
+                "daily_dispatches": meter.daily_dispatches,
                 "breaker_open": meter.breaker_open,
                 "day": meter.day,
             }
@@ -283,12 +296,17 @@ class DoctorService:
                 "status": run.status,
                 "evidence": run.evidence,
                 "task_id": run.task_id.value,
+                "repository_id": self._repository_id_for_task(run.task_id),
             }
             for run in self._goals.list_runs()
         ]
         diffs = self._diffs_from_events()
         tests = [
-            {"name": "pytest", "passed": "fail" not in (run.evidence or "").lower()}
+            {
+                "name": "pytest",
+                "passed": "fail" not in (run.evidence or "").lower(),
+                "repository_id": self._repository_id_for_task(run.task_id),
+            }
             for run in self._goals.list_runs()
         ]
         index: list[dict[str, object]] = []
@@ -389,14 +407,30 @@ class DoctorService:
             "client_version": client_version,
             "compatible": compatible,
             "signed": signature.is_file(),
-            "checksums_present": checksums.is_file() or True,
-            "sbom_present": sbom.is_file() or True,
-            "provenance_present": provenance.is_file() or True,
+            "checksums_present": checksums.is_file(),
+            "sbom_present": sbom.is_file(),
+            "provenance_present": provenance.is_file(),
         }
 
     def _ensure_ops_tables(self) -> None:
         # Migrations create these; keep a defensive no-op if tests reuse a connection.
         _ = self._conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'dead_letters'").fetchone()
+
+    def _open_restored(self, path: Path) -> sqlite3.Connection | None:
+        try:
+            conn = sqlite3.connect(str(path))
+        except sqlite3.Error:
+            return None
+        try:
+            row = conn.execute("PRAGMA integrity_check").fetchone()
+        except sqlite3.Error:
+            conn.close()
+            return None
+        if row is None or str(row[0]).lower() != "ok":
+            conn.close()
+            return None
+        conn.row_factory = sqlite3.Row
+        return conn
 
     def _copy_sqlite(self, src: Path, dest: Path) -> None:
         source = sqlite3.connect(str(src))
@@ -438,16 +472,27 @@ class DoctorService:
                 degraded = True
         return degraded
 
+    def _repository_id_for_task(self, task_id: object) -> str:
+        ident = task_id if isinstance(task_id, TaskId) else TaskId(str(task_id))
+        try:
+            return self._goals.get_task(ident).repository_id.value
+        except (LookupError, IdentifierError):
+            return ""
+
     def _diffs_from_events(self) -> list[dict[str, object]]:
         events = SqliteEventStore(self._conn).list_after(0)
         diffs: list[dict[str, object]] = []
         for item in events:
             if item.type in {"git.wrote", "external.wrote"}:
                 payload = dict(item.payload)
+                repo_id = str(payload.get("repository_id") or "")
+                if not repo_id and payload.get("task_id"):
+                    repo_id = self._repository_id_for_task(payload.get("task_id"))
                 diffs.append(
                     {
                         "path": str(payload.get("path") or payload.get("url") or item.type),
                         "summary": str(payload.get("summary") or item.type),
+                        "repository_id": repo_id,
                     }
                 )
         return diffs

@@ -12,7 +12,9 @@ RestartSec=3
 Environment=KRONOS_BIND_HOST=127.0.0.1
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=read-only
+ProtectHome=true
+StateDirectory=kronos
+ReadWritePaths=%h/.local/share/kronos %h/.config/kronos %h/.cache/kronos
 PrivateTmp=true
 
 [Install]

@@ -48,3 +48,27 @@ def test_local_metrics_count_events_without_export(monkeypatch) -> None:
     assert snap["model.called"] == 2
     assert snap["git.wrote"] == 1
     assert export_enabled() is False
+
+
+def test_tracer_writes_redacted_sink_from_ops_settings_not_env(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.delenv("KRONOS_OTEL_EXPORT", raising=False)
+    sink = tmp_path / "otel-export.jsonl"
+    tracer = Tracer(
+        destination=tmp_path / "spans.jsonl",
+        environ={},
+        otel_export=True,
+        langfuse_export=True,
+        export_sink=sink,
+    )
+    with tracer.span("model.called", {"prompt": BOT, "repository_id": "repo_alpha"}):
+        pass
+    assert tracer.exported_to_network() is False
+    assert tracer.network_calls() == ()
+    assert sink.is_file()
+    text = sink.read_text(encoding="utf-8")
+    assert "model.called" in text
+    assert BOT not in text
+    assert "repo_alpha" in text
+    assert "langfuse" in text or "otel" in text

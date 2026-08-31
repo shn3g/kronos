@@ -11,11 +11,16 @@ export interface HomeRepository {
 export interface HomeDashboard {
   ready: boolean;
   repositories: HomeRepository[];
-  schedules: Array<{ id: string; title: string; schedule: string }>;
-  budgets: Array<{ repositoryId: string; attempts: number; breakerOpen: boolean }>;
-  runs: Array<{ id: string; status: string; evidence: string }>;
-  diffs: Array<{ path: string; summary: string }>;
-  tests: Array<{ name: string; passed: boolean }>;
+  schedules: Array<{ id: string; title: string; schedule: string; repositoryId?: string }>;
+  budgets: Array<{
+    repositoryId: string;
+    attempts: number;
+    dailyDispatches: number;
+    breakerOpen: boolean;
+  }>;
+  runs: Array<{ id: string; status: string; evidence: string; repositoryId?: string }>;
+  diffs: Array<{ path: string; summary: string; repositoryId?: string }>;
+  tests: Array<{ name: string; passed: boolean; repositoryId?: string }>;
   index: Array<{
     repositoryId: string;
     ready: boolean;
@@ -68,13 +73,21 @@ export function createProductionHomeClient(
             id: stringField(row, "id"),
             title: stringField(row, "title"),
             schedule: stringField(row, "schedule"),
+            repositoryId: stringField(row, "repository_id"),
           };
         }),
         budgets: budgets.map((item) => {
           const row = asRecord(item);
+          const dailyDispatches =
+            typeof row.daily_dispatches === "number"
+              ? row.daily_dispatches
+              : typeof row.attempts === "number"
+                ? row.attempts
+                : 0;
           return {
             repositoryId: stringField(row, "repository_id"),
-            attempts: typeof row.attempts === "number" ? row.attempts : 0,
+            attempts: dailyDispatches,
+            dailyDispatches,
             breakerOpen: row.breaker_open === true,
           };
         }),
@@ -84,15 +97,24 @@ export function createProductionHomeClient(
             id: stringField(row, "id"),
             status: stringField(row, "status"),
             evidence: stringField(row, "evidence"),
+            repositoryId: stringField(row, "repository_id"),
           };
         }),
         diffs: diffs.map((item) => {
           const row = asRecord(item);
-          return { path: stringField(row, "path"), summary: stringField(row, "summary") };
+          return {
+            path: stringField(row, "path"),
+            summary: stringField(row, "summary"),
+            repositoryId: stringField(row, "repository_id"),
+          };
         }),
         tests: tests.map((item) => {
           const row = asRecord(item);
-          return { name: stringField(row, "name"), passed: row.passed === true };
+          return {
+            name: stringField(row, "name"),
+            passed: row.passed === true,
+            repositoryId: stringField(row, "repository_id"),
+          };
         }),
         index: index.map((item) => {
           const row = asRecord(item);

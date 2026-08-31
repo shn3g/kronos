@@ -139,11 +139,20 @@ async def test_doctor_backup_dead_letters_and_settings_hide_secrets(
 
     saved = await http.put(
         "/ops/settings",
-        json={"otel_export": False, "langfuse_export": False},
+        json={"otel_export": True, "langfuse_export": True},
         headers=headers,
     )
     assert saved.status_code == 200
-    assert saved.json()["otel_export"] is False
+    assert saved.json()["otel_export"] is True
+    assert saved.json()["langfuse_export"] is True
+    doctor = await http.get("/ops/doctor", headers=headers)
+    assert doctor.status_code == 200
+    sink = tmp_path / "logs" / "otel-export.jsonl"
+    assert sink.is_file()
+    exported = sink.read_text(encoding="utf-8")
+    assert BOT not in exported
+    assert "PRIVATE KEY" not in exported
+    assert "/ops/doctor" in exported or "doctor" in exported
 
     updates = await http.get("/ops/updates", headers=headers)
     assert updates.status_code == 200

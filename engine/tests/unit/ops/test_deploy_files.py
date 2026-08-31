@@ -25,3 +25,11 @@ def test_platform_unit_files_and_release_workflow_exist() -> None:
     assert "provenance" in text.lower()
     assert "TAURI_SIGNING_PRIVATE_KEY" in text
     assert "fail" in text.lower()
+    assert "if-no-files-found: error" in text
+    assert "--claim-signed" in text
+    unit = systemd.read_text(encoding="utf-8")
+    assert "StateDirectory=" in unit or "ReadWritePaths=" in unit
+    assert "ProtectHome=read-only" not in unit
+    installer = (windows / "install.ps1").read_text(encoding="utf-8")
+    assert "Copy-Item" in installer
+    assert "Payload" in installer

@@ -8,7 +8,6 @@ import os
 from pathlib import Path
 
 from kronos_engine.ops.release import (
-    UnsignedReleaseError,
     assert_signed,
     write_checksums,
     write_provenance,
@@ -35,13 +34,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     write_provenance(artifacts / "provenance.json", git_sha=args.git_sha, builder=args.builder)
     signature = artifacts / "release.sig"
-    key = os.environ.get("TAURI_SIGNING_PRIVATE_KEY", "").strip()
-    try:
-        signed_path = signature if signature.is_file() else None
-        assert_signed(signed_path, claim=args.claim_signed or bool(key))
-    except UnsignedReleaseError:
-        if args.claim_signed:
-            raise
+    claim = args.claim_signed or os.environ.get("CLAIM_SIGNED", "").strip().lower() == "true"
+    signed_path = signature if signature.is_file() else None
+    assert_signed(signed_path, claim=claim)
     return 0
 
 

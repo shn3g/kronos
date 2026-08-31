@@ -62,10 +62,14 @@ export function HomePage({ engineClient, homeClient }: HomePageProps) {
     if (!selectedId) {
       return dash;
     }
+    const matchesRepo = (item: { repositoryId?: string }) => item.repositoryId === selectedId;
     return {
       ...dash,
-      schedules: dash.schedules,
-      budgets: dash.budgets.filter((item) => !item.repositoryId || item.repositoryId === selectedId),
+      schedules: dash.schedules.filter(matchesRepo),
+      budgets: dash.budgets.filter((item) => item.repositoryId === selectedId),
+      runs: dash.runs.filter(matchesRepo),
+      diffs: dash.diffs.filter(matchesRepo),
+      tests: dash.tests.filter(matchesRepo),
       index: dash.index.filter((item) => item.repositoryId === selectedId),
     };
   }, [dash, selectedId]);
@@ -124,7 +128,7 @@ export function HomePage({ engineClient, homeClient }: HomePageProps) {
           <h2 className="workspace-card__name">Budgets</h2>
           {(filtered?.budgets ?? []).map((item) => (
             <p key={item.repositoryId} className="workspace-card__meta">
-              {item.attempts} attempts. Breaker {item.breakerOpen ? "open" : "closed"}.
+              {item.dailyDispatches} dispatches. Breaker {item.breakerOpen ? "open" : "closed"}.
             </p>
           ))}
           {(filtered?.budgets ?? []).length === 0 ? (
@@ -133,7 +137,7 @@ export function HomePage({ engineClient, homeClient }: HomePageProps) {
         </article>
         <article className="workspace-card">
           <h2 className="workspace-card__name">Runs</h2>
-          {(filtered?.runs ?? dash?.runs ?? []).map((item) => (
+          {(filtered?.runs ?? []).map((item) => (
             <p key={item.id} className="workspace-card__meta">
               {item.status}: {item.evidence}
             </p>
@@ -141,7 +145,7 @@ export function HomePage({ engineClient, homeClient }: HomePageProps) {
         </article>
         <article className="workspace-card">
           <h2 className="workspace-card__name">Diffs</h2>
-          {(filtered?.diffs ?? dash?.diffs ?? []).map((item) => (
+          {(filtered?.diffs ?? []).map((item) => (
             <p key={item.path} className="workspace-card__meta">
               {item.path} {item.summary}
             </p>
@@ -149,7 +153,7 @@ export function HomePage({ engineClient, homeClient }: HomePageProps) {
         </article>
         <article className="workspace-card">
           <h2 className="workspace-card__name">Tests</h2>
-          {(filtered?.tests ?? dash?.tests ?? []).map((item) => (
+          {(filtered?.tests ?? []).map((item) => (
             <p key={item.name} className="workspace-card__meta">
               {item.name} {item.passed ? "passed" : "failed"}
             </p>

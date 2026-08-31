@@ -76,6 +76,45 @@ def test_backup_excludes_secret_store_and_redacts_tokens(tmp_path: Path) -> None
     assert archive.includes_secret_store is False
 
 
+def test_updates_report_missing_checksums_sbom_and_provenance(tmp_path: Path) -> None:
+    secrets = InMemorySecretStore()
+    doctor = _doctor(tmp_path, secrets)
+    payload = doctor.updates(client_version="0.1.0")
+    assert payload["checksums_present"] is False
+    assert payload["sbom_present"] is False
+    assert payload["provenance_present"] is False
+    assert payload["signed"] is False
+    doctor._settings.paths.config.mkdir(parents=True, exist_ok=True)
+    sums = doctor._settings.paths.config / "SHA256SUMS"
+    sums.write_text("deadbeef  Kronos.exe\n", encoding="utf-8")
+    present = doctor.updates(client_version="0.1.0")
+    assert present["checksums_present"] is True
+    assert present["sbom_present"] is False
+    assert present["signed"] is False
+
+
+def test_restore_is_not_ready_when_archive_db_missing_or_corrupt(tmp_path: Path) -> None:
+    secrets = InMemorySecretStore()
+    doctor = _doctor(tmp_path, secrets)
+    live = doctor.check(client_version="0.1.0")
+    assert live.ready is True
+
+    missing = tmp_path / "missing-archive"
+    missing.mkdir()
+    absent = doctor.restore(missing, client_version="0.1.0")
+    assert absent.ready is False
+    assert absent.health == "failed"
+
+    garbage = tmp_path / "garbage-archive"
+    garbage.mkdir()
+    (garbage / "kronos.sqlite3").write_bytes(b"not-a-sqlite-database")
+    corrupt = doctor.restore(garbage, client_version="0.1.0")
+    assert corrupt.ready is False
+    assert corrupt.health == "failed"
+    restored_path = doctor._settings.paths.database
+    assert restored_path.read_bytes().startswith(b"not-a-sqlite-database")
+
+
 def test_restore_is_not_ready_when_health_or_version_fail(tmp_path: Path) -> None:
     secrets = InMemorySecretStore()
     doctor = _doctor(tmp_path, secrets)
@@ -91,6 +130,42 @@ def test_restore_is_not_ready_when_health_or_version_fail(tmp_path: Path) -> Non
     ).restore(Path(archive.path), client_version="0.1.0")
     assert restored.ready is False
     assert restored.health == "failed" or restored.compatible is False
+
+
+def test_dashboard_surfaces_daily_dispatches_not_hardcoded_attempts(
+    tmp_path: Path,
+) -> None:
+    secrets = InMemorySecretStore()
+    doctor = _doctor(tmp_path, secrets)
+    from kronos_engine.domain.budgets import BudgetMeter
+    from kronos_engine.domain.entities import RepositoryId
+
+    doctor._goals.save_budget_meter(
+        RepositoryId("repo_alpha"),
+        BudgetMeter(
+            attempts=0,
+            daily_dispatches=7,
+            consecutive_failures=2,
+            breaker_open=True,
+            day="2026-08-31",
+        ),
+    )
+    doctor._recorder.emit(
+        "git.wrote",
+        {
+            "path": "pkg/alpha.py",
+            "summary": "+2",
+            "repository_id": "repo_alpha",
+        },
+    )
+    snap = doctor.dashboard(client_version="0.1.0")
+    assert snap.budgets
+    meter = snap.budgets[0]
+    assert meter["daily_dispatches"] == 7
+    assert meter["breaker_open"] is True
+    assert meter["attempts"] == 7
+    assert snap.diffs
+    assert snap.diffs[0]["repository_id"] == "repo_alpha"
 
 
 def test_dead_letter_inspection_and_stuck_lease_recovery(tmp_path: Path) -> None:

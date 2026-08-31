@@ -116,6 +116,7 @@ from kronos_engine.domain.workflow import UnresolvedEvidence
 from kronos_engine.indexing.service import IndexingService, IndexStatus
 from kronos_engine.memory.promotion import PromotionBlocked, activate_promoted
 from kronos_engine.memory.records import MemoryRecord, MemoryRejected
+from kronos_engine.observability.otel import LocalMetrics, Tracer
 from kronos_engine.ports.executor import Executor
 from kronos_engine.ports.forge import (
     ForgeAuthError,
@@ -257,6 +258,29 @@ def create_app(
     store = secret_store or OsSecretStore(settings.paths.config)
     github_http = github_transport or HttpxTransport()
 
+    def _ops_flags() -> OpsSettings:
+        conn = database.connect()
+        try:
+            return DoctorService(
+                conn,
+                settings,
+                store,
+                Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn)),
+            ).settings()
+        finally:
+            conn.close()
+
+    ops_flags = _ops_flags()
+    metrics = LocalMetrics()
+    tracer = Tracer(
+        destination=settings.paths.logs / "spans.jsonl",
+        export_sink=settings.paths.logs / "otel-export.jsonl",
+        otel_export=ops_flags.otel_export,
+        langfuse_export=ops_flags.langfuse_export,
+    )
+    app.state.metrics = metrics
+    app.state.tracer = tracer
+
     @contextmanager
     def goal_engine() -> Iterator[GoalEngine]:
         conn = database.connect()
@@ -389,6 +413,17 @@ def create_app(
         if not is_loopback_client(host):
             return JSONResponse({"detail": "loopback only"}, status_code=403)
         return await call_next(request)
+
+    @app.middleware("http")
+    async def observe_requests(request: Request, call_next):  # type: ignore[no-untyped-def]
+        counts = getattr(request.app.state, "metrics", None)
+        active = getattr(request.app.state, "tracer", None)
+        if isinstance(counts, LocalMetrics):
+            counts.inc("http.requests")
+        if not isinstance(active, Tracer):
+            return await call_next(request)
+        with active.span(request.url.path, {"method": request.method}):
+            return await call_next(request)
 
     @app.get("/health", response_model=HealthResponse)
     def health(_: None = Depends(require_auth)) -> HealthResponse:
@@ -1226,13 +1261,20 @@ def create_app(
 
     @app.put("/ops/settings")
     def ops_put_settings(
-        body: OpsSettingsRequest, _: None = Depends(require_auth)
+        body: OpsSettingsRequest,
+        request: Request,
+        _: None = Depends(require_auth),
     ) -> dict[str, bool]:
         with doctor_service() as doctor:
             saved = doctor.save_settings(
                 OpsSettings(otel_export=body.otel_export, langfuse_export=body.langfuse_export)
             )
-            return {"otel_export": saved.otel_export, "langfuse_export": saved.langfuse_export}
+        active = getattr(request.app.state, "tracer", None)
+        if isinstance(active, Tracer):
+            active.set_export_flags(
+                otel_export=saved.otel_export, langfuse_export=saved.langfuse_export
+            )
+        return {"otel_export": saved.otel_export, "langfuse_export": saved.langfuse_export}
 
     @app.get("/ops/updates")
     def ops_updates(
