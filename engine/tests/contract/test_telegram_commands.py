@@ -199,6 +199,22 @@ def test_safe_configured_default_repository_is_used_when_explicit_id_omitted(
     conn.close()
 
 
+def test_goal_at_bot_name_creates_a_goal(tmp_path: Path) -> None:
+    connector, fixture, goals, repos, _store, conn = _stack(tmp_path)
+    repo_id = _enrol_named(tmp_path, repos, "alpha")
+    fixture.queue_message(
+        update_id=80,
+        text=f"/goal@KronosBot repo:{repo_id} Ship it | done | scope | low",
+    )
+    connector.poll()
+    listed = list(goals.list())
+    assert len(listed) == 1
+    assert listed[0].title == "Ship it"
+    assert listed[0].success_criteria == "done"
+    assert listed[0].source is GoalSource.TELEGRAM
+    conn.close()
+
+
 def test_unknown_explicit_repository_fails_safely(tmp_path: Path) -> None:
     connector, fixture, goals, repos, _store, conn = _stack(tmp_path)
     _enrol_named(tmp_path, repos, "alpha")
