@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
@@ -62,6 +63,9 @@ from kronos_engine.api.models import (
     SkillImportRequest,
     SkillRouteRequest,
     TaskModel,
+    TelegramAllowlistRequest,
+    TelegramStatusResponse,
+    TelegramTokenRequest,
     VersionResponse,
 )
 from kronos_engine.application.composition import build_goal_engine
@@ -74,6 +78,7 @@ from kronos_engine.application.model_profiles import (
     ProviderDraft,
     RoleAssignmentError,
 )
+from kronos_engine.application.notifications import NotificationService
 from kronos_engine.application.planning import Planner
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import (
@@ -141,6 +146,14 @@ from kronos_engine.state.goals import SqliteGoalStore
 from kronos_engine.state.model_profiles import SqliteModelRegistry
 from kronos_engine.state.outbox import SqliteOutbox
 from kronos_engine.state.repositories import SqliteRepositoryRegistry
+from kronos_engine.state.telegram import SqliteTelegramStore
+from kronos_engine.telegram.auth import BOT_TOKEN_REF, BOTFATHER_STEPS, BOTFATHER_URL
+from kronos_engine.telegram.client import (
+    HttpxTelegramTransport,
+    TelegramBotClient,
+    TelegramTransport,
+)
+from kronos_engine.telegram.commands import TelegramConnector
 
 
 def create_app(
@@ -156,10 +169,31 @@ def create_app(
     goal_forge: object | None = None,
     skills_root: Path | None = None,
     skill_source: SkillSourcePort | None = None,
+    telegram_transport: TelegramTransport | None = None,
+    telegram_auto_poll: bool = False,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        stop_polling = threading.Event()
+        worker: threading.Thread | None = None
+        if telegram_auto_poll:
+
+            def _poll() -> None:
+                while not stop_polling.wait(1.5):
+                    if not store.get(BOT_TOKEN_REF):
+                        continue
+                    try:
+                        with telegram_connector() as connector:
+                            connector.poll()
+                    except Exception:
+                        continue
+
+            worker = threading.Thread(target=_poll, daemon=True, name="kronos-telegram")
+            worker.start()
         yield
+        stop_polling.set()
+        if worker is not None:
+            worker.join(timeout=2.0)
 
     app = FastAPI(title="Kronos Engine", version=settings.engine_version, lifespan=lifespan)
 
@@ -266,6 +300,51 @@ def create_app(
             )
             catalog.load_core()
             yield catalog
+        finally:
+            conn.close()
+
+    class _NullTelegramTransport:
+        def get_updates(self, offset: int, timeout: int = 0) -> list[object]:
+            _ = offset, timeout
+            return []
+
+        def send_message(self, chat_id: int, text: str) -> None:
+            _ = chat_id, text
+
+    @contextmanager
+    def telegram_connector() -> Iterator[TelegramConnector]:
+        conn = database.connect()
+        try:
+            repos = RepositoryService(
+                SqliteRepositoryRegistry(conn),
+                settings.paths,
+                FilesystemGitInspector(),
+                ManifestStackDetector(),
+                CacheRuntimeLayout(),
+            )
+            goals = GoalService(
+                SqliteGoalStore(conn),
+                repos,
+                Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn)),
+            )
+            telegram_store = SqliteTelegramStore(conn)
+            token = store.get(BOT_TOKEN_REF)
+            transport: TelegramTransport
+            if telegram_transport is not None:
+                transport = telegram_transport
+            elif token:
+                transport = HttpxTelegramTransport(token)
+            else:
+                transport = _NullTelegramTransport()
+            client = TelegramBotClient(store, transport)
+            yield TelegramConnector(
+                client=client,
+                store=telegram_store,
+                secrets=store,
+                goals=goals,
+                repos=repos,
+                notifications=NotificationService(client, telegram_store),
+            )
         finally:
             conn.close()
 
@@ -980,6 +1059,58 @@ def create_app(
             if record is None:
                 raise HTTPException(status_code=404, detail="not found")
             return _memory_dict(record)
+
+    @app.get("/telegram/status", response_model=TelegramStatusResponse)
+    def telegram_status(_: None = Depends(require_auth)) -> TelegramStatusResponse:
+        conn = database.connect()
+        try:
+            settings_row = SqliteTelegramStore(conn).load()
+            return TelegramStatusResponse(
+                token_present=bool(store.get(BOT_TOKEN_REF)),
+                allowed_user_ids=sorted(settings_row.allowed_user_ids),
+                allowed_chat_ids=sorted(settings_row.allowed_chat_ids),
+                default_repository_id=settings_row.default_repository_id,
+                last_update_offset=settings_row.last_update_offset,
+                botfather_url=BOTFATHER_URL,
+                setup_steps=list(BOTFATHER_STEPS),
+            )
+        finally:
+            conn.close()
+
+    @app.post("/telegram/token")
+    def telegram_store_token(
+        body: TelegramTokenRequest, _: None = Depends(require_auth)
+    ) -> dict[str, bool]:
+        token = body.token.strip()
+        if not token:
+            raise HTTPException(status_code=400, detail="bot token is required")
+        store.put(BOT_TOKEN_REF, token)
+        return {"token_present": True}
+
+    @app.put("/telegram/allowlist", response_model=TelegramStatusResponse)
+    def telegram_allowlist(
+        body: TelegramAllowlistRequest, _: None = Depends(require_auth)
+    ) -> TelegramStatusResponse:
+        conn = database.connect()
+        try:
+            telegram_store = SqliteTelegramStore(conn)
+            default = body.default_repository_id or None
+            if default is not None and default.strip() == "":
+                default = None
+            telegram_store.save_allowlist(
+                tuple(body.allowed_user_ids),
+                tuple(body.allowed_chat_ids),
+                default_repository_id=default,
+            )
+        finally:
+            conn.close()
+        return telegram_status()
+
+    @app.post("/telegram/poll")
+    def telegram_poll(_: None = Depends(require_auth)) -> dict[str, int]:
+        with telegram_connector() as connector:
+            handled = connector.poll()
+            return {"handled": handled}
 
     return app
 

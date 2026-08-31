@@ -461,6 +461,20 @@
   margin-top: 12px;
 }
 
+.telegram-setup {
+  margin-top: 32px;
+}
+
+.telegram-setup .btn-primary {
+  margin-top: 12px;
+}
+
+.telegram-setup input.wizard__input {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+}
+
 .skills-page__import,
 .skills-page__actions {
   display: flex;

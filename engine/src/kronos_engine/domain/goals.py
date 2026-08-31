@@ -33,6 +33,7 @@ class GoalSource(StrEnum):
     CLI = "cli"
     GITHUB_ISSUE = "github_issue"
     SCHEDULE = "schedule"
+    TELEGRAM = "telegram"
 
 
 GOAL_TRANSITIONS: dict[GoalState, frozenset[GoalState]] = {

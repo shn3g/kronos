@@ -170,6 +170,61 @@ pub async fn pick_repository_folder(app: AppHandle) -> Option<String> {
         .map(|path| path.simplified().to_string())
 }
 
+#[tauri::command]
+pub fn import_telegram_bot_token(
+    app: AppHandle,
+    state: State<EngineSupervisor>,
+) -> EngineJsonResponse {
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("Choose a Telegram bot token file")
+        .blocking_pick_file();
+    let Some(file) = picked else {
+        return EngineJsonResponse {
+            status: 0,
+            body: String::new(),
+        };
+    };
+    let path = file.simplified().to_string();
+    let token = match fs::read_to_string(&path) {
+        Ok(raw) => raw.trim().to_string(),
+        Err(_) => {
+            return EngineJsonResponse {
+                status: 400,
+                body: "{\"detail\":\"could not read token file\"}".to_string(),
+            };
+        }
+    };
+    if token.is_empty() {
+        return EngineJsonResponse {
+            status: 400,
+            body: "{\"detail\":\"bot token is required\"}".to_string(),
+        };
+    }
+    let Some(connection) = state.connection() else {
+        return EngineJsonResponse {
+            status: 0,
+            body: String::new(),
+        };
+    };
+    let auth = format!("Bearer {}", connection.token);
+    let base = connection.base_url.trim_end_matches('/');
+    let url = format!("{base}/telegram/token");
+    let payload = serde_json::json!({ "token": token }).to_string();
+    let headers = [("Authorization", auth.as_str())];
+    match loopback_request("POST", &url, &headers, Some(payload.as_str())) {
+        Ok((status, response_body)) => EngineJsonResponse {
+            status,
+            body: response_body,
+        },
+        Err(_) => EngineJsonResponse {
+            status: 0,
+            body: String::new(),
+        },
+    }
+}
+
 fn skill_memory_id_ok(id: &str) -> bool {
     !id.is_empty()
         && !id.contains('/')
@@ -262,6 +317,12 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
     }
     if let Some(rest) = path.strip_prefix("/memory/") {
         return method == "GET" && skill_memory_id_ok(rest);
+    }
+    if path == "/telegram/status" || path == "/telegram/status/" {
+        return method == "GET";
+    }
+    if path == "/telegram/allowlist" || path == "/telegram/allowlist/" {
+        return method == "PUT";
     }
     if !path.starts_with("/repositories") {
         return false;
@@ -825,5 +886,9 @@ mod tests {
         assert!(engine_path_allowed("POST", "/memory/import-lessons"));
         assert!(engine_path_allowed("GET", "/memory/mem-1"));
         assert!(!engine_path_allowed("DELETE", "/memory"));
+        assert!(engine_path_allowed("GET", "/telegram/status"));
+        assert!(engine_path_allowed("PUT", "/telegram/allowlist"));
+        assert!(!engine_path_allowed("POST", "/telegram/token"));
+        assert!(!engine_path_allowed("POST", "/telegram/poll"));
     }
 }
