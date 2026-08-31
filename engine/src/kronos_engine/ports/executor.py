@@ -19,6 +19,7 @@ class ExecutorContext:
     evidence: str
     expected_artifact: str
     expected_content: str
+    skill_summaries: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

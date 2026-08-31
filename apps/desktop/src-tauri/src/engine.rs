@@ -250,7 +250,7 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
         if let Some((id, action)) = rest.split_once('/') {
             return method == "POST"
                 && skill_memory_id_ok(id)
-                && matches!(action, "evaluate" | "approve" | "activate" | "disable");
+                && matches!(action, "evaluate" | "approve" | "activate" | "disable" | "promote");
         }
         return method == "GET" && skill_memory_id_ok(rest);
     }
@@ -818,6 +818,7 @@ mod tests {
         assert!(engine_path_allowed("POST", "/skills/skill-tdd-core/approve"));
         assert!(engine_path_allowed("POST", "/skills/skill-tdd-core/activate"));
         assert!(engine_path_allowed("POST", "/skills/skill-tdd-core/disable"));
+        assert!(engine_path_allowed("POST", "/skills/skill-tdd-core/promote"));
         assert!(engine_path_allowed("GET", "/skills/skill-tdd-core"));
         assert!(!engine_path_allowed("DELETE", "/skills/skill-tdd-core"));
         assert!(engine_path_allowed("GET", "/memory"));

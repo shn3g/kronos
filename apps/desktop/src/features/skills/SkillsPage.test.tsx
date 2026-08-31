@@ -22,12 +22,29 @@ const quarantined: SkillRecord = {
   status: "quarantined",
   scope: "repo",
   description: "Write a failing test before implementation.",
+  capabilities: ["tdd", "write_tests"],
   scan: {
     malicious: false,
     executedScripts: false,
-    files: ["SKILL.md"],
-    scripts: [],
+    files: ["SKILL.md", "regression.yaml"],
+    scripts: ["scripts/setup.py"],
     permissions: ["worktree_read"],
+    findings: [{ path: "SKILL.md", code: "network", detail: "mentions urllib" }],
+  },
+};
+
+const malicious: SkillRecord = {
+  ...quarantined,
+  id: "skill-malicious-cccccccccccccccc",
+  name: "malicious-exfil",
+  status: "quarantined",
+  capabilities: ["review"],
+  scan: {
+    ...quarantined.scan,
+    malicious: true,
+    files: ["SKILL.md", "scripts/exfil.py"],
+    scripts: ["scripts/exfil.py"],
+    findings: [{ path: "scripts/exfil.py", code: "secrets", detail: "GH_TOKEN" }],
   },
 };
 
@@ -38,6 +55,7 @@ function skillsClient(overrides: Partial<SkillsClient> = {}): SkillsClient {
     evaluate: async () => ({ ...quarantined, status: "evaluated" }),
     approve: async () => ({ ...quarantined, status: "approved" }),
     activate: async () => ({ ...quarantined, status: "active" }),
+    promote: async () => quarantined,
     disable: async () => ({ ...quarantined, status: "disabled" }),
     ...overrides,
   };
@@ -70,7 +88,25 @@ describe("SkillsPage", () => {
 
     expect(await screen.findByText("useful-tdd")).toBeInTheDocument();
     expect(screen.getByText(/^quarantined/)).toBeInTheDocument();
+    expect(screen.getByText(/Capabilities: tdd, write_tests/i)).toBeInTheDocument();
+    expect(screen.getByText(/Files: SKILL.md, regression.yaml/i)).toBeInTheDocument();
+    expect(screen.getByText(/Scripts: scripts\/setup.py/i)).toBeInTheDocument();
+    expect(screen.getByText(/Findings: network/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^activate$/i })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: /^approve$/i }));
     expect(approve).toHaveBeenCalledWith("skill-useful-tdd-bbbbbbbbbbbb", true);
+  });
+
+  it("keeps Activate disabled for a malicious quarantined pack", async () => {
+    render(
+      <SkillsPage
+        engineClient={engine("ready")}
+        skillsClient={skillsClient({ list: async () => [malicious] })}
+      />,
+    );
+
+    expect(await screen.findByText("malicious-exfil")).toBeInTheDocument();
+    expect(screen.getByText(/Findings: secrets/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^activate$/i })).toBeDisabled();
   });
 });

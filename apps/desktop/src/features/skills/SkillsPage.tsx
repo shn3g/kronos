@@ -137,6 +137,22 @@ export function SkillsPage({ engineClient, skillsClient }: SkillsPageProps) {
                 {` · ${skill.scope}`}
               </p>
               <p className="workspace-card__status">{skill.description}</p>
+              {skill.capabilities.length ? (
+                <p className="workspace-card__meta">
+                  Capabilities: {skill.capabilities.join(", ")}
+                </p>
+              ) : null}
+              {skill.scan.files.length ? (
+                <p className="workspace-card__meta">Files: {skill.scan.files.join(", ")}</p>
+              ) : null}
+              {skill.scan.scripts.length ? (
+                <p className="workspace-card__meta">Scripts: {skill.scan.scripts.join(", ")}</p>
+              ) : null}
+              {skill.scan.findings.length ? (
+                <p className="workspace-card__meta">
+                  Findings: {skill.scan.findings.map((item) => item.code).join(", ")}
+                </p>
+              ) : null}
               {skill.scan.permissions.length ? (
                 <p className="workspace-card__meta">
                   Permissions: {skill.scan.permissions.join(", ")}
@@ -160,10 +176,20 @@ export function SkillsPage({ engineClient, skillsClient }: SkillsPageProps) {
                 <button
                   type="button"
                   className="btn-primary"
+                  disabled={skill.scan.malicious || skill.status === "quarantined"}
                   onClick={() => void run((id) => client.activate(id), skill.id)}
                 >
                   Activate
                 </button>
+                {skill.scope === "core" || skill.scope === "global" ? (
+                  <button
+                    type="button"
+                    className="btn-quiet"
+                    onClick={() => void run((id) => client.promote(id, true), skill.id)}
+                  >
+                    Promote
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="btn-quiet"

@@ -3,11 +3,17 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from kronos_engine.domain.policy_yaml import parse_simple_yaml
+
+_NEGATION_PREFIX = re.compile(
+    r"(?:do\s+not|don't|dont|never|must\s+not|should\s+not)\s+$",
+    re.I,
+)
 
 if TYPE_CHECKING:
     from kronos_engine.skills.catalog import InstalledSkill
@@ -55,12 +61,19 @@ def evaluate_skill(
         reasons.append("malicious scan")
     chosen = contract or skill.contract
     regression_passed = True
-    if chosen is not None:
+    if chosen is None:
+        regression_passed = False
+        reasons.append("missing regression contract")
+    else:
         haystack = f"{skill.manifest.description}\n{skill.manifest.body}".lower()
         missing = [item for item in chosen.verification if item.lower() not in haystack]
+        forbidden = [item for item in chosen.forbidden if _forbidden_violated(haystack, item)]
         if missing:
             regression_passed = False
             reasons.append("regression contract unmet")
+        if forbidden:
+            regression_passed = False
+            reasons.append("forbidden phrase")
     passed = security_passed and regression_passed
     return EvaluationResult(
         passed=passed,
@@ -68,3 +81,16 @@ def evaluate_skill(
         regression_passed=regression_passed,
         reasons=tuple(reasons),
     )
+
+
+def _forbidden_violated(haystack: str, phrase: str) -> bool:
+    needle = phrase.lower()
+    start = 0
+    while True:
+        index = haystack.find(needle, start)
+        if index < 0:
+            return False
+        prefix = haystack[max(0, index - 40) : index]
+        if not _NEGATION_PREFIX.search(prefix):
+            return True
+        start = index + 1

@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime
 
+from kronos_engine.adapters.embeddings.local import LocalEmbeddingAdapter
 from kronos_engine.adapters.executors.controlled import ControlledOpenExecutor
 from kronos_engine.adapters.git.detection import ManifestStackDetector
 from kronos_engine.adapters.git.repository import FilesystemGitInspector
@@ -30,6 +31,7 @@ from kronos_engine.indexing.service import IndexingService
 from kronos_engine.ports.executor import Executor
 from kronos_engine.ports.forge import ForgeAuthError, ForgeTarget
 from kronos_engine.ports.secrets import SecretStore
+from kronos_engine.skills.catalog import SkillCatalog, bundled_skills_root
 from kronos_engine.state.event_store import SqliteEventStore
 from kronos_engine.state.github_apps import SqliteGithubAppStore
 from kronos_engine.state.goals import SqliteGoalStore
@@ -57,7 +59,8 @@ def build_goal_engine(
     outbox = SqliteOutbox(conn)  # type: ignore[arg-type]
     recorder = Recorder(conn, events, outbox)  # type: ignore[arg-type]
     leases = SqliteLeases(conn)  # type: ignore[arg-type]
-    indexer = IndexingService(settings.paths)
+    embeddings = LocalEmbeddingAdapter(settings.paths.cache / "models")
+    indexer = IndexingService(settings.paths, embeddings=embeddings)
     repos = RepositoryService(
         SqliteRepositoryRegistry(conn),  # type: ignore[arg-type]
         settings.paths,
@@ -80,6 +83,13 @@ def build_goal_engine(
         expected_controller_app_id=_app_id(conn, "controller"),
     )
     planning = PlanningService(store, repos, recorder, chosen_planner, clock=tick)
+    skills = SkillCatalog(
+        conn,  # type: ignore[arg-type]
+        skills_root=bundled_skills_root(),
+        store_dir=settings.paths.cache / "skills",
+        embeddings=embeddings,
+    )
+    skills.load_core()
     dispatch = DispatchService(
         store,
         repos,
@@ -90,6 +100,7 @@ def build_goal_engine(
         lambda worktree: ProcessJailSandbox(worktree),
         settings.paths.cache,
         clock=tick,
+        skills=skills,
     )
     verification = VerificationService(
         store,
