@@ -21,7 +21,7 @@ Windows, macOS, and Linux are first-class. A signed production installer is a la
 4. Connect the controller GitHub App and the isolated reviewer GitHub App. Workers never receive those credentials.
 5. Leave autonomy frozen (`freeze: true`) and `mode: observe` or `mode: shadow` until you are ready for writes.
 
-Integration stays `main-openclaw`. The protected default branch stays `main`.
+The integration branch comes from committed `.kronos/config.yaml`. The in-app template default is `main`. The protected default branch is `policy.branches.protected` (template default `main`).
 
 ## Staged modes
 

@@ -4,7 +4,7 @@ Kronos is a local control plane for enrolled repositories. Public GitHub visibil
 
 ## Policy and lessons
 
-1. Commit `.kronos/config.yaml` through a reviewed pull request on the integration branch (`observe` or `shadow`).
+1. Commit `.kronos/config.yaml` through a reviewed pull request. Leave `autonomy.mode` at `observe` or `shadow` until the operator is ready for writes. The integration branch is a policy field, not an autonomy mode.
 2. Import lessons YAML as `disabled_candidate` records. Propose is not activate.
 3. Run the comparison harness (`kronos_engine.domain.comparison`) on fixture dispatch/merge decisions. Hard failures: default-branch writes, reviewer-identity misses (comment or label), duplicate external writes, secret-shaped payloads.
 4. Raise `autonomy.mode` only through reviewed policy. Models cannot change it.
