@@ -27,6 +27,8 @@ docs/                  Architecture, security, research, and design plans
 - Node.js 22 or newer
 - [pnpm](https://pnpm.io/) 9.15 (see `packageManager` in `package.json`)
 - Rust stable (for `pnpm tauri` native builds)
+- Platform WebView libraries (WebView2 on Windows, WebKitGTK 4.1 on Linux)
+- Visual Studio 2022 with the C++ workload on Windows (GitHub `windows-latest` provides this; a machine without MSVC can still run `pnpm test` and `pnpm test:e2e`)
 - Python 3.11 or newer (engine package metadata only in this milestone)
 
 ## Scripts
