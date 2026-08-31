@@ -159,6 +159,28 @@ def test_local_onnx_file_produces_code_vectors_and_never_uses_minilm(
     assert not any("def enrol" in text for text in document_texts)
 
 
+def test_unloadable_onnx_degrades_without_raising(tmp_path: Path) -> None:
+    pytest.importorskip("onnxruntime")
+    models = tmp_path / "models"
+    models.mkdir()
+    (models / "code.onnx").write_bytes(b"not a valid onnx file")
+    adapter = LocalEmbeddingAdapter(models)
+    assert adapter.available("code") is False
+    assert adapter.embed(["def enrol():\n    pass\n"], kind="code") is None
+
+    paths = kronos_paths(tmp_path)
+    root = init_git_repo(
+        tmp_path / "junk-onnx",
+        files={"src/mod.py": "def visible():\n    return 'ok'\n"},
+    )
+    service = IndexingService(paths, embeddings=adapter)
+    status = service.rebuild("repo_junk", root, indexing_policy())
+    assert status.dense_available is False
+    hits = service.search("repo_junk", "visible")
+    assert any(item.path.endswith("mod.py") for item in hits.items)
+    assert all("dense" not in item.rank_sources for item in hits.items)
+
+
 def test_sparse_and_graph_still_serve_without_dense(tmp_path: Path) -> None:
     paths = kronos_paths(tmp_path)
     root = init_git_repo(
