@@ -88,8 +88,8 @@ export function TelegramPage({ engineClient, telegramClient }: TelegramPageProps
     setError(null);
     try {
       await client.saveAllowlist({
-        allowedUserIds: parseIds(userIds),
-        allowedChatIds: parseIds(chatIds),
+        allowedUserIds: parseUserIds(userIds),
+        allowedChatIds: parseChatIds(chatIds),
         defaultRepositoryId: defaultRepo.trim() || null,
       });
       setStatus(await client.status());
@@ -162,9 +162,17 @@ export function TelegramPage({ engineClient, telegramClient }: TelegramPageProps
   );
 }
 
-function parseIds(raw: string): number[] {
+function parseIntegerIds(raw: string): number[] {
   return raw
     .split(/[\s,]+/)
     .map((item) => Number(item))
-    .filter((value) => Number.isInteger(value) && value > 0);
+    .filter((value) => Number.isFinite(value) && Number.isInteger(value) && value !== 0);
+}
+
+function parseUserIds(raw: string): number[] {
+  return parseIntegerIds(raw).filter((value) => value > 0);
+}
+
+function parseChatIds(raw: string): number[] {
+  return parseIntegerIds(raw);
 }
