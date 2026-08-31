@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 
 from kronos_engine.domain.attestations import (
     ATTESTATION_SCHEMA_VERSION,
+    CommandOutcome,
     RunAttestation,
     parse_attestation,
     sign_attestation_payload,
@@ -20,7 +21,7 @@ def build_attestation(
     head_sha: str,
     base_sha: str,
     reviewer_app_id: int,
-    commands: Sequence[Sequence[str]],
+    commands: Sequence[CommandOutcome],
     risk: str,
     hmac_key: bytes,
     extra: Mapping[str, object] | None = None,
@@ -36,8 +37,12 @@ def build_attestation(
         "conclusion": conclusion,
         "policy_source": "base",
         "commands": [
-            {"argv": list(argv), "exit_code": 0, "sandbox_fresh": True}
-            for argv in commands
+            {
+                "argv": list(command.argv),
+                "exit_code": command.exit_code,
+                "sandbox_fresh": command.sandbox_fresh,
+            }
+            for command in commands
         ],
         "risk": risk,
     }

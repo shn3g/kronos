@@ -105,3 +105,36 @@ def _outcome(raw: dict[str, object]) -> CommandOutcome:
         exit_code=exit_code,
         sandbox_fresh=sandbox_fresh,
     )
+
+
+class FreshProcessRunner:
+    """Executes policy argv in a worktree. Each start_fresh issues a new sandbox id."""
+
+    def __init__(self) -> None:
+        self._fresh: set[str] = set()
+
+    def start_fresh(self) -> str:
+        import uuid
+
+        self._fresh.clear()
+        sandbox_id = uuid.uuid4().hex
+        self._fresh.add(sandbox_id)
+        return sandbox_id
+
+    def run(
+        self, argv: Sequence[str], *, worktree: Path, sandbox_id: str
+    ) -> dict[str, object]:
+        import subprocess
+
+        fresh = sandbox_id in self._fresh
+        completed = subprocess.run(
+            list(argv),
+            cwd=worktree,
+            capture_output=True,
+            check=False,
+        )
+        return {
+            "argv": list(argv),
+            "exit_code": completed.returncode,
+            "sandbox_fresh": fresh,
+        }

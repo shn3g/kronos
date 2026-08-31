@@ -110,6 +110,7 @@ def _genuine_evidence(**overrides: object) -> MergeEvidence:
         "review_threads_resolved": True,
         "ruleset_strict": True,
         "expected_reviewer_app_id": REVIEWER_APP_ID,
+        "expected_controller_app_id": CONTROLLER_APP_ID,
         "policy_source": "base",
         "commands_rerun_in_fresh_sandbox": True,
         "required_commands": (("pytest", "-q"),),
@@ -311,6 +312,43 @@ def test_coder_may_merge_remains_unrepresentable() -> None:
         parse_policy(raw)
 
 
+def test_github_shaped_reviewer_check_with_app_id_allows_merge() -> None:
+    from kronos_engine.application.merge import check_identity_from_github
+
+    raw: dict[str, object] = {
+        "name": KRONOS_REVIEW_CHECK_NAME,
+        "head_sha": HEAD_SHA,
+        "conclusion": "success",
+        "app": {"id": 1002},
+    }
+    assert "posted_by" not in raw
+    identity = check_identity_from_github(raw)
+    decision = evaluate_merge_policy(
+        _genuine_evidence(checks=(identity,)),
+        attestation_key=ATTESTATION_KEY,
+    )
+    assert decision.allowed is True
+    assert decision.target == "integration"
+
+
+def test_freeze_refuses_merge() -> None:
+    decision = evaluate_merge_policy(
+        _genuine_evidence(freeze=True),
+        attestation_key=ATTESTATION_KEY,
+    )
+    assert decision.allowed is False
+    assert "freeze" in decision.reason.lower() or "autonomy" in decision.reason.lower()
+
+
+def test_unresolved_review_threads_refuse_merge() -> None:
+    decision = evaluate_merge_policy(
+        _genuine_evidence(review_threads_resolved=False),
+        attestation_key=ATTESTATION_KEY,
+    )
+    assert decision.allowed is False
+    assert "thread" in decision.reason.lower()
+
+
 def test_github_fixture_spoofs_fail_and_genuine_reviewer_check_passes() -> None:
     from tests.support.github_fixture import GitHubFixture
 
@@ -323,9 +361,9 @@ def test_github_fixture_spoofs_fail_and_genuine_reviewer_check_passes() -> None:
         app_id=None,
         posted_by="worker",
     )
-    worker = _genuine_evidence(
-        checks=(check_identity_from_github(fixture.check_runs()[0]),)
-    )
+    worker_raw = dict(fixture.check_runs()[0])
+    worker_raw.pop("posted_by", None)
+    worker = _genuine_evidence(checks=(check_identity_from_github(worker_raw),))
     assert evaluate_merge_policy(worker, attestation_key=ATTESTATION_KEY).allowed is False
 
     fixture = GitHubFixture()
@@ -335,9 +373,9 @@ def test_github_fixture_spoofs_fail_and_genuine_reviewer_check_passes() -> None:
         app_id=FOREIGN_APP_ID,
         posted_by="foreign",
     )
-    foreign = _genuine_evidence(
-        checks=(check_identity_from_github(fixture.check_runs()[0]),)
-    )
+    foreign_raw = dict(fixture.check_runs()[0])
+    foreign_raw.pop("posted_by", None)
+    foreign = _genuine_evidence(checks=(check_identity_from_github(foreign_raw),))
     assert evaluate_merge_policy(foreign, attestation_key=ATTESTATION_KEY).allowed is False
 
     fixture = GitHubFixture()
@@ -347,9 +385,9 @@ def test_github_fixture_spoofs_fail_and_genuine_reviewer_check_passes() -> None:
         app_id=REVIEWER_APP_ID,
         posted_by="reviewer",
     )
-    genuine = _genuine_evidence(
-        checks=(check_identity_from_github(fixture.check_runs()[0]),)
-    )
+    genuine_raw = dict(fixture.check_runs()[0])
+    genuine_raw.pop("posted_by", None)
+    genuine = _genuine_evidence(checks=(check_identity_from_github(genuine_raw),))
     assert evaluate_merge_policy(genuine, attestation_key=ATTESTATION_KEY).allowed is True
 
 

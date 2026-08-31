@@ -14,6 +14,7 @@ from kronos_engine.domain.models import is_secret_shaped_key
 
 ATTESTATION_SCHEMA_VERSION = 1
 ATTESTATION_HMAC_KEY_REF = "github:reviewer:attestation_key"
+ATTESTATION_VERIFY_KEY_REF = "github:engine:attestation_verify_key"
 POLICY_SOURCE_BASE = "base"
 POSTED_BY_REVIEWER = "reviewer"
 POSTED_BY_CONTROLLER = "controller"
@@ -108,6 +109,7 @@ class MergeEvidence:
     review_threads_resolved: bool
     ruleset_strict: bool
     expected_reviewer_app_id: int
+    expected_controller_app_id: int
     policy_source: str
     commands_rerun_in_fresh_sandbox: bool
     required_commands: tuple[tuple[str, ...], ...]
@@ -173,7 +175,7 @@ def parse_attestation(raw: Mapping[str, object], *, hmac_key: bytes) -> RunAttes
 
 
 def verify_attestation(attestation: RunAttestation, *, hmac_key: bytes) -> None:
-    parse_attestation(_attestation_payload(attestation), hmac_key=hmac_key)
+    parse_attestation(attestation_payload(attestation), hmac_key=hmac_key)
 
 
 def evaluate_merge_policy(
@@ -244,18 +246,12 @@ def evaluate_merge_policy(
 def _check_identity_failure(
     check: CheckRunIdentity, evidence: MergeEvidence
 ) -> MergeDecision | None:
-    if check.posted_by == POSTED_BY_WORKER:
-        return _refuse("worker token cannot publish reviewer identity")
-    if check.posted_by == POSTED_BY_CONTROLLER:
-        return _refuse("controller cannot publish the reviewer check")
-    if check.posted_by == POSTED_BY_FOREIGN:
-        return _refuse("foreign App cannot satisfy reviewer integration_id")
     if check.app_id is None:
-        return _refuse("integration_id is required on the reviewer check")
+        return _refuse("worker token cannot publish reviewer identity")
+    if check.app_id == evidence.expected_controller_app_id:
+        return _refuse("controller cannot publish the reviewer check")
     if check.app_id != evidence.expected_reviewer_app_id:
         return _refuse("foreign App cannot satisfy reviewer integration_id")
-    if check.posted_by != POSTED_BY_REVIEWER:
-        return _refuse("reviewer identity mismatch")
     if check.head_sha != evidence.pr_head_sha:
         return _refuse("stale sha: check is not on the exact PR head")
     if check.conclusion != "success":
@@ -267,7 +263,7 @@ def _refuse(reason: str) -> MergeDecision:
     return MergeDecision(allowed=False, reason=reason, target="")
 
 
-def _attestation_payload(attestation: RunAttestation) -> dict[str, object]:
+def attestation_payload(attestation: RunAttestation) -> dict[str, object]:
     return {
         "schema_version": attestation.schema_version,
         "run_id": attestation.run_id,
@@ -314,3 +310,14 @@ def _require_str(raw: Mapping[str, object], key: str) -> str:
 
 def required_commands_from_policy(commands: Sequence[Sequence[str]]) -> tuple[tuple[str, ...], ...]:
     return tuple(tuple(item) for item in commands)
+
+
+def required_commands_from_repository(policy: object) -> tuple[tuple[str, ...], ...]:
+    commands = getattr(policy, "commands", None)
+    groups = (
+        getattr(commands, "setup", ()),
+        getattr(commands, "test", ()),
+        getattr(commands, "lint", ()),
+        getattr(commands, "build", ()),
+    )
+    return tuple(tuple(group) for group in groups if group)

@@ -6,7 +6,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -95,6 +95,8 @@ class GitHubFixture:
     _next_ruleset: int = 1
     _next_check: int = 1
     _merges: list[int] = field(default_factory=list)
+    _contents: dict[tuple[str, str], str] = field(default_factory=dict)
+    _review_threads: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     repository_node_id: str = "R_kgDO_fixture"
     general_category_id: str = "DIC_kwDO_general"
     _graphql_queries: list[str] = field(default_factory=list)
@@ -206,6 +208,16 @@ class GitHubFixture:
                 return self._json(found)
             if method == "PUT":
                 return self._update_ruleset(ruleset_id, request)
+        if rest.startswith("/contents/") and method == "GET":
+            file_path = rest[len("/contents/") :]
+            sha = params.get("ref") or ""
+            text = self._contents.get((sha, file_path))
+            if text is None:
+                return HttpResponse(404, {}, b"{}")
+            encoded = base64.b64encode(text.encode()).decode()
+            return self._json(
+                {"content": encoded, "encoding": "base64", "path": file_path}
+            )
         if rest == "/check-runs" and method == "POST":
             return self._create_check_run(request)
         if rest.startswith("/commits/") and rest.endswith("/check-runs") and method == "GET":
@@ -285,6 +297,20 @@ class GitHubFixture:
         query = str(payload.get("query") or "")
         variables = payload.get("variables") if isinstance(payload.get("variables"), dict) else {}
         self._graphql_queries.append(query)
+        if "reviewThreads" in query:
+            number = variables.get("number")
+            threads = self._review_threads.get(int(number), []) if isinstance(number, int) else []
+            return self._json(
+                {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "reviewThreads": {"nodes": threads},
+                            }
+                        }
+                    }
+                }
+            )
         if "createDiscussion" in query:
             self._create_discussion_variables = dict(variables)
             if variables.get("repositoryId") != self.repository_node_id:
@@ -463,15 +489,12 @@ class GitHubFixture:
         if role == "reviewer":
             app_id = self.reviewer_app_id
             slug = "kronos-reviewer"
-            posted_by = "reviewer"
         elif role == "controller":
             app_id = self.controller_app_id
             slug = "kronos-controller"
-            posted_by = "controller"
         else:
             app_id = None
             slug = None
-            posted_by = "worker"
         check_id = self._next_check
         self._next_check += 1
         check = {
@@ -481,7 +504,7 @@ class GitHubFixture:
             "status": payload.get("status", "completed"),
             "conclusion": payload.get("conclusion"),
             "app": None if app_id is None else {"id": app_id, "slug": slug},
-            "posted_by": posted_by,
+            "output": payload.get("output") or {},
         }
         self._check_runs.append(check)
         self._logical.append("post_check_run")
@@ -496,6 +519,9 @@ class GitHubFixture:
         if base_ref == self.default_branch:
             return HttpResponse(422, {}, b'{"message":"protected"}')
         payload = json.loads(request.body.decode() if request.body else "{}")
+        expected = str((pull.get("head") or {}).get("sha") or "")
+        if expected and payload.get("sha") != expected:
+            return HttpResponse(409, {}, b'{"message":"Head branch was modified"}')
         self._merges.append(number)
         self._logical.append("merge_pull")
         return self._json({"merged": True, "sha": payload.get("sha")})
@@ -626,20 +652,63 @@ class GitHubFixture:
         app_id: int | None,
         conclusion: str = "success",
         posted_by: str = "reviewer",
+        output: dict[str, Any] | None = None,
     ) -> None:
         slug = "kronos-reviewer" if posted_by == "reviewer" else posted_by
-        self._check_runs.append(
-            {
-                "id": self._next_check,
-                "name": name,
-                "head_sha": head_sha,
-                "status": "completed",
-                "conclusion": conclusion,
-                "app": None if app_id is None else {"id": app_id, "slug": slug},
-                "posted_by": posted_by,
-            }
-        )
+        check: dict[str, Any] = {
+            "id": self._next_check,
+            "name": name,
+            "head_sha": head_sha,
+            "status": "completed",
+            "conclusion": conclusion,
+            "app": None if app_id is None else {"id": app_id, "slug": slug},
+        }
+        if output is not None:
+            check["output"] = output
+        self._check_runs.append(check)
         self._next_check += 1
+
+    def seed_pull(
+        self,
+        *,
+        head: str,
+        base: str,
+        head_sha: str,
+        base_sha: str | None = None,
+        number: int | None = None,
+        labels: tuple[str, ...] = (),
+        draft: bool = True,
+    ) -> dict[str, Any]:
+        pull_number = self._next_pull if number is None else number
+        if number is None:
+            self._next_pull += 1
+        else:
+            self._next_pull = max(self._next_pull, pull_number + 1)
+        pull = {
+            "number": pull_number,
+            "title": f"seed-{pull_number}",
+            "body": "",
+            "draft": draft,
+            "html_url": f"https://github.com/{self.owner}/{self.repo}/pull/{pull_number}",
+            "head": {"ref": head, "sha": head_sha},
+            "base": {"ref": base, "sha": base_sha or self._branches.get(base, DEFAULT_SHA)},
+            "labels": [{"name": name} for name in labels],
+        }
+        self._pulls.append(pull)
+        self._labels[pull_number] = list(labels)
+        return pull
+
+    def seed_contents(self, sha: str, path: str, text: str) -> None:
+        self._contents[(sha, path)] = text
+
+    def seed_review_threads(self, number: int, resolved: Sequence[bool]) -> None:
+        self._review_threads[number] = [{"isResolved": item} for item in resolved]
+
+    def move_pull_head(self, number: int, sha: str) -> None:
+        for pull in self._pulls:
+            if pull["number"] == number:
+                pull["head"]["sha"] = sha
+                return
 
     def merge_calls(self) -> tuple[int, ...]:
         return tuple(self._merges)

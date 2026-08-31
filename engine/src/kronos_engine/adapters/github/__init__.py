@@ -14,6 +14,15 @@ from kronos_engine.adapters.github.issues import add_issue_comment as _add_comme
 from kronos_engine.adapters.github.issues import add_labels as _add_labels
 from kronos_engine.adapters.github.issues import create_issue as _create_issue
 from kronos_engine.adapters.github.issues import list_issues as _list_issues
+from kronos_engine.adapters.github.observe import file_at_sha as _file_at_sha
+from kronos_engine.adapters.github.observe import list_check_runs as _list_check_runs
+from kronos_engine.adapters.github.observe import list_issue_comments as _list_issue_comments
+from kronos_engine.adapters.github.observe import list_issue_labels as _list_issue_labels
+from kronos_engine.adapters.github.observe import observed_pull as _observed_pull
+from kronos_engine.adapters.github.observe import (
+    review_threads_resolved as _review_threads_resolved,
+)
+from kronos_engine.adapters.github.observe import ruleset_strict as _ruleset_strict
 from kronos_engine.adapters.github.pulls import merge_pull as _merge_pull
 from kronos_engine.adapters.github.pulls import open_draft_pr as _open_draft_pr
 from kronos_engine.adapters.github.pulls import open_promotion_pr as _open_promotion_pr
@@ -78,8 +87,41 @@ class GitHubForge:
             self._client, self._target, title, body, head, key, base=base
         )
 
-    def merge_pull(self, number: int, *, sha: str, target: str | None = None) -> None:
-        _merge_pull(self._client, self._target, number, sha=sha, dest=target)
+    def merge_pull(
+        self, number: int, *, sha: str, dest: str | None = None, target: str | None = None
+    ) -> None:
+        chosen = dest if dest is not None else target
+        _merge_pull(self._client, self._target, number, sha=sha, dest=chosen)
+
+    def get_pull(self, number: int) -> PullRef:
+        return _observed_pull(self._client, self._target, number)
+
+    def list_check_runs(self, sha: str) -> tuple[dict[str, object], ...]:
+        return tuple(dict(item) for item in _list_check_runs(self._client, self._target, sha))
+
+    def list_issue_comments(self, number: int) -> tuple[dict[str, object], ...]:
+        comments = _list_issue_comments(self._client, self._target, number)
+        return tuple(dict(item) for item in comments)
+
+    def list_issue_labels(self, number: int) -> tuple[str, ...]:
+        return _list_issue_labels(self._client, self._target, number)
+
+    def ruleset_strict(self) -> bool:
+        return _ruleset_strict(self._client, self._target)
+
+    def review_threads_resolved(self, number: int) -> bool:
+        return _review_threads_resolved(self._client, self._target, number)
+
+    def file_at_sha(self, sha: str, path: str) -> str:
+        return _file_at_sha(self._client, self._target, sha, path)
+
+    @property
+    def integration_branch(self) -> str:
+        return self._target.integration_branch
+
+    @property
+    def protected_branch(self) -> str:
+        return self._target.protected_branch
 
     def open_pull(
         self,

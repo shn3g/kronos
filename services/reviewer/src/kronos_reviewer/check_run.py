@@ -5,10 +5,10 @@ from __future__ import annotations
 
 import json
 
-from kronos_engine.adapters.github.client import HttpRequest, HttpTransport
+from kronos_engine.domain.attestations import RunAttestation, attestation_payload
 from kronos_engine.domain.github import KRONOS_REVIEW_CHECK_NAME
 
-DEFAULT_TIMEOUT_SECONDS = 30.0
+from kronos_reviewer.http import DEFAULT_TIMEOUT_SECONDS, HttpRequest, HttpTransport
 
 
 class ReviewerCannotPush(RuntimeError):
@@ -29,10 +29,12 @@ class ReviewerCheckClient:
         transport: HttpTransport,
         app_id: int,
         *,
-        owner: str = "acme",
-        repo: str = "app",
+        owner: str,
+        repo: str,
         base_url: str = "https://api.github.com",
     ) -> None:
+        if not owner or not repo:
+            raise ReviewerCheckRefused("owner and repo are required")
         self._transport = transport
         self.app_id = app_id
         self._owner = owner
@@ -46,6 +48,7 @@ class ReviewerCheckClient:
         summary: str,
         verified: bool = True,
         token: str | None = None,
+        attestation: RunAttestation | None = None,
     ) -> dict[str, object]:
         if not verified:
             raise ReviewerCheckRefused("refusing to publish success without verification")
@@ -53,12 +56,17 @@ class ReviewerCheckClient:
             raise ReviewerCheckRefused("hermes check names are forbidden")
         if not token:
             raise ReviewerCheckRefused("reviewer App token is required to publish the check")
+        output: dict[str, object] = {"title": KRONOS_REVIEW_CHECK_NAME, "summary": summary}
+        if attestation is not None:
+            output["text"] = json.dumps(
+                attestation_payload(attestation), sort_keys=True, separators=(",", ":")
+            )
         payload = {
             "name": KRONOS_REVIEW_CHECK_NAME,
             "head_sha": head_sha,
             "status": "completed",
             "conclusion": "success",
-            "output": {"title": KRONOS_REVIEW_CHECK_NAME, "summary": summary},
+            "output": output,
         }
         response = self._transport.send(
             HttpRequest(
@@ -73,10 +81,11 @@ class ReviewerCheckClient:
                 timeout=DEFAULT_TIMEOUT_SECONDS,
             )
         )
+        if response.status < 200 or response.status >= 300:
+            raise ReviewerCheckRefused(f"check-run POST failed: {response.status}")
         body = json.loads(response.body.decode() or "{}")
         if not isinstance(body, dict):
             raise ReviewerCheckRefused("check-run response was not an object")
-        body.setdefault("app", {"id": self.app_id, "slug": "kronos-reviewer"})
         return body
 
     def push(self, ref: str, sha: str) -> None:

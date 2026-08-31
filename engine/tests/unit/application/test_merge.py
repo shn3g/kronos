@@ -3,16 +3,15 @@
 
 from __future__ import annotations
 
-import pytest
 from tests.security.test_reviewer_identity import (
     ATTESTATION_KEY,
-    HEAD_SHA,
+    CONTROLLER_APP_ID,
+    REVIEWER_APP_ID,
     _genuine_evidence,
     _reviewer_check,
 )
 
 from kronos_engine.application.merge import (
-    MergeRefused,
     MergeService,
     promotion_pr_auto_merge_allowed,
 )
@@ -20,11 +19,15 @@ from kronos_engine.ports.forge import IdempotencyKey, PullRef
 
 
 class _FakeMerge:
+    integration_branch = "integration"
+    protected_branch = "main"
+
     def __init__(self) -> None:
         self.merged: list[tuple[int, str]] = []
         self.opened: list[dict[str, object]] = []
 
-    def merge_pull(self, number: int, *, sha: str) -> None:
+    def merge_pull(self, number: int, *, sha: str, dest: str | None = None) -> None:
+        _ = dest
         self.merged.append((number, sha))
 
     def open_pull(
@@ -56,31 +59,51 @@ class _FakeMerge:
             created=True,
         )
 
+    def get_pull(self, number: int) -> PullRef:
+        raise NotImplementedError
 
-def test_merge_service_merges_only_genuine_integration_prs() -> None:
+    def list_check_runs(self, sha: str) -> tuple[dict[str, object], ...]:
+        raise NotImplementedError
+
+    def list_issue_comments(self, number: int) -> tuple[dict[str, object], ...]:
+        raise NotImplementedError
+
+    def list_issue_labels(self, number: int) -> tuple[str, ...]:
+        raise NotImplementedError
+
+    def ruleset_strict(self) -> bool:
+        raise NotImplementedError
+
+    def review_threads_resolved(self, number: int) -> bool:
+        raise NotImplementedError
+
+    def file_at_sha(self, sha: str, path: str) -> str:
+        raise NotImplementedError
+
+
+def _service(forge: _FakeMerge) -> MergeService:
+    return MergeService(
+        forge,
+        attestation_key=ATTESTATION_KEY,
+        expected_reviewer_app_id=REVIEWER_APP_ID,
+        expected_controller_app_id=CONTROLLER_APP_ID,
+    )
+
+
+def test_consider_allows_genuine_and_refuses_worker() -> None:
     forge = _FakeMerge()
-    service = MergeService(forge, attestation_key=ATTESTATION_KEY)
-    decision = service.merge_if_eligible(4, _genuine_evidence())
-    assert decision.allowed is True
-    assert forge.merged == [(4, HEAD_SHA)]
-
-
-def test_merge_service_does_not_merge_worker_spoof() -> None:
-    forge = _FakeMerge()
-    service = MergeService(forge, attestation_key=ATTESTATION_KEY)
-    with pytest.raises(MergeRefused, match="worker"):
-        service.merge_if_eligible(
-            4,
-            _genuine_evidence(
-                checks=(_reviewer_check(app_id=None, posted_by="worker"),),
-            ),
-        )
+    service = _service(forge)
+    assert service.consider(_genuine_evidence()).allowed is True
+    worker = service.consider(
+        _genuine_evidence(checks=(_reviewer_check(app_id=None, posted_by="worker"),))
+    )
+    assert worker.allowed is False
     assert forge.merged == []
 
 
 def test_promotion_pr_is_opened_and_never_merged() -> None:
     forge = _FakeMerge()
-    service = MergeService(forge, attestation_key=ATTESTATION_KEY)
+    service = _service(forge)
     promotion = service.open_promotion_pr(
         title="Promote integration",
         body="Human review required.",
@@ -95,9 +118,9 @@ def test_promotion_pr_is_opened_and_never_merged() -> None:
     assert promotion_pr_auto_merge_allowed() is False
 
 
-def test_eligible_review_still_refuses_protected_auto_merge() -> None:
+def test_consider_refuses_protected_default() -> None:
     forge = _FakeMerge()
-    service = MergeService(forge, attestation_key=ATTESTATION_KEY)
-    with pytest.raises(MergeRefused):
-        service.merge_if_eligible(4, _genuine_evidence(base_branch="main"))
+    service = _service(forge)
+    decision = service.consider(_genuine_evidence(base_branch="main"))
+    assert decision.allowed is False
     assert forge.merged == []
