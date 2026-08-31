@@ -16,7 +16,7 @@ from kronos_engine.adapters.git.worktrees import CacheRuntimeLayout
 from kronos_engine.application.repositories import RepositoryService, stable_repository_id
 from kronos_engine.config.paths import resolve_paths
 from kronos_engine.domain.entities import RepositoryId
-from kronos_engine.domain.policy import Commands, PolicyError
+from kronos_engine.domain.policy import Commands, PolicyError, policy_to_dict
 from kronos_engine.state.database import Database
 from kronos_engine.state.repositories import SqliteRepositoryRegistry
 
@@ -120,42 +120,12 @@ def test_models_cannot_patch_enrolled_policy_to_raise_budgets(tmp_path: Path) ->
     service = _service(tmp_path)
     root = init_git_repo(tmp_path / "gamma", origin="https://github.com/acme/gamma.git")
     enrolled = service.enrol(str(root))
+    proposal = policy_to_dict(enrolled.policy)
+    budgets = dict(proposal["budgets"])  # type: ignore[arg-type]
+    budgets["max_attempts_per_issue"] = 99
+    proposal["budgets"] = budgets
     with pytest.raises(PolicyError, match="budget"):
-        service.apply_model_policy(
-            enrolled.id,
-            {
-                "schema_version": 1,
-                "branches": {
-                    "integration": enrolled.policy.branches.integration,
-                    "protected": enrolled.policy.branches.protected,
-                },
-                "commands": {
-                    "setup": list(enrolled.policy.commands.setup),
-                    "test": list(enrolled.policy.commands.test),
-                    "lint": list(enrolled.policy.commands.lint),
-                    "build": list(enrolled.policy.commands.build),
-                },
-                "autonomy": {
-                    "freeze": enrolled.policy.autonomy.freeze,
-                    "invent_issues": enrolled.policy.autonomy.invent_issues,
-                    "refill_enabled": enrolled.policy.autonomy.refill_enabled,
-                },
-                "paths": {"locked_prefixes": list(enrolled.policy.paths.locked_prefixes)},
-                "risk": {"floor": enrolled.policy.risk.floor},
-                "budgets": {
-                    "max_attempts_per_issue": 99,
-                    "max_dispatches_per_day": enrolled.policy.budgets.max_dispatches_per_day,
-                    "breaker_failure_limit": enrolled.policy.budgets.breaker_failure_limit,
-                    "dry_run_meters": False,
-                },
-                "wip": {"ready": enrolled.policy.wip.ready, "running": enrolled.policy.wip.running},
-                "executor": {
-                    "profile": enrolled.policy.executor.profile,
-                    "sandbox": enrolled.policy.executor.sandbox,
-                },
-                "indexing": {"enabled": enrolled.policy.indexing.enabled},
-            },
-        )
+        service.apply_model_policy(enrolled.id, proposal)
 
 
 def test_application_repositories_do_not_execute_sql() -> None:

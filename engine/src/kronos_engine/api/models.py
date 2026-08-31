@@ -138,3 +138,32 @@ class AssignmentsRequest(BaseModel):
 
 class AssignmentsResponse(BaseModel):
     assignments: dict[str, str | None]
+
+
+class IndexStatusResponse(BaseModel):
+    repository_id: str
+    commit: str | None
+    chunk_count: int
+    dense_available: bool
+    index_path: str
+    disk_bytes: int
+    ready: bool
+
+
+class IndexSearchHit(BaseModel):
+    path: str
+    start_line: int
+    end_line: int
+    commit: str
+    symbol: str | None
+    rank_sources: list[str]
+    trust: str
+    text: str
+
+
+class IndexSearchResponse(BaseModel):
+    items: list[IndexSearchHit]
+
+
+class IndexMapResponse(BaseModel):
+    text: str

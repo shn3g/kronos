@@ -25,7 +25,7 @@ from kronos_engine.domain.policy import (
 def test_default_policy_ports_klikday_fuses_as_schema_data() -> None:
     policy = default_policy(integration_branch="main", protected_branch="main")
     assert policy.schema_version == POLICY_SCHEMA_VERSION
-    assert policy.schema_version == 1
+    assert policy.schema_version == 2
     assert policy.autonomy.freeze is True
     assert policy.autonomy.invent_issues is False
     assert policy.autonomy.refill_enabled is False
@@ -43,7 +43,7 @@ def test_default_policy_ports_klikday_fuses_as_schema_data() -> None:
 
 def test_strict_schema_rejects_unknown_fields_and_worker_merge_fuses() -> None:
     with pytest.raises(PolicyError, match="unknown"):
-        parse_policy({"schema_version": 1, "unexpected": True})
+        parse_policy({"schema_version": 2, "unexpected": True})
     with pytest.raises(PolicyError, match="unrepresentable|merge"):
         parse_policy(
             {
@@ -151,7 +151,7 @@ def test_operator_can_set_distinct_integration_and_protected_branches() -> None:
 
 def _minimal_policy_dict() -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "branches": {"integration": "main", "protected": "main"},
         "commands": {
             "setup": ["pnpm", "install"],
@@ -170,5 +170,16 @@ def _minimal_policy_dict() -> dict[str, object]:
         },
         "wip": {"ready": 2, "running": 3},
         "executor": {"profile": "standard", "sandbox": "default"},
-        "indexing": {"enabled": True},
+        "indexing": {
+            "enabled": True,
+            "exclude_prefixes": [
+                "node_modules/",
+                "vendor/",
+                "dist/",
+                "build/",
+                "target/",
+                "__pycache__/",
+            ],
+            "max_file_bytes": 1048576,
+        },
     }
