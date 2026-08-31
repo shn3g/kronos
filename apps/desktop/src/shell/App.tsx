@@ -11,6 +11,8 @@ import { pickRepositoryFolder } from "../features/workspaces/client";
 import { ModelsPage } from "../features/models/ModelsPage";
 import { IndexPage } from "../features/index/IndexPage";
 import { GitHubPage } from "../features/connections/github/GitHubPage";
+import { GoalsPage } from "../features/goals/GoalsPage";
+import { RunsPage } from "../features/runs/RunsPage";
 import { pathFromHash, ROUTES } from "./routes";
 
 const productionClient = createProductionEngineClient();
@@ -63,6 +65,10 @@ export function App({ engineClient }: AppProps) {
         <main id="main" className="chrome-main" tabIndex={-1}>
           {path === "/workspaces" ? (
             <WorkspacesPage engineClient={client} pickFolder={pickRepositoryFolder} />
+          ) : path === "/goals" ? (
+            <GoalsPage engineClient={client} />
+          ) : path === "/runs" ? (
+            <RunsPage engineClient={client} />
           ) : path === "/models" ? (
             <ModelsPage engineClient={client} />
           ) : path === "/index" ? (

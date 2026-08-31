@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from kronos_engine.domain.entities import RepositoryId, TaskId
@@ -26,6 +27,32 @@ class CacheRuntimeLayout:
         assert_outside_enrolled_tree(worktrees, enrolled_root)
         state_dir.mkdir(parents=True, exist_ok=True)
         worktrees.mkdir(parents=True, exist_ok=True)
+
+
+class GitCacheWorktree:
+    def create(
+        self,
+        enrolled_root: Path,
+        cache_root: Path,
+        repository_id: RepositoryId,
+        task_id: TaskId,
+    ) -> Path:
+        target = task_worktree(cache_root, repository_id, task_id)
+        assert_outside_enrolled_tree(target, enrolled_root)
+        if target.exists():
+            return target
+        target.parent.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run(
+            ["git", "worktree", "add", "--detach", str(target), "HEAD"],
+            cwd=enrolled_root,
+            capture_output=True,
+            text=True,
+            shell=False,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"worktree create failed: {result.stderr}")
+        return target
 
 
 def assert_outside_enrolled_tree(target: Path, enrolled_root: Path) -> None:
