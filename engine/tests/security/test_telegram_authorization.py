@@ -36,7 +36,7 @@ from kronos_engine.state.goals import SqliteGoalStore
 from kronos_engine.state.outbox import SqliteOutbox
 from kronos_engine.state.repositories import SqliteRepositoryRegistry
 from kronos_engine.state.telegram import SqliteTelegramStore
-from kronos_engine.telegram.client import TelegramBotClient
+from kronos_engine.telegram.client import TelegramBotClient, TelegramUpdate
 from kronos_engine.telegram.commands import TelegramConnector
 
 
@@ -207,6 +207,59 @@ def test_replayed_update_id_is_ignored_after_restart(tmp_path: Path) -> None:
     assert len(listed) == 1
     assert listed[0].id.value == first_id
     assert listed[0].title == "First"
+    conn.close()
+
+
+def test_persisted_update_replays_without_a_second_goal_after_crash(tmp_path: Path) -> None:
+    connector, _fixture, goals, _repos, _secrets, conn, _db = _connector(tmp_path)
+    repo_id = _enrol(tmp_path, conn)
+    store = SqliteTelegramStore(conn)
+    store.save_allowlist((ALLOWED_USER,), (ALLOWED_CHAT,), default_repository_id=repo_id)
+    creates = {"count": 0}
+    real_create = goals.create
+
+    def boom(spec: GoalSpec) -> object:
+        creates["count"] += 1
+        raise RuntimeError("simulated crash after persist")
+
+    connector._goals.create = boom  # type: ignore[method-assign]
+    update = TelegramUpdate(
+        update_id=91,
+        user_id=ALLOWED_USER,
+        chat_id=ALLOWED_CHAT,
+        text=f"/goal repo:{repo_id} | First | criteria | non-goals | low",
+    )
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        connector.handle_update(update)
+    assert store.seen(91)
+    assert goals.list() == ()
+    assert creates["count"] == 1
+    connector._goals.create = real_create  # type: ignore[method-assign]
+    connector.handle_update(update)
+    assert goals.list() == ()
+    assert store.seen(91)
+    conn.close()
+
+
+def test_unauthorized_replay_stays_committed_without_creating_a_goal(tmp_path: Path) -> None:
+    connector, fixture, goals, _repos, _secrets, conn, _db = _connector(tmp_path)
+    repo_id = _enrol(tmp_path, conn)
+    store = SqliteTelegramStore(conn)
+    store.save_allowlist((ALLOWED_USER,), (ALLOWED_CHAT,), default_repository_id=repo_id)
+    command = f"/goal repo:{repo_id} | Secret goal | criteria met | out of scope | low"
+    update = TelegramUpdate(
+        update_id=92,
+        user_id=STRANGER_USER,
+        chat_id=ALLOWED_CHAT,
+        text=command,
+    )
+    connector.handle_update(update)
+    assert goals.list() == ()
+    assert fixture.sent == []
+    assert store.seen(92)
+    connector.handle_update(update)
+    assert goals.list() == ()
+    assert fixture.sent == []
     conn.close()
 
 

@@ -101,6 +101,7 @@ class TelegramConnector:
             self._reply(update.chat_id, "rate limit")
             self._store.commit_update(update.update_id)
             return
+        self._store.commit_update(update.update_id)
         try:
             reply = self._dispatch(parsed, update.text)
         except AmbiguousRepository as error:
@@ -115,7 +116,6 @@ class TelegramConnector:
             reply = str(error)
         if reply:
             self._reply(update.chat_id, reply)
-        self._store.commit_update(update.update_id)
 
     def _dispatch(self, parsed: ParsedCommand | None, raw: str) -> str:
         if parsed is None:
