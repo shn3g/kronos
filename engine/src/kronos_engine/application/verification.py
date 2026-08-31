@@ -86,9 +86,16 @@ class VerificationService:
             require_test_commands(repo.policy.commands.test)
         except EmptyTestCommands as error:
             return VerifyResult(ok=False, reason=str(error), evidence=str(error))
-        results = self._gates.run(worktree, (tuple(repo.policy.commands.test),))
+        try:
+            results = self._gates.run(worktree, (tuple(repo.policy.commands.test),))
+        except TimeoutError as error:
+            return VerifyResult(ok=False, reason="ci timeout", evidence=str(error))
         passed = bool(results) and all(bool(item.get("passed")) for item in results)
         output = str(results[0].get("output") if results else "no gate output")
+        self._recorder.emit(
+            "ci.checked",
+            {"task_id": task.id.value, "passed": passed},
+        )
         if passed:
             return VerifyResult(ok=True, reason="gates passed", evidence=output)
         return VerifyResult(ok=False, reason="failing tests", evidence=output)
@@ -193,6 +200,14 @@ class VerificationService:
                 "pr_url": pull.url,
             },
         )
+        self._recorder.emit(
+            "git.wrote",
+            {"task_id": task.id.value, "url": pull.url, "path": branch},
+        )
+        self._recorder.emit(
+            "external.wrote",
+            {"task_id": task.id.value, "url": pull.url, "idempotency_key": f"pr:{task.id.value}"},
+        )
         return pull
 
     def merge_if_eligible(self, task_id: TaskId, merge: MergeService) -> MergeAttempt:
@@ -231,6 +246,10 @@ class VerificationService:
                         "to": GoalState.COMPLETED.value,
                     },
                 )
+        self._recorder.emit(
+            "review.checked",
+            {"task_id": task.id.value, "ok": True},
+        )
         return MergeAttempt(ok=True, reason=decision.reason)
 
     def _assert_fence(self, task: TaskRecord) -> None:

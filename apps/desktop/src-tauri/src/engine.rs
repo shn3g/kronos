@@ -324,6 +324,31 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
     if path == "/telegram/allowlist" || path == "/telegram/allowlist/" {
         return method == "PUT";
     }
+    if path == "/ops/dashboard"
+        || path == "/ops/dashboard/"
+        || path == "/ops/doctor"
+        || path == "/ops/doctor/"
+        || path == "/ops/dead-letters"
+        || path == "/ops/dead-letters/"
+        || path == "/ops/updates"
+        || path == "/ops/updates/"
+        || path == "/ops/notifications"
+        || path == "/ops/notifications/"
+    {
+        return method == "GET";
+    }
+    if path == "/ops/settings" || path == "/ops/settings/" {
+        return method == "GET" || method == "PUT";
+    }
+    if path == "/ops/backup"
+        || path == "/ops/backup/"
+        || path == "/ops/leases/recover"
+        || path == "/ops/leases/recover/"
+        || path == "/ops/rollback"
+        || path == "/ops/rollback/"
+    {
+        return method == "POST";
+    }
     if !path.starts_with("/repositories") {
         return false;
     }
@@ -890,5 +915,17 @@ mod tests {
         assert!(engine_path_allowed("PUT", "/telegram/allowlist"));
         assert!(!engine_path_allowed("POST", "/telegram/token"));
         assert!(!engine_path_allowed("POST", "/telegram/poll"));
+        assert!(engine_path_allowed("GET", "/ops/dashboard"));
+        assert!(engine_path_allowed("GET", "/ops/doctor"));
+        assert!(engine_path_allowed("POST", "/ops/backup"));
+        assert!(engine_path_allowed("GET", "/ops/dead-letters"));
+        assert!(engine_path_allowed("POST", "/ops/leases/recover"));
+        assert!(engine_path_allowed("GET", "/ops/settings"));
+        assert!(engine_path_allowed("PUT", "/ops/settings"));
+        assert!(engine_path_allowed("GET", "/ops/updates"));
+        assert!(engine_path_allowed("GET", "/ops/notifications"));
+        assert!(engine_path_allowed("POST", "/ops/rollback"));
+        assert!(!engine_path_allowed("POST", "/ops/token"));
+        assert!(!engine_path_allowed("POST", "/ops/pem"));
     }
 }

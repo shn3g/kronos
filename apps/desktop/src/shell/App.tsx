@@ -16,6 +16,10 @@ import { GoalsPage } from "../features/goals/GoalsPage";
 import { RunsPage } from "../features/runs/RunsPage";
 import { SkillsPage } from "../features/skills/SkillsPage";
 import { MemoryPage } from "../features/memory/MemoryPage";
+import { HomePage } from "../features/home/HomePage";
+import { SettingsPage } from "../features/settings/SettingsPage";
+import { UpdatesPage } from "../features/updates/UpdatesPage";
+import { NotificationsPage } from "../features/notifications/NotificationsPage";
 import { pathFromHash, ROUTES } from "./routes";
 
 const productionClient = createProductionEngineClient();
@@ -35,8 +39,6 @@ export function App({ engineClient }: AppProps) {
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
-
-  const active = ROUTES.find((route) => route.path === path) ?? ROUTES[0];
 
   return (
     <div className="app-shell">
@@ -85,12 +87,14 @@ export function App({ engineClient }: AppProps) {
               <GitHubPage engineClient={client} />
               <TelegramPage engineClient={client} />
             </>
+          ) : path === "/settings" ? (
+            <SettingsPage engineClient={client} />
+          ) : path === "/updates" ? (
+            <UpdatesPage engineClient={client} />
+          ) : path === "/notifications" ? (
+            <NotificationsPage engineClient={client} />
           ) : (
-            <>
-              <p className="page-kicker">{active.name}</p>
-              <h1 className="page-title">{active.heading}</h1>
-              <p className="page-body">{active.summary}</p>
-            </>
+            <HomePage engineClient={client} />
           )}
         </main>
       </div>

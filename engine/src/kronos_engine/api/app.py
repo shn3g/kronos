@@ -6,6 +6,7 @@ from __future__ import annotations
 import threading
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -23,6 +24,7 @@ from kronos_engine.adapters.tools import DefaultToolDetector
 from kronos_engine.api.models import (
     AssignmentsRequest,
     AssignmentsResponse,
+    BackupRequest,
     DetectedToolModel,
     EventItem,
     EventListResponse,
@@ -48,6 +50,7 @@ from kronos_engine.api.models import (
     InspectResponse,
     LessonImportRequest,
     ModelsSnapshotResponse,
+    OpsSettingsRequest,
     PathRequest,
     PreviewFileModel,
     ProfileModel,
@@ -69,6 +72,7 @@ from kronos_engine.api.models import (
     VersionResponse,
 )
 from kronos_engine.application.composition import build_goal_engine
+from kronos_engine.application.doctor import DoctorService, OpsSettings
 from kronos_engine.application.event_query import EventQuery
 from kronos_engine.application.github_setup import GitHubSetupService
 from kronos_engine.application.goal_engine import GoalEngine
@@ -204,6 +208,14 @@ def create_app(
         conn = database.connect()
         try:
             yield EventQuery(SqliteEventStore(conn))
+        finally:
+            conn.close()
+
+    @contextmanager
+    def recorder() -> Iterator[Recorder]:
+        conn = database.connect()
+        try:
+            yield Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn))
         finally:
             conn.close()
 
@@ -354,6 +366,19 @@ def create_app(
                 goals=goals,
                 repos=repos,
                 notifications=notifications,
+            )
+        finally:
+            conn.close()
+
+    @contextmanager
+    def doctor_service() -> Iterator[DoctorService]:
+        conn = database.connect()
+        try:
+            yield DoctorService(
+                conn,
+                settings,
+                store,
+                Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn)),
             )
         finally:
             conn.close()
@@ -588,6 +613,11 @@ def create_app(
         with repository_service() as repos:
             record = _load(repos, repository_id)
             pack = IndexingService(settings.paths).search(record.id.value, q, mode=mode)
+            with recorder() as events:
+                events.emit(
+                    "retrieval.searched",
+                    {"repository_id": record.id.value, "query": q, "hits": len(pack.items)},
+                )
             return IndexSearchResponse(
                 items=[
                     IndexSearchHit(
@@ -1121,6 +1151,124 @@ def create_app(
         with telegram_connector() as connector:
             handled = connector.poll()
             return {"handled": handled}
+
+    @app.get("/ops/dashboard")
+    def ops_dashboard(
+        _: None = Depends(require_auth),
+        x_kronos_client_version: Annotated[str | None, Header(alias=CLIENT_VERSION_HEADER)] = None,
+    ) -> dict[str, object]:
+        with doctor_service() as doctor:
+            snap = doctor.dashboard(
+                client_version=x_kronos_client_version or settings.engine_version
+            )
+            return {
+                "ready": snap.ready,
+                "repositories": snap.repositories,
+                "schedules": snap.schedules,
+                "budgets": snap.budgets,
+                "runs": snap.runs,
+                "diffs": snap.diffs,
+                "tests": snap.tests,
+                "index": snap.index,
+            }
+
+    @app.get("/ops/doctor")
+    def ops_doctor(
+        _: None = Depends(require_auth),
+        x_kronos_client_version: Annotated[str | None, Header(alias=CLIENT_VERSION_HEADER)] = None,
+    ) -> dict[str, object]:
+        with doctor_service() as doctor:
+            report = doctor.check(client_version=x_kronos_client_version or settings.engine_version)
+            return {
+                "ready": report.ready,
+                "health": report.health,
+                "compatible": report.compatible,
+                "model_degraded": report.model_degraded,
+                "index_degraded": report.index_degraded,
+                "findings": [item.detail for item in report.findings],
+            }
+
+    @app.post("/ops/backup")
+    def ops_backup(body: BackupRequest, _: None = Depends(require_auth)) -> dict[str, object]:
+        with doctor_service() as doctor:
+            dest = (
+                Path(body.dest) if body.dest.strip() else settings.paths.data / "backups" / "latest"
+            )
+            archive = doctor.backup(dest)
+            return {"path": archive.path, "includes_secret_store": archive.includes_secret_store}
+
+    @app.get("/ops/dead-letters")
+    def ops_dead_letters(_: None = Depends(require_auth)) -> dict[str, object]:
+        with doctor_service() as doctor:
+            return {
+                "items": [
+                    {
+                        "id": item.id,
+                        "event_type": item.event_type,
+                        "payload": item.payload,
+                        "reason": item.reason,
+                    }
+                    for item in doctor.inspect_dead_letters()
+                ]
+            }
+
+    @app.post("/ops/leases/recover")
+    def ops_recover_leases(_: None = Depends(require_auth)) -> dict[str, object]:
+        with doctor_service() as doctor:
+            recovered = doctor.recover_stuck_leases(now=datetime.now(tz=UTC))
+            return {"recovered": [item.resource_key for item in recovered]}
+
+    @app.get("/ops/settings")
+    def ops_get_settings(_: None = Depends(require_auth)) -> dict[str, bool]:
+        with doctor_service() as doctor:
+            current = doctor.settings()
+            return {"otel_export": current.otel_export, "langfuse_export": current.langfuse_export}
+
+    @app.put("/ops/settings")
+    def ops_put_settings(
+        body: OpsSettingsRequest, _: None = Depends(require_auth)
+    ) -> dict[str, bool]:
+        with doctor_service() as doctor:
+            saved = doctor.save_settings(
+                OpsSettings(otel_export=body.otel_export, langfuse_export=body.langfuse_export)
+            )
+            return {"otel_export": saved.otel_export, "langfuse_export": saved.langfuse_export}
+
+    @app.get("/ops/updates")
+    def ops_updates(
+        _: None = Depends(require_auth),
+        x_kronos_client_version: Annotated[str | None, Header(alias=CLIENT_VERSION_HEADER)] = None,
+    ) -> dict[str, object]:
+        with doctor_service() as doctor:
+            return doctor.updates(client_version=x_kronos_client_version or "")
+
+    @app.get("/ops/notifications")
+    def ops_notifications(_: None = Depends(require_auth)) -> dict[str, object]:
+        with doctor_service() as doctor:
+            return {
+                "items": [
+                    {
+                        "id": item.id,
+                        "title": item.title,
+                        "detail": item.detail,
+                        "severity": item.severity,
+                    }
+                    for item in doctor.notifications()
+                ]
+            }
+
+    @app.post("/ops/rollback")
+    def ops_rollback(_: None = Depends(require_auth)) -> dict[str, str]:
+        from kronos_engine.ops.lifecycle import install as install_release
+        from kronos_engine.ops.lifecycle import rollback as rollback_release
+
+        target = settings.paths.data / "release"
+        if not (target / "current" / "version.json").is_file():
+            install_release(
+                target, version=settings.engine_version, engine_version=settings.engine_version
+            )
+        state = rollback_release(target)
+        return {"version": state.version}
 
     return app
 

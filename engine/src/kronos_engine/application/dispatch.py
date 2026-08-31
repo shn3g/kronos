@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import errno
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -325,6 +326,14 @@ class DispatchService:
                 status="failed",
             )
         self._recorder.emit("run.started", {"task_id": task.id.value, "phase": phase})
+        self._recorder.emit(
+            "model.called",
+            {"task_id": task.id.value, "phase": phase, "model_id": "executor"},
+        )
+        self._recorder.emit(
+            "tool.called",
+            {"task_id": task.id.value, "phase": phase},
+        )
         summaries, routed_ids = self._route_skill_summaries(task)
         request = ExecutorRequest(
             repository_id=task.repository_id,
@@ -352,7 +361,27 @@ class DispatchService:
             worker_env=strip_worker_secrets({"PATH": "/usr/bin", "LANG": "C"}),
         )
         sandbox = self._sandbox_factory(claimed.worktree)
-        result = self._executor.run(request, sandbox)
+        try:
+            result = self._executor.run(request, sandbox)
+        except OSError as error:
+            if getattr(error, "errno", None) != errno.ENOSPC:
+                raise
+            self._store.save_run(
+                RunRecord(
+                    id=RunId(f"run_{task.id.value}"),
+                    goal_id=task.goal_id,
+                    task_id=task.id,
+                    status="failed",
+                    evidence="disk full",
+                    pr_url=None,
+                    created_at=self._clock().isoformat(),
+                )
+            )
+            self._recorder.emit(
+                "run.completed",
+                {"task_id": task.id.value, "status": "failed", "error": "disk full"},
+            )
+            return ExecuteResult(ok=False, artifacts=(), error="disk full", status="failed")
         artifacts = result.artifacts
         self._store.save_task(replace(running, artifacts=artifacts))
         self._store.save_run(

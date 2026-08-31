@@ -53,4 +53,15 @@ test("web shell shows engine unavailable and primary routes", async ({ page }) =
   await expect(page.getByText(/connect a compatible engine to set up Telegram/i)).toBeVisible();
   await expect(page.getByRole("button", { name: /import bot token/i })).toHaveCount(0);
   await expect(page.getByRole("status")).toContainText("Engine unavailable");
+  await page.getByRole("link", { name: "Settings" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
+  await expect(page.getByText(/connect a compatible engine to change settings/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /run doctor/i })).toHaveCount(0);
+  await page.getByRole("link", { name: "Updates" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Updates" })).toBeVisible();
+  await expect(page.getByText(/connect a compatible engine to inspect updates/i)).toBeVisible();
+  await page.getByRole("link", { name: "Notifications" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Notifications" })).toBeVisible();
+  await expect(page.getByText(/connect a compatible engine to inspect alerts/i)).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("Engine unavailable");
 });

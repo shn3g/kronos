@@ -119,7 +119,7 @@
 
 .chrome-main {
   padding: 48px 56px 64px;
-  max-width: 720px;
+  max-width: 880px;
 }
 
 .page-kicker {
@@ -541,3 +541,30 @@
     font-size: 32px;
   }
 }
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.dashboard-list {
+  margin: 8px 0 0;
+  padding: 0 0 0 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.home-page .wizard__label,
+.settings-page .models__confirm {
+  margin-top: 24px;
+}
+
+.updates-page .btn-quiet,
+.settings-page .workspaces__toolbar {
+  margin-top: 20px;
+  display: flex;
+  gap: 8px;
+}
+

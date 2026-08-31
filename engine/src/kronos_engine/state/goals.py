@@ -219,6 +219,25 @@ class SqliteGoalStore:
         )
         self._conn.commit()
 
+    def list_budget_meters(self) -> Sequence[tuple[str, BudgetMeter]]:
+        rows = self._conn.execute(
+            "SELECT repository_id, day, daily_dispatches, consecutive_failures, breaker_open "
+            "FROM budget_meters ORDER BY repository_id, day"
+        ).fetchall()
+        return tuple(
+            (
+                str(row["repository_id"]),
+                BudgetMeter(
+                    attempts=0,
+                    daily_dispatches=int(row["daily_dispatches"]),
+                    consecutive_failures=int(row["consecutive_failures"]),
+                    breaker_open=bool(row["breaker_open"]),
+                    day=row["day"],
+                ),
+            )
+            for row in rows
+        )
+
     def task_attempts(self, task_id: TaskId) -> int:
         row = self._conn.execute(
             "SELECT attempts FROM task_attempts WHERE task_id = ?", (task_id.value,)

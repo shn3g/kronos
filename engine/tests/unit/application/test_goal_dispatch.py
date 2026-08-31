@@ -12,7 +12,13 @@ from tests.e2e.test_goal_to_integration_pr import GoalHarness, ScriptedPlanner
 
 from kronos_engine.application.dispatch import ExecuteResult
 from kronos_engine.domain.entities import TaskId
-from kronos_engine.domain.goals import GoalSource, GoalSpec, GoalState, GoalValidationError, InvalidTransition
+from kronos_engine.domain.goals import (
+    GoalSource,
+    GoalSpec,
+    GoalState,
+    GoalValidationError,
+    InvalidTransition,
+)
 from kronos_engine.domain.tasks import EvidenceLocator, TaskState
 from kronos_engine.domain.workflow import ScheduledSpawnForbidden, UnresolvedEvidence
 from kronos_engine.state.scheduler import GoalScheduler
