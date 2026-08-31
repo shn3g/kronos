@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from kronos_engine.application.notifications import NotificationService
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import RepositoryNotFound, RepositoryService
 from kronos_engine.domain.entities import GoalId
@@ -21,10 +22,12 @@ class GoalService:
         store: SqliteGoalStore,
         repos: RepositoryService,
         recorder: Recorder,
+        notifications: NotificationService | None = None,
     ) -> None:
         self._store = store
         self._repos = repos
         self._recorder = recorder
+        self._notifications = notifications
 
     def create(self, spec: GoalSpec) -> GoalRecord:
         try:
@@ -54,6 +57,7 @@ class GoalService:
                 "source": goal.source.value,
             },
         )
+        self._notify_state(goal)
         return goal
 
     def list(self) -> Sequence[GoalRecord]:
@@ -97,4 +101,14 @@ class GoalService:
                 "reason": updated.stop_reason or "",
             },
         )
+        self._notify_state(updated)
         return updated
+
+    def _notify_state(self, goal: GoalRecord) -> None:
+        if self._notifications is None:
+            return
+        self._notifications.notify_allowed_chats(
+            title=goal.title,
+            state=goal.state.value,
+            extra=goal.stop_reason,
+        )

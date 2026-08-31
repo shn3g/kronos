@@ -46,8 +46,7 @@ class NotificationService:
         pr_url: str | None = None,
         extra: str | None = None,
     ) -> None:
-        settings = self._store.load()
-        for chat_id in settings.allowed_chat_ids:
+        for chat_id in self._store.load().allowed_chat_ids:
             self.notify_state_change(
                 chat_id=chat_id,
                 title=title,
@@ -55,3 +54,11 @@ class NotificationService:
                 pr_url=pr_url,
                 extra=extra,
             )
+
+    def notify_failure_allowed(self, *, reason: str, log_excerpt: str | None = None) -> None:
+        for chat_id in self._store.load().allowed_chat_ids:
+            self.notify_failure(chat_id=chat_id, reason=reason, log_excerpt=log_excerpt)
+
+    def notify_artifact_allowed(self, *, name: str, content: str) -> None:
+        for chat_id in self._store.load().allowed_chat_ids:
+            self.notify_artifact(chat_id=chat_id, name=name, content=content)
