@@ -48,7 +48,7 @@ export const ROUTES = [
     path: "/connections",
     name: "Connections",
     heading: "Connections",
-    summary: "GitHub, Telegram, and local tool connections will be configured here.",
+    summary: "Create and install the controller and reviewer GitHub Apps. Fail closed without an engine.",
   },
 ] as const;
 

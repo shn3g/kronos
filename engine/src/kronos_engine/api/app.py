@@ -14,6 +14,8 @@ from fastapi.responses import JSONResponse
 from kronos_engine.adapters.git.detection import ManifestStackDetector
 from kronos_engine.adapters.git.repository import FilesystemGitInspector, GitError
 from kronos_engine.adapters.git.worktrees import CacheRuntimeLayout
+from kronos_engine.adapters.github import GitHubForge
+from kronos_engine.adapters.github.client import HttpTransport, HttpxTransport
 from kronos_engine.adapters.secrets.os_store import OsSecretStore
 from kronos_engine.adapters.tools import DefaultToolDetector
 from kronos_engine.api.models import (
@@ -22,6 +24,13 @@ from kronos_engine.api.models import (
     DetectedToolModel,
     EventItem,
     EventListResponse,
+    GithubAppRecordResponse,
+    GithubAppRegisterRequest,
+    GithubAppStatusModel,
+    GithubInstallRequest,
+    GithubManifestsResponse,
+    GithubRulesetRequest,
+    GithubStatusResponse,
     GoalListResponse,
     HealthResponse,
     IndexMapResponse,
@@ -43,6 +52,7 @@ from kronos_engine.api.models import (
 )
 from kronos_engine.application.catalog import CatalogService
 from kronos_engine.application.event_query import EventQuery
+from kronos_engine.application.github_setup import GitHubSetupService
 from kronos_engine.application.model_profiles import (
     ModelProfileService,
     ProviderDraft,
@@ -56,10 +66,18 @@ from kronos_engine.application.repositories import (
 from kronos_engine.config.repository import EnrolmentPreview, github_owner, render_enrolment_preview
 from kronos_engine.config.settings import CLIENT_VERSION_HEADER, Settings, is_loopback_client
 from kronos_engine.domain.entities import EnrolledRepository, IdentifierError, RepositoryId
+from kronos_engine.domain.github import APP_ROLES
 from kronos_engine.domain.models import ModelProfile
 from kronos_engine.domain.policy import PolicyError, policy_to_dict
 from kronos_engine.domain.version import client_is_compatible
 from kronos_engine.indexing.service import IndexingService, IndexStatus
+from kronos_engine.ports.forge import (
+    ForgeAuthError,
+    ForgeTarget,
+    GithubAppRecord,
+    OperatorConfirmationRequired,
+    RulesetWouldWeaken,
+)
 from kronos_engine.ports.model_provider import ToolDetector
 from kronos_engine.ports.model_registry import ProviderConfig
 from kronos_engine.ports.repository import RuntimeInsideEnrolledTree
@@ -67,6 +85,7 @@ from kronos_engine.ports.secrets import SecretStore
 from kronos_engine.state.catalog import SqliteCatalog
 from kronos_engine.state.database import Database
 from kronos_engine.state.event_store import SqliteEventStore
+from kronos_engine.state.github_apps import SqliteGithubAppStore
 from kronos_engine.state.model_profiles import SqliteModelRegistry
 from kronos_engine.state.repositories import SqliteRepositoryRegistry
 
@@ -77,6 +96,7 @@ def create_app(
     *,
     tool_detector: ToolDetector | None = None,
     secret_store: SecretStore | None = None,
+    github_transport: HttpTransport | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -122,6 +142,19 @@ def create_app(
 
     detector = tool_detector or DefaultToolDetector()
     store = secret_store or OsSecretStore(settings.paths.config)
+    github_http = github_transport or HttpxTransport()
+
+    @contextmanager
+    def github_service() -> Iterator[GitHubSetupService]:
+        conn = database.connect()
+        try:
+            yield GitHubSetupService(
+                SqliteGithubAppStore(conn),
+                store,
+                github_http,
+            )
+        finally:
+            conn.close()
 
     @contextmanager
     def model_service() -> Iterator[ModelProfileService]:
@@ -383,6 +416,120 @@ def create_app(
             record = _load(repos, repository_id)
             return IndexMapResponse(text=IndexingService(settings.paths).repo_map(record.id.value))
 
+    @app.get("/github/status", response_model=GithubStatusResponse)
+    def github_status(_: None = Depends(require_auth)) -> GithubStatusResponse:
+        with github_service() as service:
+            status = service.status()
+            return GithubStatusResponse(
+                controller=GithubAppStatusModel(
+                    registered=status.controller.registered,
+                    installed=status.controller.installed,
+                    verified=status.controller.verified,
+                ),
+                reviewer=GithubAppStatusModel(
+                    registered=status.reviewer.registered,
+                    installed=status.reviewer.installed,
+                    verified=status.reviewer.verified,
+                ),
+                webhook_enabled=status.webhook_enabled,
+                poll_mode=status.poll_mode,
+                github_cli_present=status.github_cli_present,
+            )
+
+    @app.get("/github/manifests", response_model=GithubManifestsResponse)
+    def github_manifests(_: None = Depends(require_auth)) -> GithubManifestsResponse:
+        with github_service() as service:
+            payload = service.manifests()
+            controller = payload["controller"]
+            reviewer = payload["reviewer"]
+            assert isinstance(controller, dict)
+            assert isinstance(reviewer, dict)
+            return GithubManifestsResponse(
+                controller=controller,
+                reviewer=reviewer,
+                reviewer_check_name=str(payload["reviewer_check_name"]),
+            )
+
+    @app.post("/github/apps/{role}", response_model=GithubAppRecordResponse)
+    def github_register_app(
+        role: str, body: GithubAppRegisterRequest, _: None = Depends(require_auth)
+    ) -> GithubAppRecordResponse:
+        if role not in APP_ROLES:
+            raise HTTPException(status_code=404, detail="not found")
+        if body.gh_token:
+            raise HTTPException(status_code=400, detail="GH_TOKEN is not accepted")
+        with github_service() as service:
+            try:
+                record = service.register_app(
+                    role=role,
+                    app_id=body.app_id,
+                    slug=body.slug,
+                    private_key=body.private_key,
+                )
+            except ForgeAuthError as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            return _github_record(record)
+
+    @app.post("/github/apps/{role}/install", response_model=GithubAppRecordResponse)
+    def github_install_app(
+        role: str, body: GithubInstallRequest, _: None = Depends(require_auth)
+    ) -> GithubAppRecordResponse:
+        if role not in APP_ROLES:
+            raise HTTPException(status_code=404, detail="not found")
+        with github_service() as service:
+            try:
+                record = service.record_installation(role, body.installation_id)
+            except ForgeAuthError as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            return _github_record(record)
+
+    @app.post("/github/apps/{role}/verify", response_model=GithubAppRecordResponse)
+    def github_verify_app(role: str, _: None = Depends(require_auth)) -> GithubAppRecordResponse:
+        if role not in APP_ROLES:
+            raise HTTPException(status_code=404, detail="not found")
+        with github_service() as service:
+            try:
+                record = service.verify_installation(role)
+            except ForgeAuthError as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            return _github_record(record)
+
+    @app.post("/github/rulesets/propose")
+    def github_propose_ruleset(
+        body: GithubRulesetRequest, _: None = Depends(require_auth)
+    ) -> dict[str, object]:
+        with github_service() as service:
+            try:
+                forge = _controller_forge(service, body)
+                proposal = forge.propose_ruleset(body.reviewer_integration_id)
+            except ForgeAuthError as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            return {
+                "name": proposal.name,
+                "strict": proposal.strict,
+                "required_checks": [
+                    {"context": item.context, "integration_id": item.integration_id}
+                    for item in proposal.required_checks
+                ],
+            }
+
+    @app.post("/github/rulesets/apply")
+    def github_apply_ruleset(
+        body: GithubRulesetRequest, _: None = Depends(require_auth)
+    ) -> dict[str, object]:
+        with github_service() as service:
+            try:
+                forge = _controller_forge(service, body)
+                proposal = forge.propose_ruleset(body.reviewer_integration_id)
+                applied = forge.apply_ruleset(proposal, confirm=body.confirm)
+            except OperatorConfirmationRequired as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            except RulesetWouldWeaken as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            except ForgeAuthError as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            return {"id": applied.id, "strict": applied.strict, "created": applied.created}
+
     @app.get("/goals", response_model=GoalListResponse)
     def goals(_: None = Depends(require_auth)) -> GoalListResponse:
         with catalog_service() as catalog:
@@ -415,6 +562,27 @@ def create_app(
             )
 
     return app
+
+
+def _github_record(record: GithubAppRecord) -> GithubAppRecordResponse:
+    return GithubAppRecordResponse(
+        role=record.role,
+        registered=True,
+        installed=record.installation_id is not None,
+        verified=record.verified,
+    )
+
+
+def _controller_forge(service: GitHubSetupService, body: GithubRulesetRequest) -> GitHubForge:
+    return service.forge(
+        "controller",
+        ForgeTarget(
+            owner=body.owner,
+            repo=body.repo,
+            integration_branch=body.integration_branch,
+            protected_branch=body.protected_branch,
+        ),
+    )
 
 
 def _parse_id(repository_id: str) -> RepositoryId:

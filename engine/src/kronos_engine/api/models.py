@@ -167,3 +167,50 @@ class IndexSearchResponse(BaseModel):
 
 class IndexMapResponse(BaseModel):
     text: str
+
+
+class GithubAppStatusModel(BaseModel):
+    registered: bool
+    installed: bool
+    verified: bool
+
+
+class GithubStatusResponse(BaseModel):
+    controller: GithubAppStatusModel
+    reviewer: GithubAppStatusModel
+    webhook_enabled: bool
+    poll_mode: str
+    github_cli_present: bool
+
+
+class GithubManifestsResponse(BaseModel):
+    controller: dict[str, Any]
+    reviewer: dict[str, Any]
+    reviewer_check_name: str
+
+
+class GithubAppRegisterRequest(BaseModel):
+    app_id: int
+    slug: str
+    private_key: str
+    gh_token: str | None = None
+
+
+class GithubAppRecordResponse(BaseModel):
+    role: str
+    registered: bool
+    installed: bool
+    verified: bool
+
+
+class GithubInstallRequest(BaseModel):
+    installation_id: int
+
+
+class GithubRulesetRequest(BaseModel):
+    owner: str
+    repo: str
+    integration_branch: str = "integration"
+    protected_branch: str = "main"
+    reviewer_integration_id: int
+    confirm: bool = False
