@@ -26,11 +26,27 @@ function clients(overrides: Partial<HomePageClients> = {}): HomePageClients {
           status: "active",
         },
       ],
-      schedules: [{ id: "goal_nightly", title: "Nightly scan", schedule: "0 4 * * *" }],
-      budgets: [{ repositoryId: "repo_alpha", attempts: 1, breakerOpen: false }],
-      runs: [{ id: "run_1", status: "succeeded", evidence: "tests/test_repro.py" }],
-      diffs: [{ path: "pkg/math.py", summary: "+2 -1" }],
-      tests: [{ name: "pytest", passed: true }],
+      schedules: [
+        {
+          id: "goal_nightly",
+          title: "Nightly scan",
+          schedule: "0 4 * * *",
+          repositoryId: "repo_alpha",
+        },
+      ],
+      budgets: [
+        { repositoryId: "repo_alpha", attempts: 1, dailyDispatches: 1, breakerOpen: false },
+      ],
+      runs: [
+        {
+          id: "run_1",
+          status: "succeeded",
+          evidence: "tests/test_repro.py",
+          repositoryId: "repo_alpha",
+        },
+      ],
+      diffs: [{ path: "pkg/math.py", summary: "+2 -1", repositoryId: "repo_alpha" }],
+      tests: [{ name: "pytest", passed: true, repositoryId: "repo_alpha" }],
       index: [{ repositoryId: "repo_alpha", ready: true, denseAvailable: false, chunkCount: 4 }],
     }),
     ...overrides,
@@ -66,4 +82,113 @@ describe("HomePage", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: /repository/i }), "repo_alpha");
     expect(screen.getByRole("combobox", { name: /repository/i })).toHaveValue("repo_alpha");
   });
-});
+
+  it("filters schedules, budgets, runs, diffs, tests, and index by repository", async () => {
+      const user = userEvent.setup();
+      render(
+        <HomePage
+          engineClient={engine("ready")}
+          homeClient={clients({
+            dashboard: async () => ({
+              ready: true,
+              repositories: [
+                {
+                  id: "repo_alpha",
+                  displayName: "alpha",
+                  realpath: "C:/tmp/alpha",
+                  origin: "https://github.com/acme/alpha.git",
+                  status: "active",
+                },
+                {
+                  id: "repo_beta",
+                  displayName: "beta",
+                  realpath: "C:/tmp/beta",
+                  origin: "https://github.com/acme/beta.git",
+                  status: "active",
+                },
+              ],
+              schedules: [
+                {
+                  id: "goal_alpha",
+                  title: "Alpha nightly",
+                  schedule: "0 4 * * *",
+                  repositoryId: "repo_alpha",
+                },
+                {
+                  id: "goal_beta",
+                  title: "Beta nightly",
+                  schedule: "0 5 * * *",
+                  repositoryId: "repo_beta",
+                },
+              ],
+              budgets: [
+                {
+                  repositoryId: "repo_alpha",
+                  attempts: 4,
+                  dailyDispatches: 4,
+                  breakerOpen: false,
+                },
+                {
+                  repositoryId: "repo_beta",
+                  attempts: 9,
+                  dailyDispatches: 9,
+                  breakerOpen: true,
+                },
+              ],
+              runs: [
+                {
+                  id: "run_alpha",
+                  status: "succeeded",
+                  evidence: "alpha-evidence",
+                  repositoryId: "repo_alpha",
+                },
+                {
+                  id: "run_beta",
+                  status: "failed",
+                  evidence: "beta-evidence",
+                  repositoryId: "repo_beta",
+                },
+              ],
+              diffs: [
+                { path: "alpha.py", summary: "alpha-diff", repositoryId: "repo_alpha" },
+                { path: "beta.py", summary: "beta-diff", repositoryId: "repo_beta" },
+              ],
+              tests: [
+                { name: "alpha-pytest", passed: true, repositoryId: "repo_alpha" },
+                { name: "beta-pytest", passed: false, repositoryId: "repo_beta" },
+              ],
+              index: [
+                {
+                  repositoryId: "repo_alpha",
+                  ready: true,
+                  denseAvailable: false,
+                  chunkCount: 4,
+                },
+                {
+                  repositoryId: "repo_beta",
+                  ready: false,
+                  denseAvailable: false,
+                  chunkCount: 1,
+                },
+              ],
+            }),
+          })}
+        />,
+      );
+
+      expect(await screen.findByText("Alpha nightly")).toBeInTheDocument();
+      await user.selectOptions(screen.getByRole("combobox", { name: /repository/i }), "repo_alpha");
+      expect(screen.getByText("Alpha nightly")).toBeInTheDocument();
+      expect(screen.queryByText("Beta nightly")).not.toBeInTheDocument();
+      expect(screen.getByText(/alpha-evidence/)).toBeInTheDocument();
+      expect(screen.queryByText(/beta-evidence/)).not.toBeInTheDocument();
+      expect(screen.getByText(/alpha\.py/)).toBeInTheDocument();
+      expect(screen.queryByText(/beta\.py/)).not.toBeInTheDocument();
+      expect(screen.getByText(/alpha-pytest/)).toBeInTheDocument();
+      expect(screen.queryByText(/beta-pytest/)).not.toBeInTheDocument();
+      expect(screen.getByText(/4 chunks/)).toBeInTheDocument();
+      expect(screen.queryByText(/1 chunks/)).not.toBeInTheDocument();
+      expect(screen.getByText(/4 dispatches/)).toBeInTheDocument();
+      expect(screen.queryByText(/9 dispatches/)).not.toBeInTheDocument();
+    });
+  });

@@ -171,6 +171,8 @@ class GoalEngine:
             )
             return self._from_task(paused, claimed, ok=False, terminal=True)
         red_gate = self._verification.gate(task_id)
+        if "timeout" in red_gate.reason.lower():
+            return self._fail(task_id, claimed, red_gate.reason, trip=False)
         if "empty" in red_gate.reason.lower() or "worktree" in red_gate.reason.lower():
             return self._fail(task_id, claimed, red_gate.reason, trip=False)
         if red_gate.ok:

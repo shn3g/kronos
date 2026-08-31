@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -30,12 +31,28 @@ class LocalMetrics:
 
 class Tracer:
     def __init__(
-        self, destination: Path | None = None, *, environ: Mapping[str, str] | None = None
+        self,
+        destination: Path | None = None,
+        *,
+        environ: Mapping[str, str] | None = None,
+        otel_export: bool = False,
+        langfuse_export: bool = False,
+        export_sink: Path | None = None,
     ) -> None:
         self._destination = destination
         self._environ = environ
+        self._otel_export = otel_export
+        self._langfuse_export = langfuse_export
+        self._export_sink = export_sink
         self._local: list[dict[str, Any]] = []
         self._network: list[str] = []
+
+    def set_export_flags(self, *, otel_export: bool, langfuse_export: bool) -> None:
+        self._otel_export = otel_export
+        self._langfuse_export = langfuse_export
+
+    def export_active(self) -> bool:
+        return self._otel_export or self._langfuse_export or export_enabled(self._environ)
 
     def exported_to_network(self) -> bool:
         return bool(self._network)
@@ -46,19 +63,25 @@ class Tracer:
     def local_spans(self) -> list[dict[str, Any]]:
         return list(self._local)
 
+    def _write_local(self, path: Path, record: Mapping[str, object]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+        path.write_text(existing + json.dumps(dict(record)) + "\n", encoding="utf-8")
+
     @contextmanager
     def span(self, name: str, payload: Mapping[str, object] | None = None) -> Iterator[None]:
         cleaned = redact_mapping(payload or {})
-        record = {"name": redact_text(name), "payload": cleaned}
+        record: dict[str, Any] = {
+            "name": redact_text(name),
+            "payload": cleaned,
+            "otel_export": self._otel_export or export_enabled(self._environ),
+            "langfuse_export": self._langfuse_export,
+        }
         self._local.append(record)
         if self._destination is not None:
-            self._destination.parent.mkdir(parents=True, exist_ok=True)
-            existing = (
-                self._destination.read_text(encoding="utf-8") if self._destination.is_file() else ""
-            )
-            self._destination.write_text(existing + str(record) + "\n", encoding="utf-8")
-        if export_enabled(self._environ):
-            # Export is opt-in and still does not open a network socket here.
-            # A real exporter would be injected; CI never sets KRONOS_OTEL_EXPORT.
-            pass
+            self._write_local(self._destination, record)
+        if self.export_active():
+            sink = self._export_sink or self._destination
+            if sink is not None:
+                self._write_local(sink, record)
         yield

@@ -83,3 +83,19 @@ def test_checksums_sbom_and_provenance_ship_unsigned_without_keys(tmp_path: Path
     with pytest.raises(UnsignedReleaseError):
         assert_signed(None, claim=True)
     assert_signed(None, claim=False) is None
+
+
+def test_release_cli_fails_closed_when_claim_signed_without_sig(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kronos_engine.ops.release_cli import main
+
+    artifacts = tmp_path / "dist"
+    artifacts.mkdir()
+    (artifacts / "Kronos.exe").write_bytes(b"nsis")
+    monkeypatch.setenv("CLAIM_SIGNED", "true")
+    monkeypatch.delenv("TAURI_SIGNING_PRIVATE_KEY", raising=False)
+    with pytest.raises(UnsignedReleaseError):
+        main(["--artifacts", str(artifacts), "--claim-signed"])
+    with pytest.raises(UnsignedReleaseError):
+        main(["--artifacts", str(artifacts)])
