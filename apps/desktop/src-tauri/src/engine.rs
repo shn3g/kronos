@@ -1,0 +1,563 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//! Starts and monitors the local Python engine process.
+//! Missing binaries fail closed: the desktop reports unavailable.
+//! The WebView never receives the install bearer token.
+
+use serde::Serialize;
+use std::fs::{self, File, OpenOptions};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpStream;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+use tauri::{AppHandle, Manager, State};
+
+const CLIENT_VERSION: &str = "0.1.0";
+const READY_TIMEOUT: Duration = Duration::from_secs(20);
+const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum EngineUiState {
+    Unavailable,
+    Starting,
+    Ready { version: String },
+    Incompatible {
+        #[serde(rename = "clientVersion")]
+        client_version: String,
+        #[serde(rename = "engineVersion")]
+        engine_version: String,
+    },
+}
+
+struct EngineConnection {
+    base_url: String,
+    token: String,
+}
+
+struct EngineInner {
+    child: Option<Child>,
+    connection: Option<EngineConnection>,
+    ui_state: EngineUiState,
+}
+
+pub struct EngineSupervisor {
+    inner: Arc<Mutex<EngineInner>>,
+}
+
+impl EngineSupervisor {
+    pub fn spawn(app: &AppHandle) -> Self {
+        let inner = Arc::new(Mutex::new(EngineInner {
+            child: None,
+            connection: None,
+            ui_state: EngineUiState::Starting,
+        }));
+        let supervisor = Self {
+            inner: Arc::clone(&inner),
+        };
+        let app_handle = app.clone();
+        thread::spawn(move || run_sidecar(app_handle, inner));
+        supervisor
+    }
+
+    pub fn probe(&self) -> EngineUiState {
+        let connection = {
+            let guard = match self.inner.lock() {
+                Ok(guard) => guard,
+                Err(_) => return EngineUiState::Unavailable,
+            };
+            match guard.connection.as_ref() {
+                Some(connection) => EngineConnection {
+                    base_url: connection.base_url.clone(),
+                    token: connection.token.clone(),
+                },
+                None => return guard.ui_state.clone(),
+            }
+        };
+        let next = probe_engine(&connection);
+        if let Ok(mut guard) = self.inner.lock() {
+            guard.ui_state = next.clone();
+        }
+        next
+    }
+}
+
+impl Drop for EngineSupervisor {
+    fn drop(&mut self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if let Some(child) = inner.child.as_mut() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            inner.child = None;
+            inner.connection = None;
+            inner.ui_state = EngineUiState::Unavailable;
+        }
+    }
+}
+
+#[tauri::command]
+pub fn engine_state(state: State<EngineSupervisor>) -> EngineUiState {
+    state.probe()
+}
+
+fn run_sidecar(app: AppHandle, inner: Arc<Mutex<EngineInner>>) {
+    match spawn_engine(&app) {
+        Ok((child, connection)) => {
+            if let Ok(mut guard) = inner.lock() {
+                guard.child = Some(child);
+                guard.connection = Some(connection);
+            }
+            monitor_child(inner);
+        }
+        Err(error) => {
+            eprintln!("Kronos engine sidecar did not start: {error}");
+            if let Ok(mut guard) = inner.lock() {
+                guard.ui_state = EngineUiState::Unavailable;
+            }
+        }
+    }
+}
+
+fn monitor_child(inner: Arc<Mutex<EngineInner>>) {
+    loop {
+        thread::sleep(Duration::from_millis(250));
+        let mut guard = match inner.lock() {
+            Ok(guard) => guard,
+            Err(_) => break,
+        };
+        let Some(child) = guard.child.as_mut() else {
+            break;
+        };
+        match child.try_wait() {
+            Ok(Some(_)) | Err(_) => {
+                guard.child = None;
+                guard.connection = None;
+                guard.ui_state = EngineUiState::Unavailable;
+                break;
+            }
+            Ok(None) => {}
+        }
+    }
+}
+
+fn spawn_engine(app: &AppHandle) -> Result<(Child, EngineConnection), String> {
+    let paths = EngineDirs::resolve(app)?;
+    paths.create()?;
+    let token = load_or_create_token(&paths.config.join("install.json"))?;
+    let (program, args) = engine_command()?;
+    let log_path = paths.logs.join("engine.log");
+    let log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .write(true)
+        .open(&log_path)
+        .map_err(|error| error.to_string())?;
+
+    let mut command = Command::new(&program);
+    command
+        .args(&args)
+        .env("KRONOS_DATA_HOME", &paths.data)
+        .env("KRONOS_CONFIG_HOME", &paths.config)
+        .env("KRONOS_CACHE_HOME", &paths.cache)
+        .env("KRONOS_LOG_HOME", &paths.logs)
+        .env("KRONOS_AUTH_TOKEN", &token)
+        .env("KRONOS_BIND_HOST", "127.0.0.1")
+        .env("KRONOS_BIND_PORT", "0")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    if let Some(src) = engine_src_dir() {
+        let sep = if cfg!(windows) { ';' } else { ':' };
+        let merged = match std::env::var("PYTHONPATH") {
+            Ok(existing) if !existing.is_empty() => {
+                format!("{}{}{}", src.display(), sep, existing)
+            }
+            _ => src.display().to_string(),
+        };
+        command.env("PYTHONPATH", merged);
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut child = command.spawn().map_err(|error| {
+        format!("failed to spawn engine ({program:?} {args:?}): {error}")
+    })?;
+
+    let (ready_tx, ready_rx) = mpsc::channel();
+    wait_for_ready_then_log(child.stdout.take(), log_file.try_clone().ok(), ready_tx);
+    capture_logs(child.stderr.take(), Some(log_file));
+
+    let base_url = match ready_rx.recv_timeout(READY_TIMEOUT) {
+        Ok(Ok(url)) => url,
+        Ok(Err(error)) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("timed out waiting for KRONOS_READY".to_string());
+        }
+    };
+
+    Ok((
+        child,
+        EngineConnection {
+            base_url,
+            token,
+        },
+    ))
+}
+
+fn engine_src_dir() -> Option<PathBuf> {
+    if let Ok(raw) = std::env::var("KRONOS_ENGINE_SRC") {
+        let path = PathBuf::from(raw);
+        if path.join("kronos_engine").is_dir() {
+            return Some(path);
+        }
+    }
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let repo = manifest.parent()?.parent()?.parent()?;
+    let src = repo.join("engine").join("src");
+    src.join("kronos_engine").is_dir().then_some(src)
+}
+
+struct EngineDirs {
+    data: PathBuf,
+    config: PathBuf,
+    cache: PathBuf,
+    logs: PathBuf,
+}
+
+impl EngineDirs {
+    fn resolve(app: &AppHandle) -> Result<Self, String> {
+        let resolver = app.path();
+        Ok(Self {
+            data: resolver
+                .app_local_data_dir()
+                .map_err(|error| error.to_string())?,
+            config: resolver
+                .app_config_dir()
+                .map_err(|error| error.to_string())?,
+            cache: resolver.app_cache_dir().map_err(|error| error.to_string())?,
+            logs: resolver.app_log_dir().map_err(|error| error.to_string())?,
+        })
+    }
+
+    fn create(&self) -> Result<(), String> {
+        for directory in [&self.data, &self.config, &self.cache, &self.logs] {
+            fs::create_dir_all(directory).map_err(|error| error.to_string())?;
+        }
+        fs::create_dir_all(self.cache.join("worktrees")).map_err(|error| error.to_string())?;
+        Ok(())
+    }
+}
+
+fn engine_command() -> Result<(PathBuf, Vec<String>), String> {
+    if let Ok(bin) = std::env::var("KRONOS_ENGINE_BIN") {
+        let path = PathBuf::from(bin);
+        if path.exists() {
+            return Ok((path, Vec::new()));
+        }
+        return Err(format!(
+            "KRONOS_ENGINE_BIN does not exist: {}",
+            path.display()
+        ));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            for name in ["kronos-engine.exe", "kronos-engine"] {
+                let candidate = dir.join(name);
+                if candidate.exists() {
+                    return Ok((candidate, Vec::new()));
+                }
+            }
+        }
+    }
+    let python = python_executable();
+    Ok((
+        PathBuf::from(python),
+        vec!["-m".to_string(), "kronos_engine".to_string()],
+    ))
+}
+
+fn python_executable() -> &'static str {
+    if cfg!(windows) {
+        "python"
+    } else {
+        "python3"
+    }
+}
+
+fn load_or_create_token(path: &Path) -> Result<String, String> {
+    if let Ok(raw) = fs::read_to_string(path) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) {
+            if let Some(token) = value.get("auth_token").and_then(|item| item.as_str()) {
+                if !token.is_empty() {
+                    return Ok(token.to_string());
+                }
+            }
+        }
+    }
+    let token = generate_token()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let body = serde_json::json!({ "auth_token": token }).to_string();
+    write_secret_file(path, body.as_bytes())?;
+    Ok(token)
+}
+
+fn generate_token() -> Result<String, String> {
+    let bytes = csprng_bytes()?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn csprng_bytes() -> Result<[u8; 32], String> {
+    let mut bytes = [0u8; 32];
+    fill_csprng(&mut bytes)?;
+    Ok(bytes)
+}
+
+#[cfg(unix)]
+fn fill_csprng(bytes: &mut [u8]) -> Result<(), String> {
+    File::open("/dev/urandom")
+        .and_then(|mut file| file.read_exact(bytes))
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(windows)]
+fn fill_csprng(bytes: &mut [u8]) -> Result<(), String> {
+    let status = unsafe { SystemFunction036(bytes.as_mut_ptr(), bytes.len() as u32) };
+    if status == 0 {
+        return Err("RtlGenRandom failed".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+#[link(name = "advapi32")]
+unsafe extern "system" {
+    fn SystemFunction036(random_buffer: *mut u8, random_buffer_length: u32) -> u8;
+}
+
+fn probe_engine(connection: &EngineConnection) -> EngineUiState {
+    let auth = format!("Bearer {}", connection.token);
+    let base = connection.base_url.trim_end_matches('/');
+    let health_body = match loopback_get(
+        &format!("{base}/health"),
+        &[("Authorization", auth.as_str())],
+    ) {
+        Ok((200, body)) => body,
+        _ => return EngineUiState::Unavailable,
+    };
+    let health_json: serde_json::Value = match serde_json::from_str(&health_body) {
+        Ok(body) => body,
+        Err(_) => return EngineUiState::Unavailable,
+    };
+    if health_json.get("status").and_then(|value| value.as_str()) != Some("ok") {
+        return EngineUiState::Unavailable;
+    }
+
+    let version_body = match loopback_get(
+        &format!("{base}/version"),
+        &[
+            ("Authorization", auth.as_str()),
+            ("X-Kronos-Client-Version", CLIENT_VERSION),
+        ],
+    ) {
+        Ok((200, body)) => body,
+        _ => return EngineUiState::Unavailable,
+    };
+    let body: serde_json::Value = match serde_json::from_str(&version_body) {
+        Ok(body) => body,
+        Err(_) => return EngineUiState::Unavailable,
+    };
+    let engine_version = body
+        .get("engine_version")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if body.get("compatible").and_then(|value| value.as_bool()) != Some(true) {
+        return EngineUiState::Incompatible {
+            client_version: CLIENT_VERSION.to_string(),
+            engine_version: if engine_version.is_empty() {
+                "unknown".to_string()
+            } else {
+                engine_version.to_string()
+            },
+        };
+    }
+    if engine_version.is_empty() {
+        return EngineUiState::Unavailable;
+    }
+    EngineUiState::Ready {
+        version: engine_version.to_string(),
+    }
+}
+
+struct LoopbackUrl {
+    host: String,
+    port: u16,
+    path: String,
+}
+
+fn parse_loopback_http_url(url: &str) -> Result<LoopbackUrl, String> {
+    let rest = url
+        .strip_prefix("http://")
+        .ok_or_else(|| "engine probe requires http".to_string())?;
+    let (hostport, path) = rest.split_once('/').unwrap_or((rest, ""));
+    let path = if path.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{path}")
+    };
+    let (host, port_raw) = hostport
+        .rsplit_once(':')
+        .ok_or_else(|| "engine probe URL is missing a port".to_string())?;
+    let port: u16 = port_raw
+        .parse()
+        .map_err(|_| "engine probe URL has an invalid port".to_string())?;
+    Ok(LoopbackUrl {
+        host: host.to_string(),
+        port,
+        path,
+    })
+}
+
+fn loopback_get(url: &str, extra_headers: &[(&str, &str)]) -> Result<(u16, String), String> {
+    let parsed = parse_loopback_http_url(url)?;
+    let mut stream = TcpStream::connect((parsed.host.as_str(), parsed.port))
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_read_timeout(Some(PROBE_TIMEOUT))
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_write_timeout(Some(PROBE_TIMEOUT))
+        .map_err(|error| error.to_string())?;
+    let mut request = format!(
+        "GET {} HTTP/1.1\r\nHost: {}:{}\r\nConnection: close\r\n",
+        parsed.path, parsed.host, parsed.port
+    );
+    for (name, value) in extra_headers {
+        request.push_str(name);
+        request.push_str(": ");
+        request.push_str(value);
+        request.push_str("\r\n");
+    }
+    request.push_str("\r\n");
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| error.to_string())?;
+    let mut raw = Vec::new();
+    stream
+        .read_to_end(&mut raw)
+        .map_err(|error| error.to_string())?;
+    parse_http_response(&raw)
+}
+
+fn parse_http_response(raw: &[u8]) -> Result<(u16, String), String> {
+    let text = String::from_utf8_lossy(raw);
+    let (header, body) = text
+        .split_once("\r\n\r\n")
+        .or_else(|| text.split_once("\n\n"))
+        .ok_or_else(|| "engine probe response was truncated".to_string())?;
+    let status_line = header.lines().next().unwrap_or("");
+    let status: u16 = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|item| item.parse().ok())
+        .ok_or_else(|| "engine probe response had no status".to_string())?;
+    Ok((status, body.to_string()))
+}
+
+fn write_secret_file(path: &Path, body: &[u8]) -> Result<(), String> {
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path).map_err(|error| error.to_string())?;
+    file.write_all(body).map_err(|error| error.to_string())?;
+    file.sync_all().map_err(|error| error.to_string())?;
+    #[cfg(windows)]
+    restrict_windows_owner_only(path)?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn restrict_windows_owner_only(path: &Path) -> Result<(), String> {
+    let path_arg = path.to_string_lossy().into_owned();
+    let user = match std::env::var("USERNAME") {
+        Ok(name) if !name.is_empty() => name,
+        _ => return Ok(()),
+    };
+    let grant = format!("{user}:(F)");
+    let _ = Command::new("icacls")
+        .args([&path_arg, "/grant:r", &grant, "/inheritance:r"])
+        .output();
+    Ok(())
+}
+
+fn wait_for_ready_then_log<R>(
+    stream: Option<R>,
+    log_file: Option<File>,
+    ready_tx: mpsc::Sender<Result<String, String>>,
+) where
+    R: Read + Send + 'static,
+{
+    let Some(stream) = stream else {
+        let _ = ready_tx.send(Err("engine stdout was not piped".to_string()));
+        return;
+    };
+    thread::spawn(move || {
+        let reader = BufReader::new(stream);
+        let mut log_file = log_file;
+        let mut announced = false;
+        for line in reader.lines().map_while(Result::ok) {
+            if !announced {
+                if let Some(url) = line.strip_prefix("KRONOS_READY ") {
+                    announced = true;
+                    let _ = ready_tx.send(Ok(url.trim().to_string()));
+                }
+            }
+            if let Some(file) = log_file.as_mut() {
+                let _ = writeln!(file, "{line}");
+            }
+        }
+        if !announced {
+            let _ = ready_tx.send(Err(
+                "engine closed stdout before KRONOS_READY".to_string()
+            ));
+        }
+    });
+}
+
+fn capture_logs<R>(stream: Option<R>, log_file: Option<File>)
+where
+    R: Read + Send + 'static,
+{
+    let Some(stream) = stream else {
+        return;
+    };
+    let Some(mut log_file) = log_file else {
+        return;
+    };
+    thread::spawn(move || {
+        let reader = BufReader::new(stream);
+        for line in reader.lines().map_while(Result::ok) {
+            let _ = writeln!(log_file, "{line}");
+        }
+    });
+}

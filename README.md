@@ -4,17 +4,17 @@ Kronos is a local software-engineering operating system. One desktop application
 
 This repository is licensed under the [GNU Affero General Public License v3.0](LICENSE). Kronos does not depend on Hermes.
 
-Windows, macOS, and Linux are first-class targets. The desktop client talks to a version-matched local engine. Closing the window does not define engine lifetime; engine lifecycle lands in a later milestone.
+Windows, macOS, and Linux are first-class targets. The desktop client talks to a version-matched local engine over a loopback API. Closing the window stops the sidecar child process started by Tauri.
 
 ## Status
 
-The current tree is the desktop shell: routes, design tokens, and engine connection states. The engine placeholder exposes `__version__` only. Production desktop wiring reports **engine unavailable** until a live engine exists. The UI can also render **starting**, **ready**, and **incompatible version** when an injected client returns those states. A default session never reports **ready**.
+The desktop shell and engine lifecycle are present. The production client fails closed: it reports **ready** only when the live loopback API is healthy and version-compatible. Tests may inject **starting**, **ready**, and **incompatible version** to cover UI labels. A default web session without Tauri reports **unavailable**.
 
 ## Repository layout
 
 ```text
 apps/desktop/          Tauri 2 + React + TypeScript shell
-engine/                Python package placeholder (__version__ only)
+engine/                Python control-plane (loopback API, SQLite WAL)
 services/reviewer/     Isolated reviewer placeholder
 skills/                Future skill library
 templates/             Future repository and GitHub templates
@@ -28,8 +28,8 @@ docs/                  Architecture, security, research, and design plans
 - [pnpm](https://pnpm.io/) 9.15 (see `packageManager` in `package.json`)
 - Rust stable (for `pnpm tauri` native builds)
 - Platform WebView libraries (WebView2 on Windows, WebKitGTK 4.1 on Linux)
-- Visual Studio 2022 with the C++ workload on Windows (GitHub `windows-latest` provides this; a machine without MSVC can still run `pnpm test` and `pnpm test:e2e`)
-- Python 3.11 or newer (engine package metadata only in this milestone)
+- Visual Studio 2022 with the C++ workload on Windows (GitHub `windows-latest` provides this; a machine without MSVC can still run `pnpm test`, `pnpm test:e2e`, and engine pytest)
+- Python 3.11 or newer for the engine
 
 ## Scripts
 
@@ -44,6 +44,7 @@ From the repository root:
 | `pnpm --filter @kronos/desktop build` | Typecheck and Vite production bundle |
 | `pnpm tauri dev` | Native Tauri window wrapping the Vite dev server |
 | `pnpm tauri build` | Native installer/artifact for the current OS |
+| `python -m pytest` (in `engine/`) | Engine unit and lifecycle tests |
 
 Playwright targets the Vite web build (`vite preview` after `vite build`), not a full Tauri WebView. That keeps CI runnable without signing certificates. Native `tauri build` still runs in the desktop CI job when the runner has Rust and platform WebView libraries.
 
@@ -56,7 +57,7 @@ The shell displays exactly one of:
 - **Engine ready**
 - **Incompatible engine version**
 
-Tests inject an `EngineClient`. The production client fails closed to **unavailable**.
+Tests inject an `EngineClient`. The production client probes the live sidecar and fails closed to **unavailable** when the API is missing, unhealthy, or unreachable.
 
 ## Contributing
 
