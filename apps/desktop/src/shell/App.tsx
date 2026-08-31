@@ -9,6 +9,7 @@ import { EngineStatus } from "../engine/EngineStatus";
 import { WorkspacesPage } from "../features/workspaces/WorkspacesPage";
 import { pickRepositoryFolder } from "../features/workspaces/client";
 import { ModelsPage } from "../features/models/ModelsPage";
+import { IndexPage } from "../features/index/IndexPage";
 import { pathFromHash, ROUTES } from "./routes";
 
 const productionClient = createProductionEngineClient();
@@ -63,6 +64,8 @@ export function App({ engineClient }: AppProps) {
             <WorkspacesPage engineClient={client} pickFolder={pickRepositoryFolder} />
           ) : path === "/models" ? (
             <ModelsPage engineClient={client} />
+          ) : path === "/index" ? (
+            <IndexPage engineClient={client} />
           ) : (
             <>
               <p className="page-kicker">{active.name}</p>

@@ -205,6 +205,10 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
                 (method, suffix),
                 ("GET", None)
                     | ("GET", Some("preview"))
+                    | ("GET", Some("index"))
+                    | ("GET", Some("index/search"))
+                    | ("GET", Some("index/map"))
+                    | ("POST", Some("index/rebuild"))
                     | ("POST", Some("pause" | "disable" | "remove" | "re-enrol" | "resume"))
             )
         }
@@ -367,6 +371,7 @@ impl EngineDirs {
             fs::create_dir_all(directory).map_err(|error| error.to_string())?;
         }
         fs::create_dir_all(self.cache.join("worktrees")).map_err(|error| error.to_string())?;
+        fs::create_dir_all(self.cache.join("indexes")).map_err(|error| error.to_string())?;
         Ok(())
     }
 }
@@ -697,5 +702,13 @@ mod tests {
         assert!(!engine_path_allowed("GET", "/models/assignments"));
         assert!(!engine_path_allowed("POST", "/secrets"));
         assert!(engine_path_allowed("GET", "/repositories"));
+        assert!(engine_path_allowed("GET", "/repositories/repo_alpha/index"));
+        assert!(engine_path_allowed(
+            "GET",
+            "/repositories/repo_alpha/index/search?q=connect"
+        ));
+        assert!(engine_path_allowed("POST", "/repositories/repo_alpha/index/rebuild"));
+        assert!(engine_path_allowed("GET", "/repositories/repo_alpha/index/map"));
+        assert!(!engine_path_allowed("DELETE", "/repositories/repo_alpha/index"));
     }
 }
