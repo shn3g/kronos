@@ -199,6 +199,22 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
     if path == "/models/assignments" {
         return method == "PUT";
     }
+    if path == "/goals" || path == "/goals/" {
+        return method == "GET" || method == "POST";
+    }
+    if let Some(rest) = path.strip_prefix("/goals/") {
+        return method == "GET"
+            && !rest.is_empty()
+            && rest
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-');
+    }
+    if path == "/runs" || path == "/runs/" {
+        return method == "GET";
+    }
+    if path == "/events" || path == "/events/" {
+        return method == "GET";
+    }
     if !path.starts_with("/repositories") {
         return false;
     }
@@ -738,5 +754,11 @@ mod tests {
         assert!(engine_path_allowed("POST", "/repositories/repo_alpha/index/refresh"));
         assert!(engine_path_allowed("GET", "/repositories/repo_alpha/index/map"));
         assert!(!engine_path_allowed("DELETE", "/repositories/repo_alpha/index"));
+        assert!(engine_path_allowed("GET", "/goals"));
+        assert!(engine_path_allowed("POST", "/goals"));
+        assert!(engine_path_allowed("GET", "/goals/goal_abc"));
+        assert!(engine_path_allowed("GET", "/runs"));
+        assert!(engine_path_allowed("GET", "/events?after=0"));
+        assert!(!engine_path_allowed("DELETE", "/goals"));
     }
 }
