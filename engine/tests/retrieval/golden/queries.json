@@ -1,0 +1,25 @@
+{
+  "k": 5,
+  "queries": [
+    {
+      "id": "graph-tests-of-connect",
+      "query": "connect",
+      "relevant_paths": ["tests/test_db.py"]
+    },
+    {
+      "id": "symbol-connect",
+      "query": "connect",
+      "relevant_paths": ["pkg/db.py"]
+    },
+    {
+      "id": "handle-request",
+      "query": "handle_request",
+      "relevant_paths": ["pkg/api.py"]
+    },
+    {
+      "id": "docs-enrol",
+      "query": "isolated index",
+      "relevant_paths": ["docs/overview.md"]
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-schema_version: 1
+schema_version: 2
 branches:
   integration: main
   protected: main
@@ -29,3 +29,11 @@ executor:
   sandbox: default
 indexing:
   enabled: true
+  exclude_prefixes:
+    - node_modules/
+    - vendor/
+    - dist/
+    - build/
+    - target/
+    - __pycache__/
+  max_file_bytes: 1048576

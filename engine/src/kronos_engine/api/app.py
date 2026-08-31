@@ -24,6 +24,10 @@ from kronos_engine.api.models import (
     EventListResponse,
     GoalListResponse,
     HealthResponse,
+    IndexMapResponse,
+    IndexSearchHit,
+    IndexSearchResponse,
+    IndexStatusResponse,
     InspectResponse,
     ModelsSnapshotResponse,
     PathRequest,
@@ -55,6 +59,7 @@ from kronos_engine.domain.entities import EnrolledRepository, IdentifierError, R
 from kronos_engine.domain.models import ModelProfile
 from kronos_engine.domain.policy import PolicyError, policy_to_dict
 from kronos_engine.domain.version import client_is_compatible
+from kronos_engine.indexing.service import IndexingService, IndexStatus
 from kronos_engine.ports.model_provider import ToolDetector
 from kronos_engine.ports.model_registry import ProviderConfig
 from kronos_engine.ports.repository import RuntimeInsideEnrolledTree
@@ -317,6 +322,56 @@ def create_app(
                 raise HTTPException(status_code=400, detail=str(error)) from error
             return AssignmentsResponse(assignments=assigned.as_dict())
 
+    @app.get("/repositories/{repository_id}/index", response_model=IndexStatusResponse)
+    def index_status(repository_id: str, _: None = Depends(require_auth)) -> IndexStatusResponse:
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+            status = IndexingService(settings.paths).status(record.id.value)
+            return _index_status(status)
+
+    @app.post("/repositories/{repository_id}/index/rebuild", response_model=IndexStatusResponse)
+    def index_rebuild(
+        repository_id: str, _: None = Depends(require_auth)
+    ) -> IndexStatusResponse:
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+            status = IndexingService(settings.paths).rebuild(
+                record.id.value, Path(record.realpath), record.policy
+            )
+            return _index_status(status)
+
+    @app.get("/repositories/{repository_id}/index/search", response_model=IndexSearchResponse)
+    def index_search(
+        repository_id: str,
+        _: None = Depends(require_auth),
+        q: Annotated[str, Query()] = "",
+        mode: Annotated[str, Query()] = "hybrid",
+    ) -> IndexSearchResponse:
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+            pack = IndexingService(settings.paths).search(record.id.value, q, mode=mode)
+            return IndexSearchResponse(
+                items=[
+                    IndexSearchHit(
+                        path=item.path,
+                        start_line=item.start_line,
+                        end_line=item.end_line,
+                        commit=item.commit,
+                        symbol=item.symbol,
+                        rank_sources=list(item.rank_sources),
+                        trust=item.trust,
+                        text=item.text,
+                    )
+                    for item in pack.items
+                ]
+            )
+
+    @app.get("/repositories/{repository_id}/index/map", response_model=IndexMapResponse)
+    def index_map(repository_id: str, _: None = Depends(require_auth)) -> IndexMapResponse:
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+            return IndexMapResponse(text=IndexingService(settings.paths).repo_map(record.id.value))
+
     @app.get("/goals", response_model=GoalListResponse)
     def goals(_: None = Depends(require_auth)) -> GoalListResponse:
         with catalog_service() as catalog:
@@ -451,4 +506,16 @@ def _profile_model(profile: ModelProfile) -> ProfileModel:
         model_id=profile.model_id,
         billed=profile.billed,
         approved_fallbacks=list(profile.approved_fallbacks),
+    )
+
+
+def _index_status(status: IndexStatus) -> IndexStatusResponse:
+    return IndexStatusResponse(
+        repository_id=status.repository_id,
+        commit=status.commit,
+        chunk_count=status.chunk_count,
+        dense_available=status.dense_available,
+        index_path=status.index_path,
+        disk_bytes=status.disk_bytes,
+        ready=status.ready,
     )

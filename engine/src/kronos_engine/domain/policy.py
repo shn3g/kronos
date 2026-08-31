@@ -6,7 +6,17 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
-POLICY_SCHEMA_VERSION = 1
+POLICY_SCHEMA_VERSION = 2
+DEFAULT_INDEX_EXCLUDES: tuple[str, ...] = (
+    "node_modules/",
+    "vendor/",
+    "dist/",
+    "build/",
+    "target/",
+    "__pycache__/",
+)
+DEFAULT_MAX_FILE_BYTES = 1_048_576
+_ALLOWED_INDEXING = frozenset({"enabled", "exclude_prefixes", "max_file_bytes"})
 
 SIZE_STEPS: tuple[str, ...] = ("XS", "XS_PLUS", "S", "M", "L")
 RISK_STEPS: tuple[str, ...] = ("low", "medium", "high", "critical")
@@ -91,6 +101,8 @@ class ExecutorProfile:
 @dataclass(frozen=True, slots=True)
 class Indexing:
     enabled: bool
+    exclude_prefixes: tuple[str, ...]
+    max_file_bytes: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,7 +136,11 @@ def default_policy(*, integration_branch: str, protected_branch: str) -> Reposit
             },
             "wip": {"ready": 2, "running": 3},
             "executor": {"profile": "standard", "sandbox": "default"},
-            "indexing": {"enabled": True},
+            "indexing": {
+                "enabled": True,
+                "exclude_prefixes": list(DEFAULT_INDEX_EXCLUDES),
+                "max_file_bytes": DEFAULT_MAX_FILE_BYTES,
+            },
         }
     )
 
@@ -148,6 +164,9 @@ def parse_policy(raw: Mapping[str, object]) -> RepositoryPolicy:
     wip = _require_mapping(raw, "wip")
     executor = _require_mapping(raw, "executor")
     indexing = _require_mapping(raw, "indexing")
+    unknown_indexing = set(indexing) - _ALLOWED_INDEXING
+    if unknown_indexing:
+        raise PolicyError(f"unknown indexing fields: {sorted(unknown_indexing)}")
     floor = _require_str(risk, "floor")
     if floor not in RISK_STEPS:
         raise PolicyError("unknown risk floor")
@@ -184,7 +203,11 @@ def parse_policy(raw: Mapping[str, object]) -> RepositoryPolicy:
             profile=_require_str(executor, "profile"),
             sandbox=_require_str(executor, "sandbox"),
         ),
-        indexing=Indexing(enabled=_require_bool(indexing, "enabled")),
+        indexing=Indexing(
+            enabled=_require_bool(indexing, "enabled"),
+            exclude_prefixes=_require_str_tuple(indexing, "exclude_prefixes"),
+            max_file_bytes=_require_positive_int(indexing, "max_file_bytes"),
+        ),
     )
 
 
@@ -216,7 +239,11 @@ def policy_to_dict(policy: RepositoryPolicy) -> dict[str, object]:
         },
         "wip": {"ready": policy.wip.ready, "running": policy.wip.running},
         "executor": {"profile": policy.executor.profile, "sandbox": policy.executor.sandbox},
-        "indexing": {"enabled": policy.indexing.enabled},
+        "indexing": {
+            "enabled": policy.indexing.enabled,
+            "exclude_prefixes": list(policy.indexing.exclude_prefixes),
+            "max_file_bytes": policy.indexing.max_file_bytes,
+        },
     }
 
 
@@ -232,6 +259,8 @@ def apply_model_proposal(
         raise PolicyError("models cannot change wip")
     if proposed.branches != current.branches:
         raise PolicyError("models cannot change branches")
+    if proposed.indexing != current.indexing:
+        raise PolicyError("models cannot change indexing")
     risk = RiskPolicy(floor=clamp_risk(current.risk.floor, proposed.risk.floor))
     return replace(proposed, risk=risk)
 
