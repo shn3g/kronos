@@ -2,64 +2,42 @@
 
 Kronos is a local software-engineering operating system. One desktop application plans bounded work, runs tests, and keeps repository automation under deterministic policy.
 
-This repository is licensed under the [GNU Affero General Public License v3.0](LICENSE). Kronos does not depend on Hermes.
+Windows, macOS, and Linux. Licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
 
-Windows, macOS, and Linux are first-class targets. The desktop client talks to a version-matched local engine over a loopback API. Closing the window stops the sidecar child process started by Tauri.
+## Install
 
-## Status
+Download a Windows NSIS installer, Linux `.deb`, or macOS `.app` from a [GitHub Release](https://github.com/shn3g/kronos/releases), or build with `pnpm tauri build`.
 
-The desktop shell, engine lifecycle, repository enrolment, model routing, GitHub Apps, Telegram, skills, and ops dashboard are present. Workspaces lists enrolled repositories after the engine is ready. Enable Kronos proposes a reviewable diff and does not write runtime files into the git tree. The production client fails closed: it reports **ready** only when the live loopback API is healthy and version-compatible.
+Signing is not present. Windows SmartScreen and macOS Gatekeeper will warn. That is the OS. Use "Run anyway" or right-click Open for the unsigned path.
 
-See [docs/quickstart.md](docs/quickstart.md) and [docs/operations.md](docs/operations.md).
+The desktop sidecar still runs `python -m kronos_engine` (`python` on Windows, `python3` elsewhere) from **PATH**. Python 3.11+ must be installed until a later bundle. An unsigned installer that does not bundle Python is not fully one-click.
 
-## Repository layout
+Hosted GitHub Actions may not always produce Release artifacts. If the Release has no installer, builders use the one-line build below.
+
+## Build
+
+Install Node 22, pnpm 9.15, Python 3.11+, Rust, and the platform WebView. Then:
 
 ```text
-apps/desktop/          Tauri 2 + React + TypeScript shell
-engine/                Python control-plane (loopback API, SQLite WAL)
-services/reviewer/     Isolated reviewer placeholder
-skills/                Future skill library
-templates/             Repository policy and GitHub workflow templates
-deploy/                Future service unit files
-docs/                  Architecture, security, operations, and design plans
+pnpm install
+cd engine && pip install -e ".[dev]" && cd ..
+pnpm tauri build
 ```
 
-## Prerequisites
+Contributor tests belong in [CONTRIBUTING.md](CONTRIBUTING.md). Walkthrough: [docs/quickstart.md](docs/quickstart.md).
 
-- Node.js 22 or newer
-- [pnpm](https://pnpm.io/) 9.15 (see `packageManager` in `package.json`)
-- Rust stable (for `pnpm tauri` native builds)
-- Platform WebView libraries (WebView2 on Windows, WebKitGTK 4.1 on Linux)
-- Visual Studio 2022 with the C++ workload on Windows (GitHub `windows-latest` provides this; a machine without MSVC can still run `pnpm test`, `pnpm test:e2e`, and engine pytest)
-- Python 3.11 or newer for the engine
+## Inside the app
 
-## Scripts
+1. Open Kronos. Engine ready requires the sidecar (`python -m kronos_engine` on PATH).
+2. Workspaces: pick **your** git folder, Enrol. Kronos registers it in local SQLite. It does not write `.kronos/` into the tree at enrol.
+3. Enable Kronos shows a **preview** of `.kronos/config.yaml`, workflow, and CODEOWNERS. You commit those on **your** repo.
+4. Connections: two GitHub Apps (controller + isolated reviewer) and optional Telegram. Models: your keys in OS secret storage.
+5. On enrol: empty lesson store; per-repo hybrid index under app cache (FTS5 always; optional local ONNX vectors if weights are on disk, never downloaded). Isolation by repository id.
+6. Leave `freeze: true` and `mode: observe` or `shadow` until you want writes.
 
-From the repository root:
+**Skills:** global library under `skills/core/` shipped with Kronos. **Lessons:** per enrolled repo, empty at first, propose is not activate.
 
-| Command | What it runs |
-| --- | --- |
-| `pnpm install` | Install JavaScript workspace dependencies |
-| `pnpm test` | Vitest unit tests for the desktop UI |
-| `pnpm test:e2e` | Playwright smoke test against the Vite web build |
-| `pnpm --filter @kronos/desktop dev` | Vite frontend on port 1420 |
-| `pnpm --filter @kronos/desktop build` | Typecheck and Vite production bundle |
-| `pnpm tauri dev` | Native Tauri window wrapping the Vite dev server |
-| `pnpm tauri build` | Native installer/artifact for the current OS |
-| `python -m pytest` (in `engine/`) | Engine unit and lifecycle tests |
-
-Playwright targets the Vite web build (`vite preview` after `vite build`), not a full Tauri WebView. That keeps CI runnable without signing certificates. Native `tauri build` still runs in the desktop CI job when the runner has Rust and platform WebView libraries.
-
-## Engine connection states
-
-The shell displays exactly one of:
-
-- **Engine unavailable**
-- **Engine starting**
-- **Engine ready**
-- **Incompatible engine version**
-
-Tests inject an `EngineClient`. The production client probes the live sidecar and fails closed to **unavailable** when the API is missing, unhealthy, or unreachable.
+Retrieval is local hybrid search per repo.
 
 ## Contributing
 

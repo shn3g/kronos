@@ -1,6 +1,6 @@
 # Operations
 
-Kronos is a local control plane for enrolled repositories. Public GitHub visibility for `shn3g/kronos` is a controller step after this work is approved and merged. Do not flip visibility from a feature branch.
+Kronos is a local control plane for enrolled repositories.
 
 ## Policy and lessons
 

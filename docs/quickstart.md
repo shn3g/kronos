@@ -2,30 +2,40 @@
 
 Kronos is a local software-engineering operating system. One desktop application plans bounded work, runs tests, and keeps repository automation under committed policy.
 
-This project is licensed under GNU AGPL v3.0. Kronos does not depend on Hermes.
+Windows, macOS, and Linux. Licensed under GNU AGPL v3.0.
 
 ## Install
 
-1. Install Node.js 22+, pnpm 9.15, Python 3.11+, and a stable Rust toolchain for native desktop builds.
-2. Clone this repository and run `pnpm install` at the repository root.
-3. From `engine/`, install the engine package in development mode (`pip install -e ".[dev]"`).
-4. Run `pnpm test` and `python -m pytest` (from `engine/`) before you change behavior.
+Download a Windows NSIS installer, Linux `.deb`, or macOS `.app` from a [GitHub Release](https://github.com/shn3g/kronos/releases).
 
-Windows, macOS, and Linux are first-class. A signed production installer is a later operator step. Unsigned CI artifacts are for verification.
+Signing is not present. Windows SmartScreen and macOS Gatekeeper will warn. That is the OS. Use "Run anyway" or right-click Open for the unsigned path.
+
+The desktop sidecar still runs `python -m kronos_engine` (`python` on Windows, `python3` elsewhere) from PATH. Python 3.11+ must be installed until a later bundle. An unsigned installer that does not bundle Python is not fully one-click.
+
+Hosted GitHub Actions may not always produce Release artifacts. If the Release has no installer, install Node 22, pnpm 9.15, Python 3.11+, Rust, and the platform WebView, then:
+
+```text
+pnpm install
+cd engine && pip install -e ".[dev]" && cd ..
+pnpm tauri build
+```
 
 ## Enable a repository
 
-1. Start the desktop app or the local engine sidecar.
-2. Enrol a git repository. Enable Kronos shows a preview of `.kronos/config.yaml`, `.github/workflows/kronos-pr.yml`, and CODEOWNERS. Preview does not write the tree.
-3. Review and commit those files through a normal pull request. CODEOWNERS must cover `.kronos/**`.
-4. Connect the controller GitHub App and the isolated reviewer GitHub App. Workers never receive those credentials.
-5. Leave autonomy frozen (`freeze: true`) and `mode: observe` or `mode: shadow` until you are ready for writes.
+1. Open Kronos. Engine ready requires the sidecar (`python -m kronos_engine` on PATH).
+2. Workspaces: pick your git folder, Enrol. Kronos registers it in local SQLite. It does not write `.kronos/` into the tree at enrol.
+3. Enable Kronos shows a preview of `.kronos/config.yaml`, `.github/workflows/kronos-pr.yml`, and CODEOWNERS. Preview does not write the tree. You commit those on your repo. CODEOWNERS must cover `.kronos/**`.
+4. Connections: two GitHub Apps (controller + isolated reviewer) and optional Telegram. Models: your keys in OS secret storage.
+5. On enrol: empty lesson store; per-repo hybrid index under app cache (FTS5 always; optional local ONNX vectors if weights are on disk, never downloaded). Isolation by repository id.
+6. Leave `freeze: true` and `mode: observe` or `shadow` until you want writes.
 
 The integration branch comes from committed `.kronos/config.yaml`. The in-app template default is `main`. The protected default branch is `policy.branches.protected` (template default `main`).
 
+Skills are a global library under `skills/core/` shipped with Kronos. Lessons are per enrolled repo, empty at first. Propose is not activate. Retrieval is local hybrid search per repo.
+
 ## Staged modes
 
-Models cannot change the mode. Operators raise it through reviewed policy.
+Models cannot change the mode. You raise it through reviewed policy.
 
 | Mode | GitHub issues | Draft PRs | Integration merge | Multi-task graphs |
 | --- | --- | --- | --- | --- |
@@ -40,7 +50,7 @@ Every mode refuses autonomous writes to the protected default branch.
 
 ## Tests
 
-From the repository root: `pnpm test`. From `engine/`: `python -m pytest`. Fixtures only. Do not point tests at live GitHub or Telegram.
+See [CONTRIBUTING.md](../CONTRIBUTING.md). Fixtures only. Do not point tests at live GitHub or Telegram.
 
 ## Next reading
 

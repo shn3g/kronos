@@ -1,6 +1,6 @@
 # Architecture notes
 
-Architecture notes live in `docs/architecture/`. This folder holds file-level notes that accumulate as subsystems land.
+File-level notes that accumulate as subsystems land.
 
 - [Quickstart](../quickstart.md)
 - [Desktop shell](desktop-shell.md)

@@ -8,7 +8,7 @@ Use [GitHub private vulnerability reporting](https://github.com/shn3g/kronos/sec
 
 Include:
 
-- Affected component (`apps/desktop`, `engine`, `services/reviewer`, CI, or docs)
+- Affected component (`apps/desktop`, `engine`, `services/reviewer`, GitHub Apps, Telegram, indexing, sandbox, policy, CI, or docs)
 - Kronos version or git revision
 - Reproduction steps and expected impact
 - Whether credentials, repositories, or user data are involved
@@ -22,13 +22,20 @@ If the advisory form is unavailable, email the repository owner through the GitH
 In scope:
 
 - Desktop client, local engine, reviewer process, and packaging scripts in this repository
-- Credential handling, sandbox escapes, and policy bypasses once those components exist
+- Credential handling, sandbox escapes, and policy bypasses
+- GitHub Apps Kronos uses for repository automation and isolated review
+- Telegram authorization (allowlists, bot-token handling, unauthorized chats)
+- Local indexing of enrolled repositories
 - Supply-chain issues in committed lockfiles and GitHub Actions workflows
 
-Out of scope until those features ship:
+Product quality (still welcome when a concrete bypass exists):
 
-- Model quality, prompt injection against untrusted repository text (tracked as product work, still welcome as reports when a concrete bypass exists)
-- Third-party GitHub or Telegram platform bugs
+- Model quality
+- Prompt injection against untrusted repository text
+
+Out of scope:
+
+- Bugs in the GitHub or Telegram platforms themselves. Report those to the vendor.
 
 ## Response
 

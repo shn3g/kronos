@@ -4,12 +4,12 @@ Kronos is an AGPL-3.0 project. This document describes how decisions are made an
 
 ## Maintainers
 
-The GitHub organization or user that owns [shn3g/kronos](https://github.com/shn3g/kronos) appoints maintainers. Maintainers merge pull requests, cut releases, and handle security reports described in [SECURITY.md](SECURITY.md).
+Maintainers are appointed by the owner of [https://github.com/shn3g/kronos](https://github.com/shn3g/kronos). Maintainers merge pull requests, cut releases, and handle security reports described in [SECURITY.md](SECURITY.md).
 
 ## Decision process
 
-1. Product architecture lives in `docs/architecture/`.
-2. Behavior changes land as reviewable pull requests with tests.
+1. Product architecture lives in `docs/architecture/` only.
+2. Behavior changes land as reviewed pull requests with tests.
 3. License, security policy, and required checks need maintainer approval.
 4. Disagreements that block a release are resolved by the owning maintainer until a broader maintainer group exists.
 
@@ -19,14 +19,14 @@ All contributions are received under GNU AGPL v3.0 as stated in [LICENSE](LICENS
 
 ## Security
 
-Security reports bypass the public issue tracker. Maintainers follow [SECURITY.md](SECURITY.md). Publishing a fix under AGPL-3.0 includes corresponding source for the patched version.
+Security reports follow [SECURITY.md](SECURITY.md). They bypass the public issue tracker. Publishing a fix under AGPL-3.0 includes corresponding source for the patched version.
 
 ## Releases
 
-Releases are git tags on `main`. Installers and SBOMs attach to GitHub Releases once packaging in later milestones is complete. Unsigned CI artifacts are for verification, not production distribution.
+Releases are git tags on `main`. Unsigned NSIS / `.deb` / `.app` installers, checksums, and SBOMs may attach to GitHub Releases. Signing is optional and fail-closed without a key.
 
 ## Code of collaboration
 
 - Keep discussion in GitHub issues, discussions, and pull requests so history stays public.
 - Prefer small, tested changes over large unreviewed branches.
-- Windows, macOS, and Linux remain first-class. A change that breaks one target needs a follow-up or a documented exception in the PR.
+- Windows, macOS, and Linux are first-class. A change that breaks one target needs a follow-up or a documented exception in the pull request.
