@@ -8,7 +8,7 @@ Windows, macOS, and Linux are first-class targets. The desktop client talks to a
 
 ## Status
 
-The desktop shell and engine lifecycle are present. The production client fails closed: it reports **ready** only when the live loopback API is healthy and version-compatible. Tests may inject **starting**, **ready**, and **incompatible version** to cover UI labels. A default web session without Tauri reports **unavailable**.
+The desktop shell, engine lifecycle, and repository enrolment are present. Workspaces lists enrolled repositories after the engine is ready. Enable Kronos proposes a reviewable diff and does not write runtime files into the git tree. The production client fails closed: it reports **ready** only when the live loopback API is healthy and version-compatible.
 
 ## Repository layout
 
@@ -17,7 +17,7 @@ apps/desktop/          Tauri 2 + React + TypeScript shell
 engine/                Python control-plane (loopback API, SQLite WAL)
 services/reviewer/     Isolated reviewer placeholder
 skills/                Future skill library
-templates/             Future repository and GitHub templates
+templates/             Repository policy and GitHub workflow templates
 deploy/                Future service unit files
 docs/                  Architecture, security, research, and design plans
 ```
