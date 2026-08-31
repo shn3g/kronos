@@ -200,6 +200,91 @@ async def test_plan_and_tick_run_outside_pytest_harness(
 
 
 @pytest.mark.asyncio
+async def test_create_and_plan_via_http(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    http, headers, tmp_path = client
+    repo = init_git_repo(
+        tmp_path / "alpha",
+        origin="https://github.com/acme/alpha.git",
+        files={"pkg/math.py": "def add(a, b):\n    return a\n", "pkg/__init__.py": ""},
+    )
+    enrolled = await http.post(
+        "/repositories", json={"path": str(repo), "policy": POLICY_LIVE}, headers=headers
+    )
+    repo_id = enrolled.json()["repository"]["id"]
+    await http.post(f"/repositories/{repo_id}/index/rebuild", headers=headers)
+
+    created = await http.post(
+        "/goals",
+        json={
+            "repository_id": repo_id,
+            "title": "Fix add",
+            "success_criteria": "add returns a+b",
+            "non_goals": "rewrite packaging",
+            "risk_ceiling": "low",
+            "source": "desktop",
+            "max_attempts": 3,
+        },
+        headers=headers,
+    )
+    assert created.status_code == 200
+    goal_id = created.json()["id"]
+    assert created.json()["state"] == "draft"
+
+    planned = await http.post(f"/goals/{goal_id}/plan", headers=headers)
+    assert planned.status_code == 200
+    assert planned.json()["goal"]["state"] == "planned"
+    assert planned.json()["tasks"]
+
+
+@pytest.mark.asyncio
+async def test_tick_surfaces_plan_failure_for_draft_goal(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    http, headers, tmp_path = client
+    repo = init_git_repo(
+        tmp_path / "alpha",
+        origin="https://github.com/acme/alpha.git",
+        files={".gitkeep": ""},
+    )
+    enrolled = await http.post(
+        "/repositories",
+        json={
+            "path": str(repo),
+            "policy": {
+                **POLICY_LIVE,
+                "indexing": {**POLICY_LIVE["indexing"], "enabled": False},
+            },
+        },
+        headers=headers,
+    )
+    repo_id = enrolled.json()["repository"]["id"]
+
+    created = await http.post(
+        "/goals",
+        json={
+            "repository_id": repo_id,
+            "title": "Fix add",
+            "success_criteria": "add returns a+b",
+            "non_goals": "rewrite packaging",
+            "risk_ceiling": "low",
+            "source": "desktop",
+            "max_attempts": 3,
+        },
+        headers=headers,
+    )
+    assert created.json()["state"] == "draft"
+
+    ticked = await http.post("/goals/tick", headers=headers)
+    assert ticked.status_code == 200
+    body = ticked.json()
+    assert body["ok"] is False
+    assert body["status"] == "plan_failed"
+    assert body["reason"]
+
+
+@pytest.mark.asyncio
 async def test_ingest_github_refuses_empty_nongoals(
     client: tuple[AsyncClient, dict[str, str], Path],
 ) -> None:
