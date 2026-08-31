@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -167,9 +168,14 @@ class IndexingService:
                 disk_bytes=0,
                 ready=False,
             )
-        store = SqliteIndexStore(db_path)
+        try:
+            store = SqliteIndexStore(db_path)
+        except sqlite3.Error as error:
+            raise RuntimeError("corrupt cache") from error
         try:
             return self._status(repo_id, store)
+        except sqlite3.Error as error:
+            raise RuntimeError("corrupt cache") from error
         finally:
             store.close()
 

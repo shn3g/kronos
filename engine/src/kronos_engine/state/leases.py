@@ -116,6 +116,24 @@ class SqliteLeases:
             raise StaleFenceError(f"stale fence for {resource_key}")
         return current
 
+    def list_all(self) -> tuple[Lease, ...]:
+        rows = self._conn.execute(
+            "SELECT resource_key, holder_id, fence_token, expires_at FROM leases"
+        ).fetchall()
+        return tuple(_lease_from_row(row["resource_key"], row) for row in rows)
+
+    def release_expired(self, *, now: datetime) -> tuple[Lease, ...]:
+        now_iso = now.isoformat()
+        rows = self._conn.execute(
+            "SELECT resource_key, holder_id, fence_token, expires_at "
+            "FROM leases WHERE expires_at <= ?",
+            (now_iso,),
+        ).fetchall()
+        recovered = tuple(_lease_from_row(row["resource_key"], row) for row in rows)
+        self._conn.execute("DELETE FROM leases WHERE expires_at <= ?", (now_iso,))
+        self._conn.commit()
+        return recovered
+
 
 class _Retry(Exception):
     """Internal signal to retry a fenced write after a lost race."""

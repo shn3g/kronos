@@ -9,6 +9,7 @@ import uvicorn
 
 from kronos_engine.api.app import create_app
 from kronos_engine.config.settings import load_settings
+from kronos_engine.observability.logging import configure_logging
 from kronos_engine.state.database import Database
 
 
@@ -23,6 +24,7 @@ def main() -> None:
     ):
         directory.mkdir(parents=True, exist_ok=True)
     database = Database(settings.paths.database)
+    configure_logging(settings.paths.logs)
     sock = _bind_loopback(settings.bind_host, settings.bind_port)
     host, port = sock.getsockname()[:2]
     ready_url = f"http://[{host}]:{port}" if ":" in str(host) else f"http://{host}:{port}"

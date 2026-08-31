@@ -137,6 +137,10 @@ class PlanningService:
                 "task_ids": [node.id.value for node in bound.nodes],
             },
         )
+        self._recorder.emit(
+            "policy.evaluated",
+            {"goal_id": goal.id.value, "task_count": len(bound.nodes)},
+        )
         return bound
 
 

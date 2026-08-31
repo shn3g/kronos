@@ -342,3 +342,13 @@ class TelegramStatusResponse(BaseModel):
     last_update_offset: int
     botfather_url: str
     setup_steps: list[str]
+
+
+class BackupRequest(BaseModel):
+    dest: str = ""
+
+
+class OpsSettingsRequest(BaseModel):
+    otel_export: bool = False
+    langfuse_export: bool = False
+
