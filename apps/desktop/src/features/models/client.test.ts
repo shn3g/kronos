@@ -79,4 +79,53 @@ describe("createProductionModelsClient", () => {
       embedding: "prof_b",
     });
   });
+
+  it("registers a local provider through POST /models/providers", async () => {
+    const client = createProductionModelsClient(async (method, path, body) => {
+      expect(method).toBe("POST");
+      expect(path).toBe("/models/providers");
+      expect(body).toEqual({
+        kind: "openai_compatible",
+        display_name: "http://127.0.0.1:11434/v1",
+        base_url: "http://127.0.0.1:11434/v1",
+        billed: false,
+      });
+      return {
+        status: 200,
+        body: JSON.stringify({
+          provider: {
+            id: "prov_1",
+            kind: "openai_compatible",
+            display_name: "http://127.0.0.1:11434/v1",
+            billed: false,
+          },
+          profiles: [
+            {
+              id: "prof_coder",
+              display_name: "Local (coder)",
+              role: "coder",
+              billed: false,
+            },
+          ],
+        }),
+      };
+    });
+
+    await expect(
+      client.createProvider({
+        kind: "openai_compatible",
+        displayName: "http://127.0.0.1:11434/v1",
+        baseUrl: "http://127.0.0.1:11434/v1",
+        billed: false,
+      }),
+    ).resolves.toEqual({
+      provider: {
+        id: "prov_1",
+        kind: "openai_compatible",
+        displayName: "http://127.0.0.1:11434/v1",
+        billed: false,
+      },
+      profiles: [{ id: "prof_coder", displayName: "Local (coder)", role: "coder", billed: false }],
+    });
+  });
 });

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { EngineClient } from "../../engine/client";
 import {
   createProductionModelsClient,
+  type DetectedTool,
   type ModelRole,
   type ModelsClient,
   type ModelsSnapshot,
@@ -29,6 +30,7 @@ export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
     reviewer: "",
     embedding: "",
   });
+  const [confirmShared, setConfirmShared] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -59,12 +61,7 @@ export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
         return;
       }
       setSnapshot(next);
-      setAssignments({
-        planner: next.assignments.planner ?? "",
-        coder: next.assignments.coder ?? "",
-        reviewer: next.assignments.reviewer ?? "",
-        embedding: next.assignments.embedding ?? "",
-      });
+      setAssignments(assignmentsFromSnapshot(next));
     });
     return () => {
       cancelled = true;
@@ -84,11 +81,40 @@ export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
     );
   }
 
+  async function onRegister(tool: DetectedTool) {
+    setError(null);
+    setSaved(false);
+    try {
+      const created = await client.createProvider({
+        kind: tool.kind,
+        displayName: tool.label,
+        baseUrl: tool.kind === "openai_compatible" ? tool.label : null,
+        billed: false,
+      });
+      const next: ModelsSnapshot = {
+        detected: snapshot?.detected ?? [tool],
+        profiles: created.profiles,
+        assignments: snapshot?.assignments ?? {
+          planner: null,
+          coder: null,
+          reviewer: null,
+          embedding: null,
+        },
+      };
+      setSnapshot(next);
+      setAssignments(assignmentsFromProfiles(created.profiles));
+    } catch {
+      setError("Could not register the detected provider.");
+    }
+  }
+
   async function onSave() {
     setError(null);
     setSaved(false);
     try {
-      const next = await client.assign(assignments);
+      const next = confirmShared
+        ? await client.assign(assignments, { confirmSharedRoles: true })
+        : await client.assign(assignments);
       setAssignments({
         planner: next.planner ?? "",
         coder: next.coder ?? "",
@@ -112,7 +138,20 @@ export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
       {snapshot?.detected.length ? (
         <ul className="models__detected">
           {snapshot.detected.map((tool) => (
-            <li key={`${tool.kind}:${tool.label}`}>{tool.label}</li>
+            <li key={`${tool.kind}:${tool.label}`}>
+              <span>{tool.label}</span>
+              {snapshot.profiles.length === 0 ? (
+                <button
+                  type="button"
+                  className="btn-quiet"
+                  onClick={() => {
+                    void onRegister(tool);
+                  }}
+                >
+                  Register as provider
+                </button>
+              ) : null}
+            </li>
           ))}
         </ul>
       ) : null}
@@ -144,6 +183,17 @@ export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
             </select>
           </label>
         ))}
+        <label className="models__confirm" htmlFor="model-confirm-shared">
+          <input
+            id="model-confirm-shared"
+            type="checkbox"
+            checked={confirmShared}
+            onChange={(event) => {
+              setConfirmShared(event.target.checked);
+            }}
+          />
+          Use one local model for all four roles
+        </label>
         <button type="submit" className="btn-primary">
           Save assignments
         </button>
@@ -152,4 +202,29 @@ export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
       {error ? <p className="wizard__error">{error}</p> : null}
     </section>
   );
+}
+
+function assignmentsFromSnapshot(snapshot: ModelsSnapshot): Record<ModelRole, string> {
+  const fromSaved: Record<ModelRole, string> = {
+    planner: snapshot.assignments.planner ?? "",
+    coder: snapshot.assignments.coder ?? "",
+    reviewer: snapshot.assignments.reviewer ?? "",
+    embedding: snapshot.assignments.embedding ?? "",
+  };
+  if (ROLES.some((role) => fromSaved[role])) {
+    return fromSaved;
+  }
+  return assignmentsFromProfiles(snapshot.profiles);
+}
+
+function assignmentsFromProfiles(
+  profiles: { id: string; role: string }[],
+): Record<ModelRole, string> {
+  const byRole = Object.fromEntries(profiles.map((profile) => [profile.role, profile.id]));
+  return {
+    planner: byRole.planner ?? "",
+    coder: byRole.coder ?? "",
+    reviewer: byRole.reviewer ?? "",
+    embedding: byRole.embedding ?? "",
+  };
 }
