@@ -1,0 +1,54 @@
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+.pnpm-store/
+
+# Test / coverage
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.nyc_output/
+
+# Rust / Tauri
+target/
+apps/desktop/src-tauri/gen/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editors
+.idea/
+*.swp
+*.swo
+
+# Secrets and local env
+.env
+.env.*
+!.env.example
+
+# Agent / local workspaces
+.superpowers/
+.worktrees/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
