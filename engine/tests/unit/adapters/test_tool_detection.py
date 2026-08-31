@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+import pytest
 
 from kronos_engine.adapters.executors.cursor import detect_cursor_cli
 from kronos_engine.adapters.models.openai_compatible import detect_openai_compatible_endpoints
@@ -23,6 +26,25 @@ def test_cursor_cli_detection_uses_path_lookup_not_repo_binaries(tmp_path: Path)
     assert found.name == "cursor-agent"
     assert "repo" not in found.path.replace("\\", "/")
     assert not (repo / "PWNED").exists()
+
+
+def test_cwd_decoy_cursor_agent_is_not_selected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    empty_bin = tmp_path / "empty-bin"
+    empty_bin.mkdir()
+    decoy_name = "cursor-agent.exe" if os.name == "nt" else "cursor-agent"
+    decoy = cwd / decoy_name
+    decoy.write_text("raise SystemExit('pwn')\n", encoding="utf-8")
+    if os.name != "nt":
+        decoy.chmod(0o755)
+    monkeypatch.chdir(cwd)
+    monkeypatch.setenv("PATH", str(empty_bin))
+    found = detect_cursor_cli()
+    assert found is None
+    assert not (cwd / "PWNED").exists()
 
 
 def test_openai_compatible_probe_does_not_execute_repository_code(tmp_path: Path) -> None:

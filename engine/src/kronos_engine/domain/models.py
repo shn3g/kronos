@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+import re
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TypeVar
 
@@ -25,6 +26,12 @@ FORBIDDEN_WORKER_SECRET_KEYS = frozenset(
 )
 
 T = TypeVar("T")
+
+_SECRET_SHAPED = re.compile(
+    r"(TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|API[_-]?KEY|PRIVATE[_-]?KEY|"
+    r"CREDENTIAL|ACCESS[_-]?KEY|BEARER)",
+    re.IGNORECASE,
+)
 
 
 class ModelRoutingError(ValueError):
@@ -81,6 +88,8 @@ def select_completion_model(
     *,
     fallback_model_id: str | None = None,
     fallback_billed: bool = False,
+    provider_billed: bool = False,
+    billed_model_ids: Sequence[str] = (),
 ) -> str:
     if fallback_model_id is None or fallback_model_id == profile.model_id:
         return profile.model_id
@@ -88,7 +97,13 @@ def select_completion_model(
         raise UnapprovedFallbackError(
             f"fallback {fallback_model_id!r} is not on the approved list"
         )
-    if fallback_billed:
+    billed = (
+        fallback_billed
+        or provider_billed
+        or profile.billed
+        or fallback_model_id in billed_model_ids
+    )
+    if billed:
         raise PaidFallbackRefused(
             "refusing paid model fallback; assign the paid model explicitly"
         )
@@ -101,7 +116,11 @@ def assert_finite_attempts(max_attempts: int) -> int:
     return max_attempts
 
 
-def assert_cost_allowed(limits: ResourceLimits, estimated_cost: float) -> None:
+def assert_cost_allowed(
+    limits: ResourceLimits, estimated_cost: float, *, billed: bool = False
+) -> None:
+    if billed and limits.cost_ceiling == 0:
+        raise CostCeilingExceeded("billed provider is forbidden when the cost ceiling is 0")
     if estimated_cost > limits.cost_ceiling:
         raise CostCeilingExceeded("estimated cost exceeds the cost ceiling")
 
@@ -119,6 +138,12 @@ def run_bounded_attempts(operation: Callable[[int], T], max_attempts: int) -> tu
 
 def is_forbidden_secret_key(key: str) -> bool:
     return key.upper() in FORBIDDEN_WORKER_SECRET_KEYS
+
+
+def is_secret_shaped_key(key: str) -> bool:
+    if is_forbidden_secret_key(key):
+        return True
+    return _SECRET_SHAPED.search(key) is not None
 
 
 def strip_worker_secrets(env: Mapping[str, str]) -> dict[str, str]:

@@ -59,6 +59,28 @@ def test_silent_paid_fallback_fails_even_when_listed() -> None:
         select_completion_model(profile, fallback_model_id="gpt-4", fallback_billed=True)
 
 
+def test_billed_provider_refuses_fallback_even_when_caller_marks_unbilled() -> None:
+    profile = _profile(approved_fallbacks=("gpt-4",))
+    with pytest.raises(PaidFallbackRefused, match="paid"):
+        select_completion_model(
+            profile,
+            fallback_model_id="gpt-4",
+            fallback_billed=False,
+            provider_billed=True,
+        )
+
+
+def test_fallback_id_mapped_to_billed_profile_is_refused() -> None:
+    profile = _profile(approved_fallbacks=("gpt-4",))
+    with pytest.raises(PaidFallbackRefused, match="paid"):
+        select_completion_model(
+            profile,
+            fallback_model_id="gpt-4",
+            fallback_billed=False,
+            billed_model_ids=("gpt-4",),
+        )
+
+
 def test_approved_unbilled_fallback_is_allowed() -> None:
     profile = _profile()
     assert (
@@ -104,6 +126,14 @@ def test_cost_ceiling_blocks_overspend() -> None:
         assert_cost_allowed(limits, estimated_cost=0.01)
 
 
+def test_cost_ceiling_zero_fails_closed_for_billed_provider() -> None:
+    limits = ResourceLimits(
+        max_tokens=1, max_attempts=1, timeout_seconds=1.0, cost_ceiling=0.0
+    )
+    with pytest.raises(CostCeilingExceeded):
+        assert_cost_allowed(limits, estimated_cost=0.0, billed=True)
+
+
 def test_worker_secret_keys_include_controller_and_reviewer_leaks() -> None:
     leaked = strip_worker_secrets(
         {
@@ -119,3 +149,12 @@ def test_worker_secret_keys_include_controller_and_reviewer_leaks() -> None:
     assert "GH_TOKEN" in FORBIDDEN_WORKER_SECRET_KEYS
     assert "KRONOS_CONTROLLER_TOKEN" in FORBIDDEN_WORKER_SECRET_KEYS
     assert "KRONOS_REVIEWER_TOKEN" in FORBIDDEN_WORKER_SECRET_KEYS
+
+
+def test_secret_shaped_keys_include_generic_api_keys() -> None:
+    from kronos_engine.domain.models import is_secret_shaped_key
+
+    assert is_secret_shaped_key("OPENAI_API_KEY") is True
+    assert is_secret_shaped_key("AWS_SECRET_ACCESS_KEY") is True
+    assert is_secret_shaped_key("PATH") is False
+    assert is_secret_shaped_key("LANG") is False

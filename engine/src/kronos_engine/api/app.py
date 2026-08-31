@@ -17,6 +17,7 @@ from kronos_engine.adapters.git.worktrees import CacheRuntimeLayout
 from kronos_engine.adapters.secrets.os_store import OsSecretStore
 from kronos_engine.adapters.tools import DefaultToolDetector
 from kronos_engine.api.models import (
+    AssignmentsRequest,
     AssignmentsResponse,
     DetectedToolModel,
     EventItem,
@@ -290,18 +291,28 @@ def create_app(
             ]
             if not profiles:
                 raise HTTPException(status_code=500, detail="provider profile was not created")
+            coder = next((item for item in profiles if item.role == "coder"), profiles[0])
             return ProviderCreateResponse(
                 provider=_provider_model(provider),
-                profile=_profile_model(profiles[0]),
+                profile=_profile_model(coder),
+                profiles=[_profile_model(item) for item in profiles],
             )
 
     @app.put("/models/assignments", response_model=AssignmentsResponse)
     def assign_models(
-        body: dict[str, str], _: None = Depends(require_auth)
+        body: AssignmentsRequest, _: None = Depends(require_auth)
     ) -> AssignmentsResponse:
         with model_service() as service:
             try:
-                assigned = service.assign(body)
+                assigned = service.assign(
+                    {
+                        "planner": body.planner,
+                        "coder": body.coder,
+                        "reviewer": body.reviewer,
+                        "embedding": body.embedding,
+                    },
+                    confirm_shared_roles=body.confirm_shared_roles,
+                )
             except RoleAssignmentError as error:
                 raise HTTPException(status_code=400, detail=str(error)) from error
             return AssignmentsResponse(assignments=assigned.as_dict())
