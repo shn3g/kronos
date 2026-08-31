@@ -81,3 +81,51 @@ class EventItem(BaseModel):
 class EventListResponse(BaseModel):
     events: list[EventItem]
     head_seq: int
+
+
+class ProviderModel(BaseModel):
+    id: str
+    kind: str
+    display_name: str
+    base_url: str | None
+    billed: bool
+
+
+class ProfileModel(BaseModel):
+    id: str
+    display_name: str
+    role: str
+    provider_id: str
+    model_id: str
+    billed: bool
+    approved_fallbacks: list[str]
+
+
+class DetectedToolModel(BaseModel):
+    kind: str
+    label: str
+    present: bool
+
+
+class ModelsSnapshotResponse(BaseModel):
+    detected: list[DetectedToolModel]
+    providers: list[ProviderModel]
+    profiles: list[ProfileModel]
+    assignments: dict[str, str | None]
+
+
+class ProviderCreateRequest(BaseModel):
+    kind: str
+    display_name: str
+    base_url: str | None = None
+    billed: bool = False
+    api_key: str | None = None
+
+
+class ProviderCreateResponse(BaseModel):
+    provider: ProviderModel
+    profile: ProfileModel
+
+
+class AssignmentsResponse(BaseModel):
+    assignments: dict[str, str | None]

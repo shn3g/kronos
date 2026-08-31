@@ -78,6 +78,35 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        3,
+        """
+        CREATE TABLE model_providers (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            base_url TEXT,
+            billed INTEGER NOT NULL CHECK (billed IN (0, 1)),
+            secret_ref TEXT NOT NULL
+        );
+
+        CREATE TABLE model_profiles (
+            id TEXT PRIMARY KEY,
+            display_name TEXT NOT NULL,
+            role TEXT NOT NULL,
+            provider_id TEXT NOT NULL REFERENCES model_providers(id),
+            model_id TEXT NOT NULL,
+            billed INTEGER NOT NULL CHECK (billed IN (0, 1)),
+            approved_fallbacks_json TEXT NOT NULL,
+            limits_json TEXT NOT NULL
+        );
+
+        CREATE TABLE model_assignments (
+            role TEXT PRIMARY KEY,
+            profile_id TEXT NOT NULL REFERENCES model_profiles(id)
+        );
+        """,
+    ),
 )
 
 
