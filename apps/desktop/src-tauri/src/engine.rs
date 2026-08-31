@@ -172,6 +172,15 @@ pub async fn pick_repository_folder(app: AppHandle) -> Option<String> {
 
 fn engine_path_allowed(method: &str, path: &str) -> bool {
     let path = path.split('?').next().unwrap_or(path);
+    if path == "/models" || path == "/models/" {
+        return method == "GET";
+    }
+    if path == "/models/providers" {
+        return method == "POST";
+    }
+    if path == "/models/assignments" {
+        return method == "PUT";
+    }
     if !path.starts_with("/repositories") {
         return false;
     }
@@ -674,4 +683,19 @@ where
             let _ = writeln!(log_file, "{line}");
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::engine_path_allowed;
+
+    #[test]
+    fn allowlist_includes_models_and_repositories() {
+        assert!(engine_path_allowed("GET", "/models"));
+        assert!(engine_path_allowed("POST", "/models/providers"));
+        assert!(engine_path_allowed("PUT", "/models/assignments"));
+        assert!(!engine_path_allowed("GET", "/models/assignments"));
+        assert!(!engine_path_allowed("POST", "/secrets"));
+        assert!(engine_path_allowed("GET", "/repositories"));
+    }
 }
