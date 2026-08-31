@@ -1,3 +1,34 @@
-# Compose placeholders for a later operations milestone.
-# Engine and reviewer services are not defined in sub-plan 1.
-services: {}
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Isolated engine and reviewer processes. Credentials and mounts are not shared.
+services:
+  engine:
+    image: kronos-engine:local
+    volumes:
+      - engine-data:/var/lib/kronos/engine
+    secrets:
+      - controller_private_key
+    environment:
+      KRONOS_ROLE: engine
+  reviewer:
+    image: kronos-reviewer:local
+    read_only: true
+    volumes:
+      - reviewer-data:/var/lib/kronos/reviewer
+      - reviewer-sandbox:/var/lib/kronos/reviewer-sandbox
+    secrets:
+      - reviewer_private_key
+      - reviewer_attestation_key
+    environment:
+      KRONOS_ROLE: reviewer
+      KRONOS_REVIEW_CHECK_NAME: kronos-review (kronos-reviewer)
+secrets:
+  controller_private_key:
+    file: ./secrets/controller.pem
+  reviewer_private_key:
+    file: ./secrets/reviewer.pem
+  reviewer_attestation_key:
+    file: ./secrets/reviewer.attestation
+volumes:
+  engine-data:
+  reviewer-data:
+  reviewer-sandbox:

@@ -14,7 +14,9 @@ from kronos_engine.adapters.github.issues import add_issue_comment as _add_comme
 from kronos_engine.adapters.github.issues import add_labels as _add_labels
 from kronos_engine.adapters.github.issues import create_issue as _create_issue
 from kronos_engine.adapters.github.issues import list_issues as _list_issues
+from kronos_engine.adapters.github.pulls import merge_pull as _merge_pull
 from kronos_engine.adapters.github.pulls import open_draft_pr as _open_draft_pr
+from kronos_engine.adapters.github.pulls import open_promotion_pr as _open_promotion_pr
 from kronos_engine.adapters.github.rulesets import apply_ruleset as _apply_ruleset
 from kronos_engine.adapters.github.rulesets import propose_ruleset as _propose_ruleset
 from kronos_engine.ports.forge import (
@@ -72,6 +74,26 @@ class GitHubForge:
         *,
         base: str | None = None,
     ) -> PullRef:
+        return _open_draft_pr(
+            self._client, self._target, title, body, head, key, base=base
+        )
+
+    def merge_pull(self, number: int, *, sha: str, target: str | None = None) -> None:
+        _merge_pull(self._client, self._target, number, sha=sha, dest=target)
+
+    def open_pull(
+        self,
+        *,
+        title: str,
+        body: str,
+        head: str,
+        base: str,
+        draft: bool,
+        key: IdempotencyKey,
+    ) -> PullRef:
+        _ = draft
+        if base == self._target.protected_branch:
+            return _open_promotion_pr(self._client, self._target, title, body, head, key)
         return _open_draft_pr(
             self._client, self._target, title, body, head, key, base=base
         )
