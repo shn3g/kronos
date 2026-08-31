@@ -5,13 +5,14 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let handle = app.handle().clone();
             let supervisor = engine::EngineSupervisor::spawn(&handle);
             app.manage(supervisor);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![engine::engine_state])
+        .invoke_handler(tauri::generate_handler![engine::engine_state, engine::engine_json, engine::pick_repository_folder])
         .run(tauri::generate_context!())
         .expect("Kronos failed to start");
 }

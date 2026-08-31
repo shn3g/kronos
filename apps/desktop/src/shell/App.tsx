@@ -6,6 +6,8 @@ import {
   type EngineClient,
 } from "../engine/client";
 import { EngineStatus } from "../engine/EngineStatus";
+import { WorkspacesPage } from "../features/workspaces/WorkspacesPage";
+import { pickRepositoryFolder } from "../features/workspaces/client";
 import { pathFromHash, ROUTES } from "./routes";
 
 const productionClient = createProductionEngineClient();
@@ -56,9 +58,15 @@ export function App({ engineClient }: AppProps) {
           <EngineStatus client={client} />
         </header>
         <main id="main" className="chrome-main" tabIndex={-1}>
-          <p className="page-kicker">{active.name}</p>
-          <h1 className="page-title">{active.heading}</h1>
-          <p className="page-body">{active.summary}</p>
+          {path === "/workspaces" ? (
+            <WorkspacesPage engineClient={client} pickFolder={pickRepositoryFolder} />
+          ) : (
+            <>
+              <p className="page-kicker">{active.name}</p>
+              <h1 className="page-title">{active.heading}</h1>
+              <p className="page-body">{active.summary}</p>
+            </>
+          )}
         </main>
       </div>
     </div>

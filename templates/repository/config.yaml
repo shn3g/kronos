@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+schema_version: 1
+branches:
+  integration: main
+  protected: main
+commands:
+  setup: []
+  test: []
+  lint: []
+  build: []
+autonomy:
+  freeze: true
+  invent_issues: false
+  refill_enabled: false
+paths:
+  locked_prefixes: []
+risk:
+  floor: low
+budgets:
+  max_attempts_per_issue: 3
+  max_dispatches_per_day: 12
+  breaker_failure_limit: 4
+  dry_run_meters: false
+wip:
+  ready: 2
+  running: 3
+executor:
+  profile: standard
+  sandbox: default
+indexing:
+  enabled: true

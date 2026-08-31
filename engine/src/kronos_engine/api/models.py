@@ -18,8 +18,52 @@ class VersionResponse(BaseModel):
     compatible: bool
 
 
+class RepositoryRecord(BaseModel):
+    id: str
+    display_name: str
+    realpath: str
+    origin: str | None
+    status: str
+
+
 class RepositoryListResponse(BaseModel):
-    repositories: list[dict[str, str]]
+    repositories: list[RepositoryRecord]
+
+
+class PathRequest(BaseModel):
+    path: str
+    policy: dict[str, Any] | None = None
+
+
+class PreviewFileModel(BaseModel):
+    path: str
+    action: str
+    content: str
+    unified_diff: str
+
+
+class InspectResponse(BaseModel):
+    git_root: str
+    origin: str | None
+    current_branch: str
+    default_branch: str
+    languages: list[str]
+    package_managers: list[str]
+    policy: dict[str, Any]
+    preview: list[PreviewFileModel]
+    wrote_files: bool
+    committed: bool
+    pushed: bool
+
+
+class RepositoryDetailResponse(BaseModel):
+    repository: RepositoryRecord
+    policy: dict[str, Any]
+    runtime: dict[str, str]
+    preview: list[PreviewFileModel] | None = None
+    wrote_files: bool = False
+    committed: bool = False
+    pushed: bool = False
 
 
 class GoalListResponse(BaseModel):
