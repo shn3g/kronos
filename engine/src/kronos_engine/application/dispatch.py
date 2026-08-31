@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Claim order: freeze, budget, evidence, lease, worktree, worker."""
+"""Claim order: freeze, consume, evidence, lease, worktree, worker."""
 
 from __future__ import annotations
 
@@ -14,16 +14,28 @@ from kronos_engine.application.repositories import RepositoryService
 from kronos_engine.domain.budgets import (
     BreakerTripped,
     BudgetExceeded,
+    BudgetMeter,
     check_budget,
     consume,
+    record_failure,
+    record_success,
     should_consume,
 )
-from kronos_engine.domain.entities import Lease, RunId, TaskId
-from kronos_engine.domain.goals import GoalState
+from kronos_engine.domain.entities import Lease, RepositoryId, RunId, TaskId
+from kronos_engine.domain.goals import GoalState, transition_goal
 from kronos_engine.domain.models import ResourceLimits, strip_worker_secrets
-from kronos_engine.domain.tasks import EvidenceLocator, RunRecord, TaskState, transition_task
+from kronos_engine.domain.results import LockHeldError, StaleFenceError
+from kronos_engine.domain.tasks import (
+    EvidenceLocator,
+    RunRecord,
+    TaskRecord,
+    TaskState,
+    transition_task,
+)
 from kronos_engine.domain.workflow import (
     UnresolvedEvidence,
+    lease_resource_key,
+    require_evidence,
     require_explicit_task_id,
 )
 from kronos_engine.indexing.service import IndexingService
@@ -117,8 +129,11 @@ class DispatchService:
         day = now.date().isoformat()
         meter = self._store.budget_meter(repo.id, day)
         attempts = self._store.task_attempts(ident)
+        goal = self._store.get_goal(task.goal_id)
         try:
             check_budget(meter, repo.policy, task_attempts=attempts)
+            if attempts >= goal.max_attempts:
+                raise BudgetExceeded("per-issue attempt cap reached")
         except (BudgetExceeded, BreakerTripped) as error:
             self._recorder.emit(
                 "dispatch.refused",
@@ -132,11 +147,31 @@ class DispatchService:
                 budget_consumed=False,
                 task_id=ident,
             )
+        if not dry_run:
+            running = self._store.count_wip(
+                repo.id, (TaskState.CLAIMED, TaskState.RUNNING, TaskState.AWAITING_GATES)
+            )
+            if running >= repo.policy.wip.running:
+                return ClaimResult(
+                    ok=False,
+                    steps=tuple(steps),
+                    failed_step="budget",
+                    reason="running WIP cap reached",
+                    budget_consumed=False,
+                    task_id=ident,
+                )
+
+        shadow = repo.policy.budgets.dry_run_meters
+        consumed = should_consume(dry_run=dry_run, shadow_metering=shadow)
+        if consumed:
+            self._meter(repo.id, ident, meter, dry_run=dry_run, shadow=shadow)
         steps.append("budget")
 
         try:
+            require_evidence(task.kind.value, task.evidence, task.exemption)
+            self._assert_dependencies_merged(task)
             resolve_evidence(self._indexer, repo.id.value, task.evidence)
-        except UnresolvedEvidence as error:
+        except (UnresolvedEvidence, LookupError) as error:
             self._recorder.emit(
                 "dispatch.refused",
                 {"task_id": ident.value, "step": "evidence", "reason": str(error)},
@@ -146,16 +181,12 @@ class DispatchService:
                 steps=tuple(steps),
                 failed_step="evidence",
                 reason=str(error),
-                budget_consumed=False,
+                budget_consumed=consumed,
                 task_id=ident,
             )
         steps.append("evidence")
 
-        shadow = repo.policy.budgets.dry_run_meters
         if dry_run:
-            consumed = should_consume(dry_run=True, shadow_metering=shadow)
-            if consumed:
-                self._meter(repo.id, ident, meter, dry_run=True, shadow=shadow)
             return ClaimResult(
                 ok=True,
                 steps=tuple(steps),
@@ -165,34 +196,49 @@ class DispatchService:
                 task_id=ident,
             )
 
-        running = self._store.count_wip(
-            repo.id, (TaskState.CLAIMED, TaskState.RUNNING, TaskState.AWAITING_GATES)
-        )
-        if running >= repo.policy.wip.running:
+        area_key = lease_resource_key(repo.id.value, task.scope_paths, ident.value)
+        try:
+            lease = self._leases.acquire(
+                area_key,
+                holder_id,
+                timedelta(hours=2),
+                now=now,
+            )
+        except LockHeldError as error:
+            self._recorder.emit(
+                "dispatch.refused",
+                {"task_id": ident.value, "step": "lease", "reason": str(error)},
+            )
             return ClaimResult(
                 ok=False,
                 steps=tuple(steps),
-                failed_step="budget",
-                reason="running WIP cap reached",
-                budget_consumed=False,
+                failed_step="lease",
+                reason=str(error),
+                budget_consumed=True,
                 task_id=ident,
             )
-
-        area = task.scope_paths[0] if task.scope_paths else ident.value
-        lease = self._leases.acquire(
-            f"{repo.id.value}:area:{area}",
-            holder_id,
-            timedelta(hours=2),
-            now=now,
-        )
         steps.append("lease")
 
-        worktree = self._worktrees.create(
-            Path(repo.realpath), self._cache_root, repo.id, ident
-        )
+        try:
+            worktree = self._worktrees.create(
+                Path(repo.realpath), self._cache_root, repo.id, ident
+            )
+        except RuntimeError as error:
+            self._recorder.emit(
+                "dispatch.refused",
+                {"task_id": ident.value, "step": "worktree", "reason": str(error)},
+            )
+            return ClaimResult(
+                ok=False,
+                steps=tuple(steps),
+                failed_step="worktree",
+                reason=str(error),
+                budget_consumed=True,
+                lease=lease,
+                task_id=ident,
+            )
         steps.append("worktree")
 
-        self._meter(repo.id, ident, meter, dry_run=False, shadow=shadow)
         next_state = (
             TaskState.CLAIMED
             if task.state is TaskState.READY
@@ -207,11 +253,9 @@ class DispatchService:
                 worktree_path=str(worktree),
             )
         )
-        goal = self._store.get_goal(task.goal_id)
         if goal.state is GoalState.PLANNED:
-            self._store.save_goal(
-                replace(goal, state=GoalState.ACTIVE)
-            )
+            activated = replace(goal, state=transition_goal(goal.state, GoalState.ACTIVE))
+            self._store.save_goal(activated)
             self._recorder.emit(
                 "goal.transitioned",
                 {
@@ -240,30 +284,47 @@ class DispatchService:
             task_id=ident,
         )
 
-    def execute(self, claimed: ClaimResult) -> ExecuteResult:
+    def execute(self, claimed: ClaimResult, *, phase: str = "green") -> ExecuteResult:
         if not claimed.ok or claimed.task_id is None or claimed.worktree is None:
             reason = claimed.reason or "claim required before execute"
             return ExecuteResult(ok=False, artifacts=(), error=reason, status="failed")
         task = self._store.get_task(claimed.task_id)
-        running = replace(task, state=transition_task(task.state, TaskState.RUNNING))
-        self._store.save_task(running)
-        self._recorder.emit(
-            "task.transitioned",
-            {
-                "task_id": task.id.value,
-                "from": task.state.value,
-                "to": TaskState.RUNNING.value,
-            },
-        )
-        self._recorder.emit("run.started", {"task_id": task.id.value})
+        token = claimed.lease.fence_token if claimed.lease is not None else task.fence_token
+        if token is None:
+            return ExecuteResult(ok=False, artifacts=(), error="fence required", status="failed")
+        key = lease_resource_key(task.repository_id.value, task.scope_paths, task.id.value)
+        try:
+            self._leases.assert_fence(key, token, now=self._clock())
+        except StaleFenceError as error:
+            return ExecuteResult(ok=False, artifacts=(), error=str(error), status="failed")
+        running = task
+        if task.state is TaskState.CLAIMED:
+            running = replace(task, state=transition_task(task.state, TaskState.RUNNING))
+            self._store.save_task(running)
+            self._recorder.emit(
+                "task.transitioned",
+                {
+                    "task_id": task.id.value,
+                    "from": task.state.value,
+                    "to": TaskState.RUNNING.value,
+                },
+            )
+        elif task.state is not TaskState.RUNNING:
+            return ExecuteResult(
+                ok=False,
+                artifacts=(),
+                error=f"cannot execute from {task.state.value}",
+                status="failed",
+            )
+        self._recorder.emit("run.started", {"task_id": task.id.value, "phase": phase})
         request = ExecutorRequest(
             repository_id=task.repository_id,
             task_id=task.id,
             worktree=claimed.worktree,
             context=ExecutorContext(
-                story=task.title,
+                story=f"{phase}: {task.title}",
                 evidence=",".join(f"{item.path}:{item.line}" for item in task.evidence),
-                expected_artifact=task.scope_paths[0] if task.scope_paths else "pkg/math.py",
+                expected_artifact=_expected_artifact(running, phase),
                 expected_content="",
             ),
             capabilities=ExecutorCapabilities(
@@ -308,21 +369,38 @@ class DispatchService:
             )
         return ExecuteResult(ok=True, artifacts=artifacts, error=None, status=result.status)
 
+    def record_run_failure(self, task_id: TaskId) -> None:
+        task = self._store.get_task(task_id)
+        meter = self._store.budget_meter(task.repository_id, self._clock().date().isoformat())
+        repo = self._repos.get(task.repository_id)
+        updated = record_failure(meter, repo.policy.budgets.breaker_failure_limit)
+        self._store.save_budget_meter(task.repository_id, updated)
+
+    def record_run_success(self, task_id: TaskId) -> None:
+        task = self._store.get_task(task_id)
+        meter = self._store.budget_meter(task.repository_id, self._clock().date().isoformat())
+        self._store.save_budget_meter(task.repository_id, record_success(meter))
+
+    def set_run_pr_url(self, task_id: TaskId, pr_url: str) -> None:
+        for run in self._store.list_runs():
+            if run.task_id == task_id:
+                self._store.save_run(replace(run, pr_url=pr_url))
+
+    def _assert_dependencies_merged(self, task: TaskRecord) -> None:
+        for dep in task.depends_on:
+            parent = self._store.get_task(dep)
+            if parent.state is not TaskState.MERGED:
+                raise UnresolvedEvidence(f"dependency {dep.value} is not merged")
+
     def _meter(
         self,
-        repository_id: object,
+        repository_id: RepositoryId,
         task_id: TaskId,
-        meter: object,
+        meter: BudgetMeter,
         *,
         dry_run: bool,
         shadow: bool,
     ) -> None:
-        from kronos_engine.domain.entities import RepositoryId
-
-        assert isinstance(repository_id, RepositoryId)
-        from kronos_engine.domain.budgets import BudgetMeter
-
-        assert isinstance(meter, BudgetMeter)
         updated = consume(meter, dry_run=dry_run, shadow_metering=shadow)
         self._store.save_budget_meter(repository_id, updated)
         if should_consume(dry_run=dry_run, shadow_metering=shadow):
@@ -355,3 +433,16 @@ def resolve_evidence(
                 )
     finally:
         store.close()
+
+
+def _expected_artifact(task: TaskRecord, phase: str) -> str:
+    if phase == "red":
+        if task.scope_paths:
+            stem = Path(task.scope_paths[0]).stem
+            return f"tests/test_{stem}.py"
+        return f"tests/test_{task.id.value}.py"
+    if task.scope_paths:
+        return task.scope_paths[0]
+    if task.evidence:
+        return task.evidence[0].path
+    return f"src/{task.id.value}.py"

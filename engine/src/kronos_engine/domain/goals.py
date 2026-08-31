@@ -55,8 +55,8 @@ class GoalSpec:
     non_goals: str
     risk_ceiling: str
     source: GoalSource
+    max_attempts: int
     schedule: str | None = None
-    max_attempts: int | None = None
 
     def __post_init__(self) -> None:
         require_goal_fields(self)
@@ -72,6 +72,7 @@ class GoalRecord:
     risk_ceiling: str
     source: GoalSource
     state: GoalState
+    max_attempts: int = 3
     schedule: str | None = None
     stop_reason: str | None = None
     created_at: str = ""
@@ -86,6 +87,8 @@ def require_goal_fields(spec: GoalSpec) -> None:
         raise GoalValidationError("non-goals are required")
     if spec.risk_ceiling not in RISK_STEPS:
         raise GoalValidationError("risk ceiling is required")
+    if spec.max_attempts < 1:
+        raise GoalValidationError("budget is required")
     if spec.source is GoalSource.SCHEDULE and (
         spec.schedule is None or spec.schedule.strip() == ""
     ):

@@ -11,6 +11,7 @@ export interface RunRecord {
 
 export interface RunsClient {
   list(): Promise<RunRecord[]>;
+  pollEvents(after: number): Promise<{ events: Array<{ type: string }>; headSeq: number }>;
 }
 
 interface EngineJsonResponse {
@@ -30,6 +31,18 @@ export function createProductionRunsClient(
       const payload = await jsonRequest(request, "GET", "/runs");
       const items = Array.isArray(payload.runs) ? payload.runs : [];
       return items.map(mapRun);
+    },
+    async pollEvents(after) {
+      const payload = await jsonRequest(request, "GET", `/events?after=${after}`);
+      const events = Array.isArray(payload.events) ? payload.events : [];
+      return {
+        events: events.map((item) => {
+          const record =
+            typeof item === "object" && item !== null ? (item as Record<string, unknown>) : {};
+          return { type: typeof record.type === "string" ? record.type : "" };
+        }),
+        headSeq: typeof payload.head_seq === "number" ? payload.head_seq : after,
+      };
     },
   };
 }

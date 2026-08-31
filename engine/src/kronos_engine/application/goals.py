@@ -40,6 +40,7 @@ class GoalService:
             risk_ceiling=spec.risk_ceiling,
             source=spec.source,
             state=GoalState.DRAFT,
+            max_attempts=spec.max_attempts,
             schedule=spec.schedule,
             created_at=datetime.now(tz=UTC).isoformat(),
         )
@@ -81,6 +82,7 @@ class GoalService:
             risk_ceiling=goal.risk_ceiling,
             source=goal.source,
             state=next_state,
+            max_attempts=goal.max_attempts,
             schedule=goal.schedule,
             stop_reason=reason if reason is not None else goal.stop_reason,
             created_at=goal.created_at,

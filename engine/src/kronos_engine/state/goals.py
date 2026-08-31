@@ -29,8 +29,8 @@ class SqliteGoalStore:
             """
             INSERT INTO goals(
                 id, repository_id, title, success_criteria, non_goals, risk_ceiling,
-                source, schedule, state, stop_reason, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                source, schedule, state, stop_reason, created_at, max_attempts
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 success_criteria = excluded.success_criteria,
@@ -39,7 +39,8 @@ class SqliteGoalStore:
                 source = excluded.source,
                 schedule = excluded.schedule,
                 state = excluded.state,
-                stop_reason = excluded.stop_reason
+                stop_reason = excluded.stop_reason,
+                max_attempts = excluded.max_attempts
             """,
             (
                 goal.id.value,
@@ -53,6 +54,7 @@ class SqliteGoalStore:
                 goal.state.value,
                 goal.stop_reason,
                 goal.created_at,
+                goal.max_attempts,
             ),
         )
         self._conn.commit()
@@ -249,6 +251,7 @@ def _goal_from_row(row: sqlite3.Row) -> GoalRecord:
         risk_ceiling=row["risk_ceiling"],
         source=GoalSource(row["source"]),
         state=GoalState(row["state"]),
+        max_attempts=int(row["max_attempts"]) if "max_attempts" in row.keys() else 3,
         schedule=row["schedule"],
         stop_reason=row["stop_reason"],
         created_at=row["created_at"],

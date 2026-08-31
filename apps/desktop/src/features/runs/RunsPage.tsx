@@ -41,20 +41,26 @@ export function RunsPage({ engineClient, runsClient }: RunsPageProps) {
       return;
     }
     let cancelled = false;
-    void client
-      .list()
-      .then((items) => {
-        if (!cancelled) {
-          setRuns(items);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setError("Could not load runs.");
-        }
-      });
+    let after = 0;
+    const refresh = () => {
+      void Promise.all([client.list(), client.pollEvents(after)])
+        .then(([items, streamed]) => {
+          if (!cancelled) {
+            setRuns(items);
+            after = streamed.headSeq;
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setError("Could not load runs.");
+          }
+        });
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 1500);
     return () => {
       cancelled = true;
+      window.clearInterval(interval);
     };
   }, [client, ready]);
 

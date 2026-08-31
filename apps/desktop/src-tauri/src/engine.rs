@@ -202,7 +202,21 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
     if path == "/goals" || path == "/goals/" {
         return method == "GET" || method == "POST";
     }
+    if path == "/goals/tick" || path == "/goals/tick/" {
+        return method == "POST";
+    }
+    if path == "/goals/ingest" || path == "/goals/ingest/" {
+        return method == "POST";
+    }
     if let Some(rest) = path.strip_prefix("/goals/") {
+        if let Some(id) = rest.strip_suffix("/plan") {
+            return method == "POST"
+                && !id.is_empty()
+                && !id.contains('/')
+                && id
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-');
+        }
         return method == "GET"
             && !rest.is_empty()
             && rest
@@ -757,6 +771,9 @@ mod tests {
         assert!(engine_path_allowed("GET", "/goals"));
         assert!(engine_path_allowed("POST", "/goals"));
         assert!(engine_path_allowed("GET", "/goals/goal_abc"));
+        assert!(engine_path_allowed("POST", "/goals/goal_abc/plan"));
+        assert!(engine_path_allowed("POST", "/goals/tick"));
+        assert!(engine_path_allowed("POST", "/goals/ingest"));
         assert!(engine_path_allowed("GET", "/runs"));
         assert!(engine_path_allowed("GET", "/events?after=0"));
         assert!(!engine_path_allowed("DELETE", "/goals"));
