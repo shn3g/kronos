@@ -110,6 +110,7 @@ from kronos_engine.application.verification import GateRunner
 from kronos_engine.application.workspace_changes import (
     commit_working_tree,
     list_working_tree_changes,
+    mark_chat_writes,
 )
 from kronos_engine.config.repository import (
     EnrolmentPreview,
@@ -776,7 +777,10 @@ def create_app(
     ) -> dict[str, object]:
         with repository_service() as repos:
             record = _load(repos, repository_id)
-        return {"changes": list_working_tree_changes(Path(record.realpath))}
+        changes = list_working_tree_changes(Path(record.realpath))
+        with chat_service() as service:
+            backups = service.list_backup_paths(repository_id)
+        return {"changes": mark_chat_writes(changes, backups)}
 
     @app.post("/repositories/{repository_id}/commits")
     def commit_working_changes(

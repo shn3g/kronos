@@ -10,6 +10,7 @@ from tests.support.git_fixtures import init_git_repo
 from kronos_engine.application.workspace_changes import (
     commit_working_tree,
     list_working_tree_changes,
+    mark_chat_writes,
     restore_working_path,
 )
 
@@ -102,3 +103,17 @@ def test_restore_working_path_deletes_an_untracked_file(tmp_path: Path) -> None:
     restore_working_path(repo, "fresh.py")
 
     assert not (repo / "fresh.py").exists()
+
+
+def test_mark_chat_writes_flags_only_backup_paths() -> None:
+    changes = [
+        {"path": "hello.py", "summary": "Modified hello.py", "patch": "+new\n", "status": "M"},
+        {"path": "other.py", "summary": "Added other.py", "patch": "+x\n", "status": "A"},
+    ]
+
+    marked = mark_chat_writes(changes, ("hello.py",))
+
+    assert marked[0]["from_chat"] is True
+    assert marked[1]["from_chat"] is False
+    assert marked[0]["path"] == "hello.py"
+

@@ -69,7 +69,9 @@ async def test_working_tree_changes_and_commit_fail_closed(
     paths = {item["path"]: item for item in listed.json()["changes"]}
     assert "-old" in paths["hello.py"]["patch"]
     assert "+new" in paths["hello.py"]["patch"]
+    assert paths["hello.py"]["from_chat"] is False
     assert paths["fresh.py"]["summary"].startswith("Added")
+    assert paths["fresh.py"]["from_chat"] is False
 
     empty = await http.post(
         f"/repositories/{repo_id}/commits",

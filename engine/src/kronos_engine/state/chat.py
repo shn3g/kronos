@@ -142,6 +142,13 @@ class SqliteChatStore:
         )
         self._conn.commit()
 
+    def list_backup_paths(self, repository_id: str) -> tuple[str, ...]:
+        rows = self._conn.execute(
+            "SELECT path FROM chat_file_backups WHERE repository_id = ? ORDER BY path",
+            (repository_id,),
+        ).fetchall()
+        return tuple(str(row["path"]) for row in rows)
+
 
 def _session_from_row(row: sqlite3.Row) -> ChatSessionRow:
     return ChatSessionRow(

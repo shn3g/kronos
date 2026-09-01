@@ -489,6 +489,9 @@ class ChatService:
         for rel_path in paths:
             self._store.delete_file_backup(repository_id, Path(rel_path).as_posix())
 
+    def list_backup_paths(self, repository_id: str) -> tuple[str, ...]:
+        return self._store.list_backup_paths(repository_id)
+
     def _note_revert(self, repository_id: str, path: str) -> None:
         if self._events is None:
             return

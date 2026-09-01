@@ -140,6 +140,11 @@ async def test_revert_write_restores_file_and_fails_closed(
         )
         assert sent.status_code == 200
         assert (repo / "hello.py").read_text(encoding="utf-8") == "new\n"
+        (repo / "other.py").write_text("local\n", encoding="utf-8")
+        listed = await http.get(f"/repositories/{repo_id}/changes", headers=headers)
+        by_path = {item["path"]: item for item in listed.json()["changes"]}
+        assert by_path["hello.py"]["from_chat"] is True
+        assert by_path["other.py"]["from_chat"] is False
         before_dash = await http.get("/ops/dashboard", headers=headers)
         assert any(item.get("path") == "hello.py" for item in before_dash.json()["diffs"])
 

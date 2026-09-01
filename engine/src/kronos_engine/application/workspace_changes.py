@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from kronos_engine.application.chat_diff import MAX_PATCH_CHARS, unified_write_patch
@@ -42,6 +42,19 @@ def list_working_tree_changes(root: Path) -> list[dict[str, str]]:
             }
         )
     return items
+
+
+def mark_chat_writes(
+    changes: Sequence[Mapping[str, str]],
+    backup_paths: Sequence[str],
+) -> list[dict[str, object]]:
+    backups = {path.replace("\\", "/") for path in backup_paths}
+    marked: list[dict[str, object]] = []
+    for item in changes:
+        row: dict[str, object] = dict(item)
+        row["from_chat"] = str(item.get("path") or "").replace("\\", "/") in backups
+        marked.append(row)
+    return marked
 
 
 def commit_working_tree(
