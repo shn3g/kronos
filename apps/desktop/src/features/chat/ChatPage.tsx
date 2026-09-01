@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatClient, ChatMessage, ChatSession } from "./client";
 import { ChatMarkdown } from "./ChatMarkdown";
+import { chatContextMeterLabel, chatContextUsage, chatContextWarning } from "./contextMeter";
 import { appendMention, insertMention, mentionQueryAtCursor, mentionSegments, uniqueMentionPaths } from "./mentionQuery";
 import { toolCardLabel } from "./toolCard";
 import type { IndexClient } from "../index/client";
@@ -278,6 +279,11 @@ export function ChatPage({
     };
   }, [busy]);
 
+  const contextUsage = chatContextUsage([...messages.map((item) => item.content), draft]);
+  const contextLabel = chatContextMeterLabel(contextUsage);
+  const contextWarn = chatContextWarning(contextUsage.ratio);
+  const contextPercent = Math.round(contextUsage.ratio * 100);
+
   return (
     <div className="chat-layout">
       {historyOpen ? (
@@ -437,6 +443,22 @@ export function ChatPage({
                   <span className="chat-composer__model">{plannerName}</span>
                 )
               ) : null}
+              <span
+                className="chat-context"
+                data-context-full={contextUsage.ratio >= 0.8 ? "true" : undefined}
+              >
+                <span
+                  className="chat-context__bar"
+                  role="progressbar"
+                  aria-label={contextLabel}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={contextPercent}
+                >
+                  <span className="chat-context__fill" style={{ width: `${contextPercent}%` }} />
+                </span>
+                <span className="chat-context__label">{contextLabel}</span>
+              </span>
               <button
                 type="button"
                 className={busy ? "btn-quiet" : "btn-primary"}
@@ -451,6 +473,11 @@ export function ChatPage({
                 </button>
               ) : null}
             </span>
+            {contextWarn ? (
+              <p className="chat-context__warn" role="status">
+                {contextWarn}
+              </p>
+            ) : null}
           </label>
         </div>
       </section>

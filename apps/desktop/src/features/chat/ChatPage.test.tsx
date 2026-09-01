@@ -77,6 +77,48 @@ describe("ChatPage", () => {
     );
 
     expect(await screen.findByText("Local llama")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: /about \d+ of 32000 tokens/i })).toBeInTheDocument();
+  });
+
+  it("warns when the loaded thread is near the context window", async () => {
+    render(
+      <ChatPage
+        chatClient={chatClient({
+          listSessions: async () => [
+            {
+              id: "chat_1",
+              title: "New chat",
+              repositoryId: null,
+              updatedAt: "t",
+            },
+          ],
+          getSession: async () => ({
+            session: {
+              id: "chat_1",
+              title: "New chat",
+              repositoryId: null,
+              updatedAt: "t",
+            },
+            messages: [
+              {
+                id: "u1",
+                role: "user",
+                content: "x".repeat(110_000),
+                toolName: null,
+                toolStatus: null,
+              },
+            ],
+          }),
+        })}
+        repositoryId={null}
+        historyOpen={false}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    expect(
+      await screen.findByText("This chat is getting long. Start a new chat if replies get worse."),
+    ).toBeInTheDocument();
   });
 
   it("opens models when the composer model name is chosen", async () => {

@@ -19,7 +19,7 @@ Kronos is a locally installed desktop app (Tauri WebView, also previewable in a 
 
 ## Chat
 
-Streaming conversation in the pane. Tokens appear as the model writes them. The agent may search the local per-repository index, read and write files inside the enrolled realpath, search active memories, and create a bounded Goal for unattended work. Most turns stay in the thread. Tool calls render as named cards with a text status (done, failed, running). The user message appears as soon as Send is pressed. Stop closes the in-flight model request. The local index refreshes from git commits and from uncommitted files in enrolled folders.
+Streaming conversation in the pane. Tokens appear as the model writes them. The agent may search the local per-repository index, read and write files inside the enrolled realpath, search active memories, and create a bounded Goal for unattended work. Most turns stay in the thread. Tool calls render as named cards with a text status (done, failed, running). The user message appears as soon as Send is pressed. Stop closes the in-flight model request. The composer shows an estimated token count for this thread, including a small allowance for the system prompt. The count is an estimate, not the model's billed usage. At 80 percent of a 32,000 token window it asks you to start a new chat. The local index refreshes from git commits and from uncommitted files in enrolled folders.
 
 ## Research applied
 
@@ -27,7 +27,7 @@ This is how we design in Cursor, not a Kronos product. Sources: Cursor Agents Wi
 
 - Progressive specification: no Goal form on every message. Short follow-ups stay in the same thread.
 - Persistent plan: Goals tab is the place for unattended work, matching developers who pin a plan when a chat gets long.
-- Review on the right: Changes is the default inspector tab (Cursor diffs, VS Code Changes panel). It lists the live git working tree. This turn shows files chat wrote and has not committed. All shows every dirty file. Revert restores the last chat write, or HEAD if chat did not write that file. Commit records a local git commit of the visible list and does not push. Files is a read-only tree of the current workspace. Ask in chat mentions the selected file. Search contents uses the local index. Terminal and context meter stay later.
+- Review on the right: Changes is the default inspector tab (Cursor diffs, VS Code Changes panel). It lists the live git working tree. This turn shows files chat wrote and has not committed. All shows every dirty file. Revert restores the last chat write, or HEAD if chat did not write that file. Commit records a local git commit of the visible list and does not push. Files is a read-only tree of the current workspace. Ask in chat mentions the selected file. Search contents uses the local index. The composer shows an estimated token count against a 32,000 token window. At 80 percent it asks you to start a new chat. Terminal stays later.
 - History is a View toggle, not a permanent column.
 
 ## Health
