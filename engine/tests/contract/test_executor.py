@@ -15,10 +15,60 @@ from tests.support.executor_fixtures import (
 
 from kronos_engine.adapters.executors.controlled import ControlledOpenExecutor
 from kronos_engine.adapters.executors.cursor import CliResult, CursorExecutor
+from kronos_engine.adapters.executors.opencode import OpencodeExecutor
 from kronos_engine.adapters.sandboxes.process_jail import ProcessJailSandbox
 from kronos_engine.ports.executor import Executor
 
 ExecutorFactory = Callable[[Path], Executor]
+
+_OPENCODE_FLAGS_WITH_VALUE = frozenset(
+    {
+        "--dir",
+        "--artifact",
+        "--workspace",
+        "--model",
+        "-m",
+        "--agent",
+        "--session",
+        "-s",
+        "--format",
+        "--title",
+        "--file",
+        "-f",
+        "--attach",
+    }
+)
+
+
+def _opencode_prompt(argv: list[str], stdin: str = "") -> str:
+    messages: list[str] = []
+    skip_next = False
+    seen_run = False
+    for arg in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if not seen_run:
+            if arg == "run":
+                seen_run = True
+            continue
+        if arg in _OPENCODE_FLAGS_WITH_VALUE:
+            skip_next = True
+            continue
+        if arg.startswith("-"):
+            continue
+        messages.append(arg)
+    argv_prompt = " ".join(messages)
+    if stdin:
+        return f"{argv_prompt}\n{stdin}".strip() if argv_prompt else stdin
+    return argv_prompt
+
+
+def _assert_opencode_prompt_names_artifact(argv: list[str], stdin: str = "") -> None:
+    assert "run" in argv
+    assert "--dir" in argv
+    assert "--artifact" not in argv
+    assert SYNTHETIC_ARTIFACT in _opencode_prompt(argv, stdin)
 
 
 def _controlled(_tmp_path: Path) -> Executor:
@@ -47,7 +97,31 @@ def _cursor(_tmp_path: Path) -> Executor:
     )
 
 
-@pytest.mark.parametrize("factory", [_controlled, _cursor], ids=["controlled", "cursor"])
+def _opencode(_tmp_path: Path) -> Executor:
+    def invoke(
+        argv: list[str],
+        env: dict[str, str],
+        cwd: Path,
+        timeout: float,
+    ) -> CliResult:
+        _assert_opencode_prompt_names_artifact(argv)
+        assert env.get("GH_TOKEN") is None
+        assert env.get("KRONOS_AUTH_TOKEN") is None
+        _ = cwd
+        _ = timeout
+        return CliResult(returncode=0, stdout=SYNTHETIC_CONTENT, stderr="")
+
+    return OpencodeExecutor(
+        which=lambda name: "C:/fake/opencode" if name == "opencode" else None,
+        invoke=invoke,
+    )
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [_controlled, _cursor, _opencode],
+    ids=["controlled", "cursor", "opencode"],
+)
 def test_synthetic_fixture_passes_on_both_executors(
     factory: ExecutorFactory, tmp_path: Path
 ) -> None:
@@ -60,11 +134,25 @@ def test_synthetic_fixture_passes_on_both_executors(
     assert written.read_text(encoding="utf-8") == SYNTHETIC_CONTENT
     assert result.artifacts == (SYNTHETIC_ARTIFACT,)
     assert result.usage.attempts == 1
-    assert result.usage.executor_id in {"controlled", "cursor"}
+    assert result.usage.executor_id in {"controlled", "cursor", "opencode"}
     assert request.repository_id.value == "repo_alpha"
     assert request.task_id.value == "task_synthetic"
     expected = tmp_path / "cache" / "worktrees" / "repo_alpha" / "task_synthetic"
     assert worktree.resolve() == expected.resolve()
+
+
+def test_opencode_detection_does_not_run_repository_scripts(tmp_path: Path) -> None:
+    repo = tmp_path / "enrolled"
+    repo.mkdir()
+    pwn = repo / "opencode"
+    pwn.write_text("import pathlib\npathlib.Path('PWNED').write_text('yes')\n", encoding="utf-8")
+    detected = OpencodeExecutor(
+        which=lambda name: (str(tmp_path / "bin" / "opencode") if name == "opencode" else None),
+    ).detect()
+    assert detected is not None
+    assert detected.name == "opencode"
+    assert not (repo / "PWNED").exists()
+    assert not (tmp_path / "PWNED").exists()
 
 
 def test_cursor_detection_does_not_run_repository_scripts(tmp_path: Path) -> None:
@@ -104,6 +192,50 @@ def test_cursor_run_fails_when_stdout_empty_and_worker_did_not_write(tmp_path: P
     assert not (worktree / "artifacts" / "hello.txt").exists()
 
 
+def test_opencode_keeps_worker_written_artifact_when_stdout_is_chatter(tmp_path: Path) -> None:
+    def invoke(
+        argv: list[str], env: dict[str, str], cwd: Path, timeout: float
+    ) -> CliResult:
+        _assert_opencode_prompt_names_artifact(argv)
+        _ = env
+        _ = timeout
+        artifact = cwd / "artifacts" / "hello.txt"
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text(SYNTHETIC_CONTENT, encoding="utf-8")
+        return CliResult(returncode=0, stdout="session chatter from opencode\n", stderr="")
+
+    executor = OpencodeExecutor(
+        which=lambda name: "C:/fake/opencode" if name == "opencode" else None,
+        invoke=invoke,
+    )
+    worktree = tmp_path / "wt"
+    sandbox = ProcessJailSandbox(worktree)
+    result = executor.run(synthetic_request(worktree), sandbox)
+    assert result.status == "succeeded"
+    assert (worktree / "artifacts" / "hello.txt").read_text(encoding="utf-8") == SYNTHETIC_CONTENT
+
+
+def test_opencode_writes_stdout_when_cli_succeeds_without_file(tmp_path: Path) -> None:
+    def invoke(
+        argv: list[str], env: dict[str, str], cwd: Path, timeout: float
+    ) -> CliResult:
+        _assert_opencode_prompt_names_artifact(argv)
+        _ = env
+        _ = cwd
+        _ = timeout
+        return CliResult(returncode=0, stdout=SYNTHETIC_CONTENT, stderr="")
+
+    executor = OpencodeExecutor(
+        which=lambda name: "C:/fake/opencode" if name == "opencode" else None,
+        invoke=invoke,
+    )
+    worktree = tmp_path / "wt"
+    sandbox = ProcessJailSandbox(worktree)
+    result = executor.run(synthetic_request(worktree), sandbox)
+    assert result.status == "succeeded"
+    assert (worktree / "artifacts" / "hello.txt").read_text(encoding="utf-8") == SYNTHETIC_CONTENT
+
+
 def test_cursor_run_succeeds_when_worker_writes_artifact_without_stdout(tmp_path: Path) -> None:
     def invoke(
         argv: list[str], env: dict[str, str], cwd: Path, timeout: float
@@ -125,4 +257,30 @@ def test_cursor_run_succeeds_when_worker_writes_artifact_without_stdout(tmp_path
     result = executor.run(synthetic_request(worktree), sandbox)
     assert result.status == "succeeded"
     assert (worktree / "artifacts" / "hello.txt").read_text(encoding="utf-8") == SYNTHETIC_CONTENT
+
+
+def test_opencode_passes_model_flag_when_configured(tmp_path: Path) -> None:
+    captured: list[list[str]] = []
+
+    def invoke(
+        argv: list[str], env: dict[str, str], cwd: Path, timeout: float
+    ) -> CliResult:
+        captured.append(list(argv))
+        _assert_opencode_prompt_names_artifact(argv)
+        _ = env, cwd, timeout
+        return CliResult(returncode=0, stdout=SYNTHETIC_CONTENT, stderr="")
+
+    executor = OpencodeExecutor(
+        which=lambda name: "C:/fake/opencode" if name == "opencode" else None,
+        invoke=invoke,
+        model_id="opencode/glm-4.6",
+    )
+    worktree = tmp_path / "wt"
+    sandbox = ProcessJailSandbox(worktree)
+    result = executor.run(synthetic_request(worktree), sandbox)
+    assert result.status == "succeeded"
+    assert captured
+    argv = captured[0]
+    assert "--model" in argv
+    assert argv[argv.index("--model") + 1] == "opencode/glm-4.6"
 

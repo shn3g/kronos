@@ -16,7 +16,18 @@ DEFAULT_INDEX_EXCLUDES: tuple[str, ...] = (
     "__pycache__/",
 )
 DEFAULT_MAX_FILE_BYTES = 1_048_576
-_ALLOWED_INDEXING = frozenset({"enabled", "exclude_prefixes", "max_file_bytes"})
+DEFAULT_INDEX_WATCH = True
+DEFAULT_INDEX_DEBOUNCE_MS = 500
+_ALLOWED_INDEXING = frozenset(
+    {
+        "enabled",
+        "exclude_prefixes",
+        "max_file_bytes",
+        "watch",
+        "debounce_ms",
+        "extra_exclude_globs",
+    }
+)
 
 SIZE_STEPS: tuple[str, ...] = ("XS", "XS_PLUS", "S", "M", "L")
 RISK_STEPS: tuple[str, ...] = ("low", "medium", "high", "critical")
@@ -102,11 +113,29 @@ class RiskPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class EffortTier:
+    size: str
+    max_tokens: int
+    max_attempts: int
+    create_issue: bool
+
+
+DEFAULT_EFFORT_TIERS: tuple[EffortTier, ...] = (
+    EffortTier(size="XS", max_tokens=1024, max_attempts=1, create_issue=False),
+    EffortTier(size="XS_PLUS", max_tokens=1024, max_attempts=1, create_issue=False),
+    EffortTier(size="S", max_tokens=2048, max_attempts=2, create_issue=False),
+    EffortTier(size="M", max_tokens=4096, max_attempts=3, create_issue=True),
+    EffortTier(size="L", max_tokens=8192, max_attempts=3, create_issue=True),
+)
+
+
+@dataclass(frozen=True, slots=True)
 class Budgets:
     max_attempts_per_issue: int
     max_dispatches_per_day: int
     breaker_failure_limit: int
     dry_run_meters: bool
+    effort: tuple[EffortTier, ...] = DEFAULT_EFFORT_TIERS
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +155,9 @@ class Indexing:
     enabled: bool
     exclude_prefixes: tuple[str, ...]
     max_file_bytes: int
+    watch: bool
+    debounce_ms: int
+    extra_exclude_globs: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +193,7 @@ def default_policy(*, integration_branch: str, protected_branch: str) -> Reposit
                 "max_dispatches_per_day": 12,
                 "breaker_failure_limit": 4,
                 "dry_run_meters": False,
+                "effort": _effort_to_dict(DEFAULT_EFFORT_TIERS),
             },
             "wip": {"ready": 2, "running": 3},
             "executor": {"profile": "standard", "sandbox": "default"},
@@ -168,6 +201,9 @@ def default_policy(*, integration_branch: str, protected_branch: str) -> Reposit
                 "enabled": True,
                 "exclude_prefixes": list(DEFAULT_INDEX_EXCLUDES),
                 "max_file_bytes": DEFAULT_MAX_FILE_BYTES,
+                "watch": DEFAULT_INDEX_WATCH,
+                "debounce_ms": DEFAULT_INDEX_DEBOUNCE_MS,
+                "extra_exclude_globs": [],
             },
         }
     )
@@ -226,6 +262,7 @@ def parse_policy(raw: Mapping[str, object]) -> RepositoryPolicy:
             max_dispatches_per_day=_require_positive_int(budgets, "max_dispatches_per_day"),
             breaker_failure_limit=_require_positive_int(budgets, "breaker_failure_limit"),
             dry_run_meters=_require_bool(budgets, "dry_run_meters"),
+            effort=_parse_effort(budgets),
         ),
         wip=Wip(
             ready=_require_positive_int(wip, "ready"),
@@ -239,6 +276,11 @@ def parse_policy(raw: Mapping[str, object]) -> RepositoryPolicy:
             enabled=_require_bool(indexing, "enabled"),
             exclude_prefixes=_require_str_tuple(indexing, "exclude_prefixes"),
             max_file_bytes=_require_positive_int(indexing, "max_file_bytes"),
+            watch=_optional_bool(indexing, "watch", DEFAULT_INDEX_WATCH),
+            debounce_ms=_optional_non_negative_int(
+                indexing, "debounce_ms", DEFAULT_INDEX_DEBOUNCE_MS
+            ),
+            extra_exclude_globs=_optional_str_tuple(indexing, "extra_exclude_globs"),
         ),
     )
 
@@ -269,6 +311,7 @@ def policy_to_dict(policy: RepositoryPolicy) -> dict[str, object]:
             "max_dispatches_per_day": policy.budgets.max_dispatches_per_day,
             "breaker_failure_limit": policy.budgets.breaker_failure_limit,
             "dry_run_meters": policy.budgets.dry_run_meters,
+            "effort": _effort_to_dict(policy.budgets.effort),
         },
         "wip": {"ready": policy.wip.ready, "running": policy.wip.running},
         "executor": {"profile": policy.executor.profile, "sandbox": policy.executor.sandbox},
@@ -276,6 +319,9 @@ def policy_to_dict(policy: RepositoryPolicy) -> dict[str, object]:
             "enabled": policy.indexing.enabled,
             "exclude_prefixes": list(policy.indexing.exclude_prefixes),
             "max_file_bytes": policy.indexing.max_file_bytes,
+            "watch": policy.indexing.watch,
+            "debounce_ms": policy.indexing.debounce_ms,
+            "extra_exclude_globs": list(policy.indexing.extra_exclude_globs),
         },
     }
 
@@ -330,6 +376,22 @@ def freeze_autonomy(policy: RepositoryPolicy) -> RepositoryPolicy:
     return replace(policy, autonomy=replace(policy.autonomy, freeze=True))
 
 
+def requires_pr_safety(mode: str) -> bool:
+    if mode not in OPERATION_MODES:
+        raise PolicyError("unknown operation mode")
+    return _MODE_RANK[mode] >= _MODE_RANK["write_draft_prs"]
+
+
+def effort_for_size(policy: RepositoryPolicy, size: str) -> EffortTier:
+    for item in policy.budgets.effort:
+        if item.size == size:
+            return item
+    for item in DEFAULT_EFFORT_TIERS:
+        if item.size == size:
+            return item
+    return DEFAULT_EFFORT_TIERS[2]
+
+
 def refuse_mode_write(
     mode: str,
     action: str,
@@ -350,6 +412,38 @@ def refuse_mode_write(
         return
     if _MODE_RANK[mode] < _MODE_RANK[needed]:
         raise ModeWriteRefused(f"{mode} refuses {action}")
+
+
+def _parse_effort(raw: Mapping[str, object]) -> tuple[EffortTier, ...]:
+    if "effort" not in raw:
+        return DEFAULT_EFFORT_TIERS
+    value = raw.get("effort")
+    if not isinstance(value, Mapping):
+        raise PolicyError("effort must be a mapping")
+    by_size = {item.size: item for item in DEFAULT_EFFORT_TIERS}
+    for size, spec in value.items():
+        if not isinstance(size, str) or size not in SIZE_STEPS:
+            raise PolicyError(f"unknown effort size {size}")
+        if not isinstance(spec, Mapping):
+            raise PolicyError("effort tier must be a mapping")
+        by_size[size] = EffortTier(
+            size=size,
+            max_tokens=_require_positive_int(spec, "max_tokens"),
+            max_attempts=_require_positive_int(spec, "max_attempts"),
+            create_issue=_require_bool(spec, "create_issue"),
+        )
+    return tuple(by_size[size] for size in SIZE_STEPS)
+
+
+def _effort_to_dict(effort: tuple[EffortTier, ...]) -> dict[str, object]:
+    return {
+        item.size: {
+            "max_tokens": item.max_tokens,
+            "max_attempts": item.max_attempts,
+            "create_issue": item.create_issue,
+        }
+        for item in effort
+    }
 
 
 def _parse_operation_mode(raw: Mapping[str, object]) -> str:
@@ -387,6 +481,27 @@ def _require_bool(raw: Mapping[str, object], key: str) -> bool:
     if not isinstance(value, bool):
         raise PolicyError(f"{key} must be a boolean")
     return value
+
+
+def _optional_bool(raw: Mapping[str, object], key: str, default: bool) -> bool:
+    if key not in raw:
+        return default
+    return _require_bool(raw, key)
+
+
+def _optional_non_negative_int(raw: Mapping[str, object], key: str, default: int) -> int:
+    if key not in raw:
+        return default
+    value = _require_int(raw, key)
+    if value < 0:
+        raise PolicyError(f"{key} must be >= 0")
+    return value
+
+
+def _optional_str_tuple(raw: Mapping[str, object], key: str) -> tuple[str, ...]:
+    if key not in raw:
+        return ()
+    return _require_str_tuple(raw, key)
 
 
 def _require_int(raw: Mapping[str, object], key: str) -> int:

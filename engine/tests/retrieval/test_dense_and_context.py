@@ -4,7 +4,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from tests.retrieval.support import indexing_policy, kronos_paths, write_tiny_embedding_onnx
+from tests.retrieval.support import (
+    indexing_policy,
+    kronos_paths,
+    write_local_embedding_fixtures,
+    write_tiny_token_embedding_onnx,
+    write_tiny_tokenizer,
+)
 from tests.support.git_fixtures import init_git_repo
 
 from kronos_engine.adapters.embeddings.local import (
@@ -85,6 +91,8 @@ def test_dense_degrades_when_model_file_is_absent(tmp_path: Path) -> None:
     for name in blocked:
         assert name not in text
     assert "all-MiniLM-L6-v2" in text or "all_minilm" in text.lower()
+    assert "_hash_features" not in text
+    assert "tokenizer.json" in text
 
 
 def test_minilm_document_path_never_embeds_source_code(tmp_path: Path) -> None:
@@ -113,13 +121,36 @@ def test_minilm_document_path_never_embeds_source_code(tmp_path: Path) -> None:
     _ = EmbeddingPort
 
 
-def test_local_onnx_file_produces_code_vectors_and_never_uses_minilm(
+def test_onnx_weights_without_tokenizer_leave_dense_unavailable_sparse_works(
     tmp_path: Path,
 ) -> None:
     pytest.importorskip("onnxruntime")
     models = tmp_path / "models"
-    write_tiny_embedding_onnx(models / "code.onnx")
-    write_tiny_embedding_onnx(models / "all-MiniLM-L6-v2.onnx")
+    write_tiny_token_embedding_onnx(models / "code.onnx")
+    adapter = LocalEmbeddingAdapter(models)
+    assert adapter.available("code") is False
+    assert adapter.available("document") is False
+    assert adapter.embed(["def visible():\n    return 'ok'\n"], kind="code") is None
+
+    paths = kronos_paths(tmp_path)
+    root = init_git_repo(
+        tmp_path / "no-tokenizer",
+        files={"src/mod.py": "def visible():\n    return 'ok'\n"},
+    )
+    service = IndexingService(paths, embeddings=adapter)
+    status = service.rebuild("repo_no_tok", root, indexing_policy())
+    assert status.dense_available is False
+    hits = service.search("repo_no_tok", "visible")
+    assert any(item.path.endswith("mod.py") for item in hits.items)
+    assert all("dense" not in item.rank_sources for item in hits.items)
+
+
+def test_local_onnx_file_produces_code_vectors_and_never_uses_minilm(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("onnxruntime")
+    pytest.importorskip("tokenizers")
+    models = write_local_embedding_fixtures(tmp_path / "models")
     adapter = LocalEmbeddingAdapter(models)
     assert adapter.available("code") is True
     assert adapter.available("document") is True
@@ -164,6 +195,7 @@ def test_unloadable_onnx_degrades_without_raising(tmp_path: Path) -> None:
     models = tmp_path / "models"
     models.mkdir()
     (models / "code.onnx").write_bytes(b"not a valid onnx file")
+    write_tiny_tokenizer(models / "tokenizer.json")
     adapter = LocalEmbeddingAdapter(models)
     assert adapter.available("code") is False
     assert adapter.embed(["def enrol():\n    pass\n"], kind="code") is None
@@ -193,6 +225,154 @@ def test_sparse_and_graph_still_serve_without_dense(tmp_path: Path) -> None:
     hits = service.search("repo_plain", "visible")
     assert any(item.path.endswith("mod.py") for item in hits.items)
     assert all("dense" not in item.rank_sources for item in hits.items)
+
+
+class _OnnxInput:
+    def __init__(self, name: str, shape: tuple[object, object] = ("batch", 8)) -> None:
+        self.name = name
+        self.shape = shape
+
+
+class _FakeOnnxSession:
+    def __init__(self, names: tuple[str, ...], *, capture: dict[str, object] | None = None) -> None:
+        self._inputs = [_OnnxInput(name) for name in names]
+        self.capture = capture
+        self.ran = False
+
+    def get_inputs(self) -> list[_OnnxInput]:
+        return list(self._inputs)
+
+    def run(self, _names: object, feeds: dict[str, object]) -> list[object]:
+        numpy = pytest.importorskip("numpy")
+        self.ran = True
+        if self.capture is not None:
+            self.capture.update(feeds)
+        batch = int(feeds["input_ids"].shape[0])
+        return [numpy.ones((batch, 4), dtype=numpy.float32)]
+
+
+def test_tokenization_failure_makes_available_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("onnxruntime")
+    pytest.importorskip("tokenizers")
+    models = write_local_embedding_fixtures(tmp_path / "models")
+    adapter = LocalEmbeddingAdapter(models)
+    assert adapter.available("code") is True
+
+    def fail_tokenize(*_args: object, **_kwargs: object) -> tuple[list[list[int]], list[list[int]]]:
+        raise RuntimeError("tokenizer exploded")
+
+    monkeypatch.setattr("kronos_engine.adapters.embeddings.local._tokenize", fail_tokenize)
+    assert adapter.embed(["hello"], kind="code") is None
+    assert adapter.available("code") is False
+    assert adapter.available("document") is False
+
+
+def test_unknown_onnx_input_fails_closed(tmp_path: Path) -> None:
+    pytest.importorskip("onnxruntime")
+    pytest.importorskip("tokenizers")
+    models = write_local_embedding_fixtures(tmp_path / "models")
+    adapter = LocalEmbeddingAdapter(models)
+    assert adapter.available("code") is True
+    session = _FakeOnnxSession(("input_ids", "attention_mask", "past_key_values"))
+    adapter._sessions["code"] = session
+    assert adapter.available("code") is False
+    assert adapter.embed(["hello"], kind="code") is None
+    assert session.ran is False
+
+
+class _ShapedOnnxSession:
+    def __init__(self, output: object) -> None:
+        self._inputs = [_OnnxInput("input_ids"), _OnnxInput("attention_mask")]
+        self.output = output
+
+    def get_inputs(self) -> list[_OnnxInput]:
+        return list(self._inputs)
+
+    def run(self, _names: object, feeds: dict[str, object]) -> list[object]:
+        _ = feeds
+        return [self.output]
+
+
+def test_embed_empty_texts_returns_none_without_raising(tmp_path: Path) -> None:
+    pytest.importorskip("onnxruntime")
+    pytest.importorskip("tokenizers")
+    models = write_local_embedding_fixtures(tmp_path / "models")
+    adapter = LocalEmbeddingAdapter(models)
+    assert adapter.available("code") is True
+    try:
+        empty = adapter.embed([], kind="code")
+    except Exception as exc:
+        raise AssertionError(f"embed([]) raised {type(exc).__name__}: {exc}") from exc
+    assert empty is None
+
+
+def test_incompatible_onnx_output_shape_returns_none_without_raising(tmp_path: Path) -> None:
+    pytest.importorskip("onnxruntime")
+    pytest.importorskip("tokenizers")
+    numpy = pytest.importorskip("numpy")
+    models = write_local_embedding_fixtures(tmp_path / "models")
+    adapter = LocalEmbeddingAdapter(models)
+    assert adapter.available("code") is True
+    adapter._sessions["code"] = _ShapedOnnxSession(numpy.ones((1, 2, 3, 4), dtype=numpy.float32))
+    try:
+        four_d = adapter.embed(["hello"], kind="code")
+    except Exception as exc:
+        raise AssertionError(f"embed raised {type(exc).__name__}: {exc}") from exc
+    assert four_d is None
+    adapter._sessions["code"] = _ShapedOnnxSession(numpy.array([["x", "y"]], dtype=object))
+    try:
+        non_numeric = adapter.embed(["hello"], kind="code")
+    except Exception as exc:
+        raise AssertionError(f"embed raised {type(exc).__name__}: {exc}") from exc
+    assert non_numeric is None
+
+
+def test_available_and_embed_fail_closed_when_session_load_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("onnxruntime")
+    pytest.importorskip("tokenizers")
+    models = write_local_embedding_fixtures(tmp_path / "models")
+    adapter = LocalEmbeddingAdapter(models)
+
+    def boom(_kind: str) -> object:
+        raise RuntimeError("session exploded")
+
+    monkeypatch.setattr(adapter, "_load_session", boom)
+    try:
+        available = adapter.available("code")
+        vectors = adapter.embed(["hello"], kind="code")
+    except Exception as exc:
+        raise AssertionError(
+            f"local adapter raised {type(exc).__name__}: {exc}"
+        ) from exc
+    assert available is False
+    assert vectors is None
+
+
+def test_position_ids_are_offsets_not_token_ids(tmp_path: Path) -> None:
+    pytest.importorskip("onnxruntime")
+    pytest.importorskip("tokenizers")
+    pytest.importorskip("numpy")
+    models = write_local_embedding_fixtures(tmp_path / "models")
+    adapter = LocalEmbeddingAdapter(models)
+    assert adapter.available("code") is True
+    capture: dict[str, object] = {}
+    adapter._sessions["code"] = _FakeOnnxSession(
+        ("input_ids", "attention_mask", "token_type_ids", "position_ids"),
+        capture=capture,
+    )
+    vectors = adapter.embed(["hello"], kind="code")
+    assert vectors is not None
+    assert len(vectors[0]) == 4
+    ids = capture["input_ids"]
+    positions = capture["position_ids"]
+    token_types = capture["token_type_ids"]
+    assert list(positions[0]) == list(range(len(positions[0])))
+    assert list(positions[0]) != list(ids[0])
+    assert int(token_types.sum()) == 0
 
 
 def test_context_items_include_provenance_and_repo_map_respects_token_budget(

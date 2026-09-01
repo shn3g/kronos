@@ -29,6 +29,12 @@ test("web shell shows engine unavailable and primary routes", async ({ page }) =
     page.getByText(/connect a compatible engine to create and track bounded goals/i),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: /create goal/i })).toHaveCount(0);
+  await page.getByRole("link", { name: "Chat" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Chat" })).toBeVisible();
+  await expect(
+    page.getByText(/connect a compatible engine to chat with the orchestrator/i),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: /^send$/i })).toHaveCount(0);
   await page.getByRole("link", { name: "Runs" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Runs" })).toBeVisible();
   await expect(

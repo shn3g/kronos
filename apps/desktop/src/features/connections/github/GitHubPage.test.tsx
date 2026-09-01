@@ -42,6 +42,7 @@ function githubClient(overrides: Partial<GitHubClient> = {}): GitHubClient {
         repo: "shop",
         integrationBranch: "integration",
         protectedBranch: "main",
+        repositoryId: "repo_shop",
       },
     }),
     manifests: async () => ({
@@ -57,6 +58,15 @@ function githubClient(overrides: Partial<GitHubClient> = {}): GitHubClient {
       requiredChecks: [{ context: "kronos-review (kronos-reviewer)", integrationId: 9001 }],
     }),
     applyRuleset: async () => ({ applied: true }),
+    safety: async () => ({
+      ok: false,
+      checks: [
+        { id: "ruleset_strict", ok: false, detail: "ruleset is not strict" },
+        { id: "kronos_pr_workflow", ok: false, detail: "workflow missing" },
+        { id: "codeowners", ok: false, detail: "CODEOWNERS missing" },
+        { id: "reviewer_app", ok: false, detail: "reviewer is not verified" },
+      ],
+    }),
     ...overrides,
   };
 }
@@ -163,5 +173,41 @@ describe("GitHubPage", () => {
       integrationBranch: "integration",
       confirm: true,
     });
+  });
+
+  it("lists safety checks and shows elevation blocked when safety is not ok", async () => {
+    const safety = vi.fn(async () => ({
+      ok: false,
+      checks: [
+        { id: "ruleset_strict", ok: false, detail: "ruleset is not strict" },
+        { id: "kronos_pr_workflow", ok: true, detail: "present" },
+        { id: "codeowners", ok: false, detail: "CODEOWNERS missing" },
+        { id: "reviewer_app", ok: false, detail: "reviewer is not verified" },
+      ],
+    }));
+    render(
+      <GitHubPage engineClient={engine("ready")} githubClient={githubClient({ safety })} />,
+    );
+
+    expect(await screen.findByText(/widgets\/shop/i)).toBeInTheDocument();
+    expect(await screen.findByText(/ruleset_strict/i)).toBeInTheDocument();
+    expect(screen.getByText(/kronos_pr_workflow/i)).toBeInTheDocument();
+    expect(screen.getByText(/codeowners/i)).toBeInTheDocument();
+    expect(screen.getByText(/reviewer_app/i)).toBeInTheDocument();
+    expect(screen.getByText(/elevation is blocked/i)).toBeInTheDocument();
+    expect(safety).toHaveBeenCalledWith("repo_shop");
+  });
+
+  it("fails closed when safety cannot be loaded", async () => {
+    const safety = vi.fn(async () => {
+      throw new Error("engine request failed: 0");
+    });
+    render(
+      <GitHubPage engineClient={engine("ready")} githubClient={githubClient({ safety })} />,
+    );
+
+    expect(await screen.findByText(/widgets\/shop/i)).toBeInTheDocument();
+    expect(await screen.findByText(/elevation is blocked/i)).toBeInTheDocument();
+    expect(safety).toHaveBeenCalled();
   });
 });

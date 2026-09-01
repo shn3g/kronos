@@ -4,10 +4,17 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Protocol
 
 EMBEDDING_KIND_CODE = "code"
 EMBEDDING_KIND_DOCUMENT = "document"
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingIdentity:
+    kind: str
+    model_id: str
 
 
 class EmbeddingPort(Protocol):

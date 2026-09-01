@@ -26,6 +26,7 @@ from kronos_engine.domain.budgets import (
 from kronos_engine.domain.entities import Lease, RepositoryId, RunId, TaskId
 from kronos_engine.domain.goals import GoalState, transition_goal
 from kronos_engine.domain.models import ResourceLimits, strip_worker_secrets
+from kronos_engine.domain.policy import effort_for_size
 from kronos_engine.domain.results import LockHeldError, StaleFenceError
 from kronos_engine.domain.tasks import (
     EvidenceLocator,
@@ -139,9 +140,11 @@ class DispatchService:
         meter = self._store.budget_meter(repo.id, day)
         attempts = self._store.task_attempts(ident)
         goal = self._store.get_goal(task.goal_id)
+        effort = effort_for_size(repo.policy, task.size)
+        attempt_cap = min(goal.max_attempts, effort.max_attempts)
         try:
             check_budget(meter, repo.policy, task_attempts=attempts)
-            if attempts >= goal.max_attempts:
+            if attempts >= attempt_cap:
                 raise BudgetExceeded("per-issue attempt cap reached")
         except (BudgetExceeded, BreakerTripped) as error:
             self._recorder.emit(
@@ -335,6 +338,9 @@ class DispatchService:
             {"task_id": task.id.value, "phase": phase},
         )
         summaries, routed_ids = self._route_skill_summaries(task)
+        lessons = self._lesson_summaries(task)
+        repo = self._repos.get(task.repository_id)
+        effort = effort_for_size(repo.policy, task.size)
         request = ExecutorRequest(
             repository_id=task.repository_id,
             task_id=task.id,
@@ -345,6 +351,7 @@ class DispatchService:
                 expected_artifact=_expected_artifact(running, phase),
                 expected_content="",
                 skill_summaries=summaries,
+                lesson_summaries=lessons,
             ),
             capabilities=ExecutorCapabilities(
                 network=True,
@@ -353,8 +360,8 @@ class DispatchService:
                 autonomous_merge=False,
             ),
             limits=ResourceLimits(
-                max_tokens=4096,
-                max_attempts=3,
+                max_tokens=effort.max_tokens,
+                max_attempts=effort.max_attempts,
                 timeout_seconds=120.0,
                 cost_ceiling=0.0,
             ),
@@ -470,6 +477,12 @@ class DispatchService:
         installed = {item.name: item.id for item in self._skills.list()}
         ids = tuple(installed[item.name] for item in routed.summaries if item.name in installed)
         return summaries, ids
+
+    def _lesson_summaries(self, task: TaskRecord) -> tuple[str, ...]:
+        if self._skills is None:
+            return ()
+        records = self._skills.retrieve(task.title)
+        return tuple(item.text for item in records)
 
     def _record_skill_outcomes(
         self, task: TaskRecord, skill_ids: tuple[str, ...], *, helpful: bool

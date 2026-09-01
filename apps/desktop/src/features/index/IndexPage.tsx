@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { EngineClient } from "../../engine/client";
 import {
   createProductionRepositoriesClient,
@@ -40,6 +40,9 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<IndexHit[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const selectedRef = useRef(selectedId);
+  const requestGen = useRef(0);
+  selectedRef.current = selectedId;
 
   useEffect(() => {
     let cancelled = false;
@@ -68,20 +71,34 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
         return;
       }
       setRepositories(items);
-      const initial = items[0]?.id ?? "";
-      setSelectedId(initial);
-      if (initial) {
-        void client.status(initial).then((next) => {
-          if (!cancelled) {
-            setStatus(next);
-          }
-        });
-      }
+      setSelectedId((current) => current || items[0]?.id || "");
     });
     return () => {
       cancelled = true;
     };
   }, [client, ready]);
+
+  useEffect(() => {
+    if (!ready || !selectedId) {
+      return;
+    }
+    const gen = requestGen.current;
+    let cancelled = false;
+    const refresh = () => {
+      const repoId = selectedId;
+      void client.status(repoId).then((next) => {
+        if (!cancelled && requestGen.current === gen && selectedRef.current === repoId) {
+          setStatus(next);
+        }
+      });
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [client, ready, selectedId]);
 
   if (!ready) {
     return (
@@ -96,16 +113,51 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
     );
   }
 
+  function selectRepository(id: string) {
+    requestGen.current += 1;
+    setSelectedId(id);
+    setHits([]);
+    setStatus(null);
+    setError(null);
+  }
+
   async function onRebuild() {
     if (!selectedId) {
       return;
     }
+    const repoId = selectedId;
+    const gen = requestGen.current;
     setError(null);
     try {
-      const next = await client.rebuild(selectedId);
+      const next = await client.rebuild(repoId);
+      if (requestGen.current !== gen || selectedRef.current !== repoId) {
+        return;
+      }
       setStatus(next);
     } catch {
-      setError("Could not rebuild the index.");
+      if (requestGen.current === gen && selectedRef.current === repoId) {
+        setError("Could not rebuild the index.");
+      }
+    }
+  }
+
+  async function onToggleWatch() {
+    if (!selectedId || !status) {
+      return;
+    }
+    const repoId = selectedId;
+    const gen = requestGen.current;
+    setError(null);
+    try {
+      const next = await client.setWatch(repoId, !status.watchEnabled);
+      if (requestGen.current !== gen || selectedRef.current !== repoId) {
+        return;
+      }
+      setStatus(next);
+    } catch {
+      if (requestGen.current === gen && selectedRef.current === repoId) {
+        setError("Could not update the index watcher.");
+      }
     }
   }
 
@@ -113,12 +165,19 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
     if (!selectedId) {
       return;
     }
+    const repoId = selectedId;
+    const gen = requestGen.current;
     setError(null);
     try {
-      const next = await client.search(selectedId, query);
+      const next = await client.search(repoId, query);
+      if (requestGen.current !== gen || selectedRef.current !== repoId) {
+        return;
+      }
       setHits(next);
     } catch {
-      setError("Could not search the index.");
+      if (requestGen.current === gen && selectedRef.current === repoId) {
+        setError("Could not search the index.");
+      }
     }
   }
 
@@ -137,10 +196,7 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
             id="index-repo"
             value={selectedId}
             onChange={(event) => {
-              const id = event.target.value;
-              setSelectedId(id);
-              setHits([]);
-              void client.status(id).then(setStatus);
+              selectRepository(event.target.value);
             }}
           >
             {repositories.map((repo) => (
@@ -156,6 +212,24 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
       {status ? (
         <dl className="index-page__status">
           <div>
+            <dt>State</dt>
+            <dd>{status.state}</dd>
+          </div>
+          <div>
+            <dt>Files</dt>
+            <dd>
+              {status.filesDone} / {status.filesTotal}
+            </dd>
+          </div>
+          <div>
+            <dt>Chunks embedded</dt>
+            <dd>{status.chunksEmbedded}</dd>
+          </div>
+          <div>
+            <dt>Chunks skipped</dt>
+            <dd>{status.chunksSkipped}</dd>
+          </div>
+          <div>
             <dt>Chunk count</dt>
             <dd>{status.chunkCount}</dd>
           </div>
@@ -167,7 +241,23 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
             <dt>Dense</dt>
             <dd>{status.denseAvailable ? "dense available" : "dense unavailable"}</dd>
           </div>
+          <div>
+            <dt>Last activity</dt>
+            <dd>{status.lastActivityAt ?? "none"}</dd>
+          </div>
         </dl>
+      ) : null}
+      {status ? (
+        <label className="index-page__watch">
+          <input
+            type="checkbox"
+            checked={status.watchEnabled}
+            onChange={() => {
+              void onToggleWatch();
+            }}
+          />
+          Watch working tree
+        </label>
       ) : null}
       <div className="index-page__actions">
         <button type="button" className="btn-quiet" onClick={() => void onRebuild()}>

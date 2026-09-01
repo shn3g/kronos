@@ -22,6 +22,27 @@ budgets:
   max_dispatches_per_day: 12
   breaker_failure_limit: 4
   dry_run_meters: false
+  effort:
+    XS:
+      max_tokens: 1024
+      max_attempts: 1
+      create_issue: false
+    XS_PLUS:
+      max_tokens: 1024
+      max_attempts: 1
+      create_issue: false
+    S:
+      max_tokens: 2048
+      max_attempts: 2
+      create_issue: false
+    M:
+      max_tokens: 4096
+      max_attempts: 3
+      create_issue: true
+    L:
+      max_tokens: 8192
+      max_attempts: 3
+      create_issue: true
 wip:
   ready: 2
   running: 3
@@ -38,3 +59,6 @@ indexing:
     - target/
     - __pycache__/
   max_file_bytes: 1048576
+  watch: true
+  debounce_ms: 500
+  extra_exclude_globs: []

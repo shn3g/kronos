@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-export type ModelRole = "planner" | "coder" | "reviewer" | "embedding";
+export type ModelRole = "orchestrator" | "planner" | "coder" | "reviewer" | "embedding";
+export type EmbeddingBackendKind = "openai_compatible" | "onnx" | "none";
 
 export interface DetectedTool {
   kind: string;
@@ -8,11 +9,20 @@ export interface DetectedTool {
   present: boolean;
 }
 
+export interface ResourceLimits {
+  maxTokens: number;
+  maxAttempts: number;
+  timeoutSeconds: number;
+  costCeiling: number;
+}
+
 export interface ModelProfileOption {
   id: string;
   displayName: string;
   role: string;
   billed: boolean;
+  modelId: string;
+  limits: ResourceLimits;
 }
 
 export interface ProviderDraft {
@@ -21,6 +31,7 @@ export interface ProviderDraft {
   baseUrl: string | null;
   billed: boolean;
   apiKey?: string | null;
+  modelId?: string | null;
 }
 
 export interface CreatedProvider {
@@ -30,10 +41,22 @@ export interface CreatedProvider {
 
 export type RoleAssignments = Record<ModelRole, string | null>;
 
+export interface EmbeddingBackend {
+  kind: EmbeddingBackendKind;
+  modelId: string;
+  displayName: string;
+}
+
 export interface ModelsSnapshot {
   detected: DetectedTool[];
   profiles: ModelProfileOption[];
   assignments: RoleAssignments;
+  embeddingBackend: EmbeddingBackend;
+}
+
+export interface ProfileUpdate {
+  modelId: string;
+  limits: ResourceLimits;
 }
 
 export interface ModelsClient {
@@ -43,6 +66,7 @@ export interface ModelsClient {
     options?: { confirmSharedRoles?: boolean },
   ): Promise<RoleAssignments>;
   createProvider(draft: ProviderDraft): Promise<CreatedProvider>;
+  updateProfile(id: string, patch: ProfileUpdate): Promise<ModelProfileOption>;
 }
 
 interface EngineJsonResponse {
@@ -77,8 +101,21 @@ export function createProductionModelsClient(
         base_url: draft.baseUrl,
         billed: draft.billed,
         ...(draft.apiKey ? { api_key: draft.apiKey } : {}),
+        ...(draft.modelId ? { model_id: draft.modelId } : {}),
       });
       return mapCreatedProvider(payload);
+    },
+    async updateProfile(id, patch) {
+      const payload = await jsonRequest(request, "PUT", `/models/profiles/${id}`, {
+        model_id: patch.modelId,
+        limits: {
+          max_tokens: patch.limits.maxTokens,
+          max_attempts: patch.limits.maxAttempts,
+          timeout_seconds: patch.limits.timeoutSeconds,
+          cost_ceiling: patch.limits.costCeiling,
+        },
+      });
+      return mapProfile(payload);
     },
   };
 }
@@ -127,7 +164,31 @@ function mapSnapshot(payload: Record<string, unknown>): ModelsSnapshot {
     }),
     profiles: profilesRaw.map(mapProfile),
     assignments: mapAssignments(asRecord(payload.assignments)),
+    embeddingBackend: mapEmbeddingBackend(payload.embedding_backend),
   };
+}
+
+function mapEmbeddingBackend(raw: unknown): EmbeddingBackend {
+  const record = asRecord(raw);
+  const kind = record.kind;
+  if (kind === "openai_compatible" || kind === "onnx" || kind === "none") {
+    return {
+      kind,
+      modelId: stringField(record, "model_id"),
+      displayName: stringField(record, "display_name") || defaultBackendName(kind),
+    };
+  }
+  return { kind: "none", modelId: "", displayName: "Sparse only" };
+}
+
+function defaultBackendName(kind: EmbeddingBackendKind): string {
+  if (kind === "onnx") {
+    return "Local ONNX";
+  }
+  if (kind === "openai_compatible") {
+    return "OpenAI-compatible";
+  }
+  return "Sparse only";
 }
 
 function mapCreatedProvider(payload: Record<string, unknown>): CreatedProvider {
@@ -151,11 +212,24 @@ function mapProfile(item: unknown): ModelProfileOption {
     displayName: stringField(profile, "display_name") || stringField(profile, "id"),
     role: stringField(profile, "role"),
     billed: profile.billed === true,
+    modelId: stringField(profile, "model_id"),
+    limits: mapLimits(profile.limits),
+  };
+}
+
+function mapLimits(raw: unknown): ResourceLimits {
+  const record = asRecord(raw);
+  return {
+    maxTokens: numberField(record, "max_tokens"),
+    maxAttempts: numberField(record, "max_attempts"),
+    timeoutSeconds: numberField(record, "timeout_seconds"),
+    costCeiling: numberField(record, "cost_ceiling"),
   };
 }
 
 function mapAssignments(raw: Record<string, unknown>): RoleAssignments {
   return {
+    orchestrator: stringOrNull(raw.orchestrator),
     planner: stringOrNull(raw.planner),
     coder: stringOrNull(raw.coder),
     reviewer: stringOrNull(raw.reviewer),
@@ -174,4 +248,9 @@ function asRecord(value: unknown): Record<string, unknown> {
 function stringField(record: Record<string, unknown>, key: string): string {
   const value = record[key];
   return typeof value === "string" ? value : "";
+}
+
+function numberField(record: Record<string, unknown>, key: string): number {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }

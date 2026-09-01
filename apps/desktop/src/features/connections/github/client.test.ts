@@ -63,6 +63,7 @@ describe("createProductionGitHubClient", () => {
         repo: "shop",
         integrationBranch: "integration",
         protectedBranch: "main",
+        repositoryId: "",
       },
     });
     await expect(client.manifests()).resolves.toEqual({
@@ -106,5 +107,39 @@ describe("createProductionGitHubClient", () => {
   it("fails closed when the engine proxy is unavailable", async () => {
     const client = createProductionGitHubClient(async () => ({ status: 0, body: "" }));
     await expect(client.status()).rejects.toThrow(/engine/i);
+  });
+
+  it("loads repository safety through the engine JSON proxy", async () => {
+    const calls: string[] = [];
+    const client = createProductionGitHubClient(async (method, path) => {
+      calls.push(`${method} ${path}`);
+      return {
+        status: 200,
+        body: JSON.stringify({
+          ok: false,
+          checks: [
+            { id: "ruleset_strict", ok: false, detail: "ruleset is not strict" },
+            { id: "kronos_pr_workflow", ok: false, detail: "missing" },
+            { id: "codeowners", ok: false, detail: "missing" },
+            { id: "reviewer_app", ok: false, detail: "not verified" },
+          ],
+        }),
+      };
+    });
+    await expect(client.safety("repo_alpha")).resolves.toEqual({
+      ok: false,
+      checks: [
+        { id: "ruleset_strict", ok: false, detail: "ruleset is not strict" },
+        { id: "kronos_pr_workflow", ok: false, detail: "missing" },
+        { id: "codeowners", ok: false, detail: "missing" },
+        { id: "reviewer_app", ok: false, detail: "not verified" },
+      ],
+    });
+    expect(calls).toEqual(["GET /repositories/repo_alpha/safety"]);
+  });
+
+  it("fails closed when safety cannot be loaded", async () => {
+    const client = createProductionGitHubClient(async () => ({ status: 0, body: "" }));
+    await expect(client.safety("repo_alpha")).rejects.toThrow(/engine/i);
   });
 });

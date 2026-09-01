@@ -17,6 +17,13 @@ describe("createProductionIndexClient", () => {
           dense_available: false,
           index_path: "C:/cache/indexes/repo_alpha",
           ready: true,
+          state: "embedding",
+          files_done: 3,
+          files_total: 8,
+          chunks_embedded: 10,
+          chunks_skipped: 2,
+          last_activity_at: "2026-09-01T15:00:00+00:00",
+          watch_enabled: true,
         }),
       };
     });
@@ -28,6 +35,44 @@ describe("createProductionIndexClient", () => {
       denseAvailable: false,
       indexPath: "C:/cache/indexes/repo_alpha",
       ready: true,
+      state: "embedding",
+      filesDone: 3,
+      filesTotal: 8,
+      chunksEmbedded: 10,
+      chunksSkipped: 2,
+      lastActivityAt: "2026-09-01T15:00:00+00:00",
+      watchEnabled: true,
+    });
+  });
+
+  it("toggles watch through the engine JSON proxy", async () => {
+    const client = createProductionIndexClient(async (method, path, body) => {
+      expect(method).toBe("POST");
+      expect(path).toBe("/repositories/repo_alpha/index/watch");
+      expect(body).toEqual({ enabled: false });
+      return {
+        status: 200,
+        body: JSON.stringify({
+          repository_id: "repo_alpha",
+          commit: "abc123",
+          chunk_count: 12,
+          dense_available: false,
+          index_path: "C:/cache/indexes/repo_alpha",
+          ready: true,
+          state: "idle",
+          files_done: 8,
+          files_total: 8,
+          chunks_embedded: 10,
+          chunks_skipped: 2,
+          last_activity_at: "2026-09-01T15:00:00+00:00",
+          watch_enabled: false,
+        }),
+      };
+    });
+
+    await expect(client.setWatch("repo_alpha", false)).resolves.toMatchObject({
+      watchEnabled: false,
+      state: "idle",
     });
   });
 

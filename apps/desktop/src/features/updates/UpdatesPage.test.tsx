@@ -2,12 +2,13 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { DESKTOP_CLIENT_VERSION } from "../../api/kronosClient";
 import type { EngineClient } from "../../engine/client";
 import { UpdatesPage, type UpdatesPageClients } from "./UpdatesPage";
 
 function engine(status: "unavailable" | "starting" | "ready" | "incompatible"): EngineClient {
   if (status === "ready") {
-    return { getState: async () => ({ status: "ready", version: "0.1.0" }) };
+    return { getState: async () => ({ status: "ready", version: "0.2.0" }) };
   }
   if (status === "incompatible") {
     return {
@@ -24,8 +25,8 @@ function engine(status: "unavailable" | "starting" | "ready" | "incompatible"): 
 function clients(overrides: Partial<UpdatesPageClients> = {}): UpdatesPageClients {
   return {
     status: async () => ({
-      engineVersion: "0.1.0",
-      clientVersion: "0.1.0",
+      engineVersion: "0.2.0",
+      clientVersion: "0.2.0",
       compatible: true,
       signed: false,
       checksumsPresent: true,
@@ -59,7 +60,11 @@ describe("UpdatesPage", () => {
 
   it("shows checksums and unsigned status when ready", async () => {
     render(<UpdatesPage engineClient={engine("ready")} updatesClient={clients()} />);
-    expect(await screen.findByText(/0\.1\.0/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        `Engine ${DESKTOP_CLIENT_VERSION}. Desktop ${DESKTOP_CLIENT_VERSION}.`,
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText(/not signed/i)).toBeInTheDocument();
     expect(screen.getByText(/checksums/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /rollback/i })).toBeInTheDocument();

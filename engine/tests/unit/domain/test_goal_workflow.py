@@ -109,6 +109,17 @@ def test_goal_requires_repository_criteria_nongoals_budget_risk_and_source() -> 
     )
     assert spec.source is GoalSource.CLI
     assert spec.max_attempts == 3
+    chat = GoalSpec(
+        repository_id=RepositoryId("repo_a"),
+        title="Fix add",
+        success_criteria="add returns a+b",
+        non_goals="rewrite the parser",
+        risk_ceiling="medium",
+        source=GoalSource.CHAT,
+        max_attempts=3,
+    )
+    assert chat.source is GoalSource.CHAT
+    assert chat.source.value == "chat"
 
 
 def test_goal_and_task_reject_invalid_transitions() -> None:

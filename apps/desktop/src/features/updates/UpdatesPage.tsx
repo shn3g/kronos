@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useEffect, useState } from "react";
+import { DESKTOP_CLIENT_VERSION } from "../../api/kronosClient";
 import type { EngineClient } from "../../engine/client";
 import {
   createProductionUpdatesClient,
@@ -87,7 +88,7 @@ export function UpdatesPage({ engineClient, updatesClient }: UpdatesPageProps) {
       <p className="page-kicker">Updates</p>
       <h1 className="page-title">Updates</h1>
       <p className="page-body">
-        Engine {status?.engineVersion ?? "0.1.0"}. Desktop {status?.clientVersion ?? "0.1.0"}.
+        Engine {status?.engineVersion ?? DESKTOP_CLIENT_VERSION}. Desktop {status?.clientVersion ?? DESKTOP_CLIENT_VERSION}.
       </p>
       <p className="workspace-card__meta">
         {status?.signed ? "Signed" : "Not signed"}. Checksums{" "}

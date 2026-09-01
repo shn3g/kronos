@@ -48,6 +48,29 @@ def test_reviewer_check_name_is_bound_and_is_not_hermes() -> None:
     assert reviewer_manifest["hook_attributes"]["active"] is False
 
 
+def test_create_issue_ensures_repo_labels_before_posting_issue() -> None:
+    forge, fixture, _auth = controller_stack()
+    fixture.reject_unknown_issue_labels = True
+    created = forge.create_issue(
+        title="Add feature",
+        body="Users cannot sign in.",
+        labels=("kronos:goal", "kind:feature"),
+        key=IdempotencyKey("issue:acme/app:ensure-labels"),
+    )
+    assert created.created is True
+    kinds = fixture.logical_action_kinds()
+    assert kinds.count("create_label") >= 2
+    assert kinds.index("create_label") < kinds.index("create_issue")
+    second = forge.create_issue(
+        title="Follow-up",
+        body="Second ticket.",
+        labels=("kronos:goal",),
+        key=IdempotencyKey("issue:acme/app:ensure-labels-2"),
+    )
+    assert second.created is True
+    assert fixture.count_issues() == 2
+
+
 def test_replayed_issue_comment_label_discussion_and_pr_are_idempotent() -> None:
     forge, fixture, _auth = controller_stack()
     issue_key = IdempotencyKey("issue:acme/app:goal-1")
@@ -116,6 +139,7 @@ def test_replayed_issue_comment_label_discussion_and_pr_are_idempotent() -> None
     assert p2.created is False
     assert fixture.count_pulls() == 1
     assert fixture.logical_action_kinds() == (
+        "create_label",
         "create_issue",
         "add_issue_comment",
         "add_labels",
@@ -185,9 +209,7 @@ def test_ruleset_requires_integration_id_and_strict_and_refuses_weaken() -> None
     assert unioned.bypass_actors == ()
 
     dropped = unioned.replace_required_checks(
-        tuple(
-            check for check in unioned.required_checks if check.context != "Frontend"
-        )
+        tuple(check for check in unioned.required_checks if check.context != "Frontend")
     )
     with pytest.raises(RulesetWouldWeaken, match="check"):
         forge.apply_ruleset(dropped, confirm=True)
@@ -424,9 +446,7 @@ def test_integration_id_required_only_on_kronos_review_check() -> None:
 
 def test_create_discussion_uses_repository_and_category_node_ids() -> None:
     forge, fixture, _auth = controller_stack()
-    created = forge.create_discussion(
-        "Design", "Notes", IdempotencyKey("discussion:graphql-nodes")
-    )
+    created = forge.create_discussion("Design", "Notes", IdempotencyKey("discussion:graphql-nodes"))
     assert created.created is True
     queries = fixture.graphql_queries()
     assert any("discussionCategories" in query for query in queries)
@@ -475,9 +495,7 @@ def test_mint_uses_client_base_url() -> None:
     _forge, fixture, auth = controller_stack(base_url="https://github.fixture.test")
     token = auth.mint("controller")
     assert token.require_fresh().startswith("ghs_")
-    assert fixture.last_request().url.startswith(
-        "https://github.fixture.test/app/installations/"
-    )
+    assert fixture.last_request().url.startswith("https://github.fixture.test/app/installations/")
 
 
 def test_merge_pull_is_integration_only_and_promotion_never_writes_default() -> None:
@@ -536,4 +554,3 @@ def test_merge_pull_refuses_stale_sha_when_head_moved() -> None:
     with pytest.raises(ForgeTransientError, match="409"):
         forge.merge_pull(pull.number, sha=old)
     assert fixture.merge_calls() == ()
-

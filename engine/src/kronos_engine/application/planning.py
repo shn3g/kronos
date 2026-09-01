@@ -3,17 +3,31 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Protocol
 
+from kronos_engine.adapters.models.openai_compatible import HttpTransport, OpenAICompatibleProvider
+from kronos_engine.application.issue_hygiene import (
+    issue_labels,
+    kind_from_title,
+    render_issue_body,
+)
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import RepositoryService
 from kronos_engine.domain.budgets import check_budget
-from kronos_engine.domain.entities import GoalId
+from kronos_engine.domain.entities import EnrolledRepository, GoalId
 from kronos_engine.domain.goals import GoalRecord, GoalState, InvalidTransition, transition_goal
-from kronos_engine.domain.policy import RISK_STEPS, refuse_mode_write
+from kronos_engine.domain.models import CostCeilingExceeded, assert_cost_allowed
+from kronos_engine.domain.policy import (
+    RISK_STEPS,
+    SIZE_STEPS,
+    ModeWriteRefused,
+    effort_for_size,
+    refuse_mode_write,
+)
 from kronos_engine.domain.risk import apply_planner_risk
 from kronos_engine.domain.tasks import (
     SchemaError,
@@ -27,6 +41,11 @@ from kronos_engine.domain.tasks import (
     parse_task_graph,
 )
 from kronos_engine.domain.workflow import require_evidence
+from kronos_engine.memory.records import MemoryRecord
+from kronos_engine.ports.forge import IdempotencyKey
+from kronos_engine.ports.model_provider import CompletionRequest
+from kronos_engine.ports.model_registry import ModelRegistry
+from kronos_engine.ports.secrets import ScopedSecret, SecretExpiredError, SecretStore
 from kronos_engine.state.goals import SqliteGoalStore
 
 
@@ -54,12 +73,16 @@ class PlanningService:
         planner: Planner,
         *,
         clock: Callable[[], datetime] | None = None,
+        forge: object | None = None,
+        forge_for: Callable[[EnrolledRepository], object | None] | None = None,
     ) -> None:
         self._store = store
         self._repos = repos
         self._recorder = recorder
         self._planner = planner
         self._clock = clock or (lambda: datetime.now(tz=UTC))
+        self._forge = forge
+        self._forge_for = forge_for
 
     def plan(self, goal_id: GoalId) -> TaskGraph:
         goal = self._store.get_goal(goal_id)
@@ -143,7 +166,47 @@ class PlanningService:
             "policy.evaluated",
             {"goal_id": goal.id.value, "task_count": len(bound.nodes)},
         )
+        self._maybe_create_issue(goal, bound, repo)
         return bound
+
+    def _resolved_forge(self, repo: EnrolledRepository) -> object | None:
+        if self._forge_for is not None:
+            resolved = self._forge_for(repo)
+            if resolved is not None:
+                return resolved
+        return self._forge
+
+    def _maybe_create_issue(
+        self, goal: GoalRecord, graph: TaskGraph, repo: EnrolledRepository
+    ) -> None:
+        forge = self._resolved_forge(repo)
+        if forge is None or not graph.nodes:
+            return
+        largest = max(graph.nodes, key=lambda node: SIZE_STEPS.index(node.size))
+        if not effort_for_size(repo.policy, largest.size).create_issue:
+            return
+        try:
+            refuse_mode_write(repo.policy.autonomy.mode, "create_issue")
+        except ModeWriteRefused:
+            return
+        create_issue = getattr(forge, "create_issue", None)
+        if not callable(create_issue):
+            return
+        labels = issue_labels(
+            kind=kind_from_title(goal.title),
+            size=largest.size,
+            risk=goal.risk_ceiling,
+        )
+        created = create_issue(
+            goal.title,
+            render_issue_body(goal, graph.nodes),
+            labels,
+            IdempotencyKey(f"issue:{goal.id.value}"),
+        )
+        add_labels = getattr(forge, "add_labels", None)
+        number = getattr(created, "number", None)
+        if callable(add_labels) and isinstance(number, int):
+            add_labels(number, labels, IdempotencyKey(f"labels:{goal.id.value}"))
 
 
 class IndexedPlanner:
@@ -180,6 +243,113 @@ class IndexedPlanner:
                 }
             ]
         }
+
+
+_PLANNER_SYSTEM = (
+    "Return only a JSON object with this shape: "
+    '{"tasks":[{"id":"","title":"","kind":"implementation","depends_on":[],'
+    '"evidence":[{"path":"","line":1}],"size":"S","baseline_size":"S",'
+    '"risk":"low","scope_paths":[""]}]}. No markdown.'
+)
+_SECRET_TTL_SECONDS = 60
+
+
+class LlmPlanner:
+    """Planner-role completion with IndexedPlanner as the deterministic fallback."""
+
+    def __init__(
+        self,
+        registry: ModelRegistry,
+        secrets: SecretStore,
+        fallback: Planner,
+        *,
+        complete: Callable[..., object] | None = None,
+        transport: HttpTransport | None = None,
+        retrieve: Callable[[str], tuple[MemoryRecord, ...]] | None = None,
+    ) -> None:
+        self._registry = registry
+        self._secrets = secrets
+        self._fallback = fallback
+        self._complete = complete
+        self._transport = transport
+        self._retrieve = retrieve
+
+    def plan(self, goal: object) -> Mapping[str, object]:
+        planned = self._llm_plan(goal)
+        if planned is None:
+            result = self._fallback.plan(goal)
+            return dict(result) if not isinstance(result, dict) else result
+        return planned
+
+    def _llm_plan(self, goal: object) -> dict[str, object] | None:
+        if not isinstance(goal, GoalRecord):
+            return None
+        assignments = self._registry.load_assignments()
+        profile_id = assignments.planner
+        if not profile_id:
+            return None
+        profiles = {item.id: item for item in self._registry.list_profiles()}
+        profile = profiles.get(profile_id)
+        if profile is None:
+            return None
+        providers = {item.id: item for item in self._registry.list_providers()}
+        provider = providers.get(profile.provider_id)
+        if provider is None or not provider.base_url:
+            return None
+        raw = self._secrets.get(provider.secret_ref)
+        secret = ScopedSecret(value=raw, ttl_seconds=_SECRET_TTL_SECONDS) if raw else None
+        lessons = ""
+        if self._retrieve is not None:
+            hits = self._retrieve(goal.title)
+            if hits:
+                lessons = "Lessons:\n" + "\n".join(item.text for item in hits) + "\n"
+        prompt = (
+            f"Goal: {goal.title}\n"
+            f"Success criteria: {goal.success_criteria}\n"
+            f"Non-goals: {goal.non_goals}\n"
+            f"Risk ceiling: {goal.risk_ceiling}\n"
+            f"{lessons}"
+            "Emit a single-task JSON plan with evidence and scope_paths."
+        )
+        request = CompletionRequest(
+            profile=profile,
+            prompt=prompt,
+            messages=(
+                {"role": "system", "content": _PLANNER_SYSTEM},
+                {"role": "user", "content": prompt},
+            ),
+        )
+        try:
+            billed = provider.billed or profile.billed
+            assert_cost_allowed(profile.limits, estimated_cost=0.0, billed=billed)
+            if self._complete is not None:
+                result = self._complete(request, secret)
+            else:
+                adapter = OpenAICompatibleProvider(
+                    base_url=provider.base_url,
+                    billed=provider.billed,
+                    transport=self._transport,
+                )
+                result = adapter.complete(request, secret)
+            text = getattr(result, "text", "")
+            if not isinstance(text, str):
+                return None
+            parsed: object = json.loads(text)
+            parse_task_graph(parsed)
+            if not isinstance(parsed, dict):
+                return None
+            return parsed
+        except (
+            CostCeilingExceeded,
+            SchemaError,
+            json.JSONDecodeError,
+            RuntimeError,
+            ValueError,
+            TypeError,
+            SecretExpiredError,
+            OSError,
+        ):
+            return None
 
 
 def _step(value: str) -> int:

@@ -7,6 +7,13 @@ export interface IndexStatus {
   denseAvailable: boolean;
   indexPath: string;
   ready: boolean;
+  state: "idle" | "scanning" | "embedding";
+  filesDone: number;
+  filesTotal: number;
+  chunksEmbedded: number;
+  chunksSkipped: number;
+  lastActivityAt: string | null;
+  watchEnabled: boolean;
 }
 
 export interface IndexHit {
@@ -23,6 +30,7 @@ export interface IndexHit {
 export interface IndexClient {
   status(repositoryId: string): Promise<IndexStatus>;
   rebuild(repositoryId: string): Promise<IndexStatus>;
+  setWatch(repositoryId: string, enabled: boolean): Promise<IndexStatus>;
   search(repositoryId: string, query: string): Promise<IndexHit[]>;
 }
 
@@ -48,6 +56,15 @@ export function createProductionIndexClient(
         request,
         "POST",
         `/repositories/${repositoryId}/index/rebuild`,
+      );
+      return mapStatus(payload);
+    },
+    async setWatch(repositoryId: string, enabled: boolean) {
+      const payload = await jsonRequest(
+        request,
+        "POST",
+        `/repositories/${repositoryId}/index/watch`,
+        { enabled },
       );
       return mapStatus(payload);
     },
@@ -94,6 +111,7 @@ async function jsonRequest(
 }
 
 function mapStatus(payload: Record<string, unknown>): IndexStatus {
+  const state = payload.state;
   return {
     repositoryId: stringField(payload, "repository_id"),
     commit: typeof payload.commit === "string" ? payload.commit : null,
@@ -101,6 +119,13 @@ function mapStatus(payload: Record<string, unknown>): IndexStatus {
     denseAvailable: payload.dense_available === true,
     indexPath: stringField(payload, "index_path"),
     ready: payload.ready === true,
+    state: state === "scanning" || state === "embedding" ? state : "idle",
+    filesDone: numberField(payload, "files_done"),
+    filesTotal: numberField(payload, "files_total"),
+    chunksEmbedded: numberField(payload, "chunks_embedded"),
+    chunksSkipped: numberField(payload, "chunks_skipped"),
+    lastActivityAt: typeof payload.last_activity_at === "string" ? payload.last_activity_at : null,
+    watchEnabled: payload.watch_enabled === true,
   };
 }
 
@@ -128,4 +153,9 @@ function asRecord(value: unknown): Record<string, unknown> {
 function stringField(record: Record<string, unknown>, key: string): string {
   const value = record[key];
   return typeof value === "string" ? value : "";
+}
+
+function numberField(record: Record<string, unknown>, key: string): number {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }

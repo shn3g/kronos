@@ -31,6 +31,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
+      - name: Check version lockstep against tag
+        run: python3 scripts/check-version-sync.py
+
       - name: Install Linux WebKit dependencies
         if: runner.os == 'Linux'
         run: |
@@ -117,6 +120,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check version lockstep against tag
+        run: python3 scripts/check-version-sync.py
+
       - name: Download installers
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -147,21 +156,7 @@ jobs:
             echo "no installer assets to publish"
             exit 1
           fi
-          {
-            echo "First public desktop build of Kronos ${TAG}."
-            echo
-            echo "Download one installer for your OS:"
-            echo
-            echo "- Windows: Kronos_${TAG#v}_x64-setup.exe"
-            echo "- Linux: Kronos_${TAG#v}_amd64.deb"
-            echo "- macOS: Kronos_${TAG#v}_macos.app.zip"
-            echo
-            echo "Unsigned. Windows SmartScreen and macOS Gatekeeper will warn. Use Run anyway or right-click Open."
-            echo
-            echo "Python 3.11+ must be on PATH. Node and Rust are not required to run the installer."
-            echo
-            echo "SHA256SUMS is optional verification. Source zip/tar.gz is the tree, not the app."
-          } > "$RUNNER_TEMP/notes.md"
+          python3 scripts/check-version-sync.py --write-release-notes "$RUNNER_TEMP/notes.md" --tag "$TAG"
           extra=(--verify-tag)
           gh release create "$TAG" "${assets[@]}" "${extra[@]}" \
             --repo "${{ github.repository }}" \

@@ -1,6 +1,6 @@
 [project]
 name = "kronos-engine"
-version = "0.1.0"
+version = "0.2.0"
 description = "Kronos local control-plane engine: loopback API, SQLite state, and sidecar lifecycle."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,11 +12,13 @@ dependencies = [
     "pydantic>=2.9",
     "uvicorn>=0.32",
     "keyring>=25",
+    "watchfiles>=1.0",
 ]
 
 [project.optional-dependencies]
 embeddings = [
     "onnxruntime>=1.19",
+    "tokenizers>=0.20",
 ]
 languages = [
     "tree-sitter>=0.24",
@@ -29,6 +31,7 @@ dev = [
     "httpx>=0.27",
     "mypy>=1.13",
     "onnxruntime>=1.19",
+    "tokenizers>=0.20",
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "ruff>=0.8",
@@ -75,5 +78,9 @@ module = [
     "tree_sitter_python",
     "tree_sitter_javascript",
     "tree_sitter_typescript",
+    "tokenizers",
+    "onnxruntime",
+    "numpy",
+    "watchfiles",
 ]
 ignore_missing_imports = true

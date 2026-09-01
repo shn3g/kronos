@@ -10,12 +10,33 @@ from kronos_engine.config.paths import KronosPaths, resolve_paths
 from kronos_engine.domain.policy import default_policy
 
 TINY_EMBED_ONNX = Path(__file__).resolve().parent / "fixtures" / "tiny_embed.onnx"
+TINY_TOKEN_EMBED_ONNX = Path(__file__).resolve().parent / "fixtures" / "tiny_token_embed.onnx"
+TINY_TOKENIZER = Path(__file__).resolve().parent / "fixtures" / "tokenizer.json"
 
 
 def write_tiny_embedding_onnx(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(TINY_EMBED_ONNX.read_bytes())
     return path
+
+
+def write_tiny_token_embedding_onnx(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(TINY_TOKEN_EMBED_ONNX.read_bytes())
+    return path
+
+
+def write_tiny_tokenizer(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(TINY_TOKENIZER.read_text(encoding="utf-8"), encoding="utf-8")
+    return path
+
+
+def write_local_embedding_fixtures(models_dir: Path) -> Path:
+    write_tiny_token_embedding_onnx(models_dir / "code.onnx")
+    write_tiny_token_embedding_onnx(models_dir / "all-MiniLM-L6-v2.onnx")
+    write_tiny_tokenizer(models_dir / "tokenizer.json")
+    return models_dir
 
 
 def kronos_paths(tmp_path: Path) -> KronosPaths:

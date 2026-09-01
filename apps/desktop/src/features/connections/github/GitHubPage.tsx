@@ -9,6 +9,7 @@ import {
   type GitHubClient,
   type GitHubConnectionStatus,
   type GitHubManifests,
+  type RepositorySafety,
   type RulesetProposalView,
 } from "./client";
 
@@ -27,6 +28,7 @@ export function GitHubPage({ engineClient, githubClient }: GitHubPageProps) {
   const [status, setStatus] = useState<GitHubConnectionStatus | null>(null);
   const [manifests, setManifests] = useState<GitHubManifests | null>(null);
   const [proposal, setProposal] = useState<RulesetProposalView | null>(null);
+  const [safety, setSafety] = useState<RepositorySafety | null>(null);
   const [confirmRuleset, setConfirmRuleset] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -88,6 +90,49 @@ export function GitHubPage({ engineClient, githubClient }: GitHubPageProps) {
           setError("Could not propose a ruleset for the enrolled origin.");
         }
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, ready, status]);
+
+  useEffect(() => {
+    if (!ready) {
+      return;
+    }
+    const repositoryId = status?.enrolled?.repositoryId;
+    if (!repositoryId) {
+      setSafety({
+        ok: false,
+        checks: [
+          { id: "ruleset_strict", ok: false, detail: "no enrolled GitHub origin" },
+          { id: "kronos_pr_workflow", ok: false, detail: "no enrolled GitHub origin" },
+          { id: "codeowners", ok: false, detail: "no enrolled GitHub origin" },
+          { id: "reviewer_app", ok: false, detail: "no enrolled GitHub origin" },
+        ],
+      });
+      return;
+    }
+    let cancelled = false;
+    void client.safety(repositoryId).then(
+      (nextSafety) => {
+        if (!cancelled) {
+          setSafety(nextSafety);
+        }
+      },
+      () => {
+        if (!cancelled) {
+          setSafety({
+            ok: false,
+            checks: [
+              { id: "ruleset_strict", ok: false, detail: "safety could not be loaded" },
+              { id: "kronos_pr_workflow", ok: false, detail: "safety could not be loaded" },
+              { id: "codeowners", ok: false, detail: "safety could not be loaded" },
+              { id: "reviewer_app", ok: false, detail: "safety could not be loaded" },
+            ],
+          });
+        }
+      },
+    );
     return () => {
       cancelled = true;
     };
@@ -241,6 +286,24 @@ export function GitHubPage({ engineClient, githubClient }: GitHubPageProps) {
           Apply ruleset
         </button>
       </form>
+      <section className="wizard">
+        <h2 className="wizard__title">Repository safety</h2>
+        <p className="wizard__copy">
+          Kronos will not elevate to draft PRs or merge until every check below passes.
+        </p>
+        <ul className="github-setup__checks">
+          {(safety?.checks ?? []).map((check) => (
+            <li key={check.id}>
+              {check.id}: {check.ok ? "ok" : "fail"} — {check.detail}
+            </li>
+          ))}
+        </ul>
+        <p className="github-setup__meta">
+          {safety?.ok
+            ? "PR write modes are allowed."
+            : "Mode elevation is blocked until these checks pass."}
+        </p>
+      </section>
       {error ? <p className="wizard__error">{error}</p> : null}
       {status?.githubCliPresent ? (
         <p className="github-setup__meta">GitHub CLI is present for setup assist only.</p>

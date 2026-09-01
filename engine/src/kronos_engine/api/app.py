@@ -3,17 +3,18 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import threading
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
-from kronos_engine.adapters.embeddings.local import LocalEmbeddingAdapter
 from kronos_engine.adapters.git.detection import ManifestStackDetector
 from kronos_engine.adapters.git.repository import FilesystemGitInspector, GitError
 from kronos_engine.adapters.git.worktrees import CacheRuntimeLayout
@@ -24,8 +25,16 @@ from kronos_engine.adapters.tools import DefaultToolDetector
 from kronos_engine.api.models import (
     AssignmentsRequest,
     AssignmentsResponse,
+    AutonomyRequest,
     BackupRequest,
+    ChatMessageRequest,
+    ConversationCreateRequest,
+    ConversationDetailResponse,
+    ConversationListResponse,
+    ConversationMessageModel,
+    ConversationModel,
     DetectedToolModel,
+    EmbeddingBackendModel,
     EventItem,
     EventListResponse,
     GithubAppRecordResponse,
@@ -47,6 +56,7 @@ from kronos_engine.api.models import (
     IndexSearchHit,
     IndexSearchResponse,
     IndexStatusResponse,
+    IndexWatchRequest,
     InspectResponse,
     LessonImportRequest,
     ModelsSnapshotResponse,
@@ -54,14 +64,18 @@ from kronos_engine.api.models import (
     PathRequest,
     PreviewFileModel,
     ProfileModel,
+    ProfileUpdateRequest,
     ProviderCreateRequest,
     ProviderCreateResponse,
     ProviderModel,
     RepositoryDetailResponse,
     RepositoryListResponse,
     RepositoryRecord,
+    ResourceLimitsModel,
     RunListResponse,
     RunModel,
+    SafetyCheckModel,
+    SafetyResponse,
     SkillApproveRequest,
     SkillImportRequest,
     SkillRouteRequest,
@@ -71,11 +85,22 @@ from kronos_engine.api.models import (
     TelegramTokenRequest,
     VersionResponse,
 )
-from kronos_engine.application.composition import build_goal_engine
+from kronos_engine.application.chat import (
+    ChatService,
+    ConversationDetail,
+    OrchestratorNotConfigured,
+)
+from kronos_engine.application.composition import (
+    build_goal_engine,
+    compose_llm_planner,
+    make_forge_for,
+)
 from kronos_engine.application.doctor import DoctorService, OpsSettings
+from kronos_engine.application.embeddings import ResolvedEmbedder, resolve_embedder
 from kronos_engine.application.event_query import EventQuery
 from kronos_engine.application.github_setup import GitHubSetupService
 from kronos_engine.application.goal_engine import GoalEngine
+from kronos_engine.application.goal_ticker import GOAL_TICK_INTERVAL_SECONDS, run_goal_ticker
 from kronos_engine.application.goals import GoalService
 from kronos_engine.application.model_profiles import (
     ModelProfileService,
@@ -83,13 +108,14 @@ from kronos_engine.application.model_profiles import (
     RoleAssignmentError,
 )
 from kronos_engine.application.notifications import NotificationService
-from kronos_engine.application.planning import Planner
+from kronos_engine.application.planning import Planner, PlanningService
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import (
     InspectResult,
     RepositoryNotFound,
     RepositoryService,
 )
+from kronos_engine.application.safety import SafetyElevationRefused
 from kronos_engine.application.verification import GateRunner
 from kronos_engine.config.repository import (
     EnrolmentPreview,
@@ -108,15 +134,18 @@ from kronos_engine.domain.goals import (
     GoalValidationError,
     InvalidTransition,
 )
-from kronos_engine.domain.models import ModelProfile
+from kronos_engine.domain.models import CostCeilingExceeded, ModelProfile, ResourceLimits
 from kronos_engine.domain.policy import PolicyError, policy_to_dict
 from kronos_engine.domain.tasks import SchemaError, WipExceeded
 from kronos_engine.domain.version import client_is_compatible
 from kronos_engine.domain.workflow import UnresolvedEvidence
 from kronos_engine.indexing.service import IndexingService, IndexStatus
+from kronos_engine.indexing.watcher import IndexWatcher
+from kronos_engine.memory.procedural import backfill_memory_vectors
 from kronos_engine.memory.promotion import PromotionBlocked, activate_promoted
 from kronos_engine.memory.records import MemoryRecord, MemoryRejected
 from kronos_engine.observability.otel import LocalMetrics, Tracer
+from kronos_engine.ports.embedding import EmbeddingIdentity
 from kronos_engine.ports.executor import Executor
 from kronos_engine.ports.forge import (
     ForgeAuthError,
@@ -144,6 +173,7 @@ from kronos_engine.skills.quarantine import (
     SkillSourcePort,
     SkillStillQuarantined,
 )
+from kronos_engine.state.conversations import ConversationRecord
 from kronos_engine.state.database import Database
 from kronos_engine.state.event_store import SqliteEventStore
 from kronos_engine.state.github_apps import SqliteGithubAppStore
@@ -178,10 +208,37 @@ def create_app(
     telegram_transport: TelegramTransport | None = None,
     telegram_auto_poll: bool = False,
 ) -> FastAPI:
+    embedding_startup: list[Callable[[], None]] = []
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        for hook in embedding_startup:
+            hook()
         stop_polling = threading.Event()
         worker: threading.Thread | None = None
+        goal_worker: threading.Thread | None = None
+        watcher: IndexWatcher | None = None
+        try:
+            watcher = IndexWatcher(
+                list_repos=_list_watched_repos,
+                indexer=IndexingService(settings.paths),
+                indexer_factory=_live_indexer,
+            )
+            watcher.start()
+        except Exception:
+            logging.getLogger("kronos.engine").exception("index watcher failed to start")
+            watcher = None
+        _app.state.index_watcher = watcher
+
+        def _goal_poll() -> None:
+            def _tick() -> None:
+                with goal_engine() as engine:
+                    engine.tick()
+
+            run_goal_ticker(_tick, stop_polling, interval=GOAL_TICK_INTERVAL_SECONDS)
+
+        goal_worker = threading.Thread(target=_goal_poll, daemon=True, name="kronos-goals")
+        goal_worker.start()
         if telegram_auto_poll:
             poller = TelegramPoller(store, telegram_connector)
 
@@ -195,6 +252,10 @@ def create_app(
         stop_polling.set()
         if worker is not None:
             worker.join(timeout=2.0)
+        if goal_worker is not None:
+            goal_worker.join(timeout=2.0)
+        if watcher is not None:
+            watcher.stop()
 
     app = FastAPI(title="Kronos Engine", version=settings.engine_version, lifespan=lifespan)
 
@@ -244,19 +305,109 @@ def create_app(
     def repository_service() -> Iterator[RepositoryService]:
         conn = database.connect()
         try:
-            yield RepositoryService(
-                SqliteRepositoryRegistry(conn),
-                settings.paths,
-                FilesystemGitInspector(),
-                ManifestStackDetector(),
-                CacheRuntimeLayout(),
-            )
+            yield _wired_repository_service(conn)
         finally:
             conn.close()
 
     detector = tool_detector or DefaultToolDetector()
     store = secret_store or OsSecretStore(settings.paths.config)
     github_http = github_transport or HttpxTransport()
+
+    def _resolve_embedder(conn: object) -> ResolvedEmbedder:
+        return resolve_embedder(
+            SqliteModelRegistry(conn),  # type: ignore[arg-type]
+            store,
+            settings.paths.cache / "models",
+        )
+
+    def _emit_index_event(kind: str, payload: Mapping[str, object]) -> None:
+        try:
+            conn = database.connect()
+            try:
+                Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn)).emit(kind, payload)
+            finally:
+                conn.close()
+        except Exception:
+            logging.getLogger("kronos.engine").exception("index event emit failed")
+
+    def _indexing_service(conn: object) -> IndexingService:
+        resolved = _resolve_embedder(conn)
+        return IndexingService(
+            settings.paths,
+            embeddings=resolved.adapter,
+            emit_event=_emit_index_event,
+            embedding_identity=_embedding_identity(resolved),
+        )
+
+    def _wired_repository_service(conn: object) -> RepositoryService:
+        apps = SqliteGithubAppStore(conn)  # type: ignore[arg-type]
+
+        def forge_for(record: EnrolledRepository) -> object | None:
+            parsed = github_owner_repo(record.origin)
+            if parsed is None:
+                return None
+            owner, name = parsed
+            try:
+                return GitHubSetupService(apps, store, github_http).forge(
+                    "controller",
+                    ForgeTarget(
+                        owner=owner,
+                        repo=name,
+                        integration_branch=record.policy.branches.integration,
+                        protected_branch=record.policy.branches.protected,
+                    ),
+                )
+            except ForgeAuthError:
+                return None
+
+        return RepositoryService(
+            SqliteRepositoryRegistry(conn),  # type: ignore[arg-type]
+            settings.paths,
+            FilesystemGitInspector(),
+            ManifestStackDetector(),
+            CacheRuntimeLayout(),
+            indexer=_indexing_service(conn),
+            apps=apps,
+            forge_for=forge_for,
+        )
+
+    def _current_embedder() -> ResolvedEmbedder:
+        conn = database.connect()
+        try:
+            return _resolve_embedder(conn)
+        finally:
+            conn.close()
+
+    def _live_indexer() -> IndexingService:
+        resolved = _current_embedder()
+        return IndexingService(
+            settings.paths,
+            embeddings=resolved.adapter,
+            emit_event=_emit_index_event,
+            embedding_identity=_embedding_identity(resolved),
+        )
+
+    def _list_watched_repos() -> tuple[EnrolledRepository, ...]:
+        conn = database.connect()
+        try:
+            return tuple(SqliteRepositoryRegistry(conn).list())
+        except Exception:
+            logging.getLogger("kronos.engine").exception("index watch list failed")
+            return ()
+        finally:
+            conn.close()
+
+    def _warm_embeddings() -> None:
+        try:
+            conn = database.connect()
+            try:
+                backfill_memory_vectors(conn, _resolve_embedder(conn).adapter)
+            finally:
+                conn.close()
+        except Exception:
+            logging.getLogger("kronos.engine").exception("memory embedding backfill failed")
+
+    embedding_startup.append(_warm_embeddings)
 
     def _ops_flags() -> OpsSettings:
         conn = database.connect()
@@ -330,7 +481,7 @@ def create_app(
                 skills_root=chosen_skills_root,
                 store_dir=settings.paths.cache / "skills",
                 source=skill_source,
-                embeddings=LocalEmbeddingAdapter(settings.paths.cache / "models"),
+                embeddings=_resolve_embedder(conn).adapter,
             )
             catalog.load_core()
             yield catalog
@@ -407,6 +558,56 @@ def create_app(
         finally:
             conn.close()
 
+    @contextmanager
+    def chat_service() -> Iterator[ChatService]:
+        conn = database.connect()
+        try:
+            repos = RepositoryService(
+                SqliteRepositoryRegistry(conn),
+                settings.paths,
+                FilesystemGitInspector(),
+                ManifestStackDetector(),
+                CacheRuntimeLayout(),
+                indexer=_indexing_service(conn),
+            )
+            recorder = Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn))
+            goals = GoalService(
+                SqliteGoalStore(conn),
+                repos,
+                recorder,
+                notifications=_notifications_for(conn),
+            )
+            embeddings = _resolve_embedder(conn).adapter
+            chosen_planner = compose_llm_planner(
+                conn,
+                settings,
+                store,
+                _live_indexer(),
+                embeddings,
+                planner=planner,
+            )
+            forge_for = make_forge_for(conn, settings, store, github_http, override=goal_forge)
+            planning = PlanningService(
+                SqliteGoalStore(conn),
+                repos,
+                recorder,
+                chosen_planner,
+                forge_for=forge_for,
+            )
+            yield ChatService(
+                conn,
+                repos,
+                goals,
+                planning,
+                _live_indexer(),
+                SqliteModelRegistry(conn),
+                store,
+                SqliteEventStore(conn),
+                embeddings=embeddings,
+            )
+        finally:
+            conn.close()
+
     @app.middleware("http")
     async def loopback_only(request: Request, call_next):  # type: ignore[no-untyped-def]
         host = request.client.host if request.client else ""
@@ -454,9 +655,7 @@ def create_app(
             )
 
     @app.post("/repositories/inspect", response_model=InspectResponse)
-    def inspect_repository(
-        body: PathRequest, _: None = Depends(require_auth)
-    ) -> InspectResponse:
+    def inspect_repository(body: PathRequest, _: None = Depends(require_auth)) -> InspectResponse:
         with repository_service() as service:
             try:
                 result = service.inspect(body.path)
@@ -471,6 +670,8 @@ def create_app(
         with repository_service() as service:
             try:
                 record = service.enrol(body.path, body.policy)
+            except SafetyElevationRefused as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
             except (GitError, PolicyError, RuntimeInsideEnrolledTree) as error:
                 raise HTTPException(status_code=400, detail=str(error)) from error
             return _detail_response(service, record, include_preview=True)
@@ -484,9 +685,7 @@ def create_app(
             return _detail_response(service, record)
 
     @app.get("/repositories/{repository_id}/preview", response_model=InspectResponse)
-    def preview_repository(
-        repository_id: str, _: None = Depends(require_auth)
-    ) -> InspectResponse:
+    def preview_repository(repository_id: str, _: None = Depends(require_auth)) -> InspectResponse:
         with repository_service() as service:
             record = _load(service, repository_id)
             try:
@@ -546,10 +745,44 @@ def create_app(
         with repository_service() as service:
             try:
                 record = service.reenrol(repo_id=_parse_id(repository_id), redetect=redetect)
+            except SafetyElevationRefused as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
             except (RepositoryNotFound, IdentifierError, GitError) as error:
                 status = 404 if isinstance(error, (RepositoryNotFound, IdentifierError)) else 400
                 raise HTTPException(status_code=status, detail=str(error)) from error
             return _detail_response(service, record, include_preview=True)
+
+    @app.get("/repositories/{repository_id}/safety", response_model=SafetyResponse)
+    def repository_safety(repository_id: str, _: None = Depends(require_auth)) -> SafetyResponse:
+        with repository_service() as service:
+            record = _load(service, repository_id)
+            report = service.safety(record.id)
+            return SafetyResponse(
+                ok=report.ok,
+                checks=[
+                    SafetyCheckModel(id=item.id, ok=item.ok, detail=item.detail)
+                    for item in report.checks
+                ],
+            )
+
+    @app.post("/repositories/{repository_id}/autonomy", response_model=RepositoryDetailResponse)
+    def set_repository_autonomy(
+        repository_id: str,
+        body: AutonomyRequest,
+        _: None = Depends(require_auth),
+    ) -> RepositoryDetailResponse:
+        with repository_service() as service:
+            try:
+                record = service.set_operation_mode(
+                    _parse_id(repository_id), body.mode, freeze=body.freeze
+                )
+            except SafetyElevationRefused as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            except PolicyError as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            except (RepositoryNotFound, IdentifierError) as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return _detail_response(service, record)
 
     @app.get("/models", response_model=ModelsSnapshotResponse)
     def models_snapshot(_: None = Depends(require_auth)) -> ModelsSnapshotResponse:
@@ -562,6 +795,7 @@ def create_app(
                 providers=[_provider_model(item) for item in service.list_providers()],
                 profiles=[_profile_model(item) for item in service.list_profiles()],
                 assignments=service.assignments().as_dict(),
+                embedding_backend=_embedding_backend_model(_current_embedder()),
             )
 
     @app.post("/models/providers", response_model=ProviderCreateResponse)
@@ -576,11 +810,10 @@ def create_app(
                     base_url=body.base_url,
                     billed=body.billed,
                     api_key=body.api_key,
+                    model_id=body.model_id,
                 )
             )
-            profiles = [
-                item for item in service.list_profiles() if item.provider_id == provider.id
-            ]
+            profiles = [item for item in service.list_profiles() if item.provider_id == provider.id]
             if not profiles:
                 raise HTTPException(status_code=500, detail="provider profile was not created")
             coder = next((item for item in profiles if item.role == "coder"), profiles[0])
@@ -598,6 +831,7 @@ def create_app(
             try:
                 assigned = service.assign(
                     {
+                        "orchestrator": body.orchestrator,
                         "planner": body.planner,
                         "coder": body.coder,
                         "reviewer": body.reviewer,
@@ -609,32 +843,59 @@ def create_app(
                 raise HTTPException(status_code=400, detail=str(error)) from error
             return AssignmentsResponse(assignments=assigned.as_dict())
 
+    @app.put("/models/profiles/{profile_id}", response_model=ProfileModel)
+    def update_profile(
+        profile_id: str, body: ProfileUpdateRequest, _: None = Depends(require_auth)
+    ) -> ProfileModel:
+        with model_service() as service:
+            try:
+                updated = service.update_profile(
+                    profile_id,
+                    model_id=body.model_id,
+                    limits=ResourceLimits(
+                        max_tokens=body.limits.max_tokens,
+                        max_attempts=body.limits.max_attempts,
+                        timeout_seconds=body.limits.timeout_seconds,
+                        cost_ceiling=body.limits.cost_ceiling,
+                    ),
+                )
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return _profile_model(updated)
+
     @app.get("/repositories/{repository_id}/index", response_model=IndexStatusResponse)
     def index_status(repository_id: str, _: None = Depends(require_auth)) -> IndexStatusResponse:
         with repository_service() as repos:
             record = _load(repos, repository_id)
-            status = IndexingService(settings.paths).status(record.id.value)
+            status = _live_indexer().status(record.id.value, policy=record.policy)
             return _index_status(status)
 
     @app.post("/repositories/{repository_id}/index/rebuild", response_model=IndexStatusResponse)
-    def index_rebuild(
-        repository_id: str, _: None = Depends(require_auth)
-    ) -> IndexStatusResponse:
+    def index_rebuild(repository_id: str, _: None = Depends(require_auth)) -> IndexStatusResponse:
         with repository_service() as repos:
             record = _load(repos, repository_id)
-            status = IndexingService(settings.paths).rebuild(
+            status = _live_indexer().rebuild(record.id.value, Path(record.realpath), record.policy)
+            return _index_status(status)
+
+    @app.post("/repositories/{repository_id}/index/refresh", response_model=IndexStatusResponse)
+    def index_refresh(repository_id: str, _: None = Depends(require_auth)) -> IndexStatusResponse:
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+            status = _live_indexer().incremental(
                 record.id.value, Path(record.realpath), record.policy
             )
             return _index_status(status)
 
-    @app.post("/repositories/{repository_id}/index/refresh", response_model=IndexStatusResponse)
-    def index_refresh(
-        repository_id: str, _: None = Depends(require_auth)
+    @app.post("/repositories/{repository_id}/index/watch", response_model=IndexStatusResponse)
+    def index_watch(
+        repository_id: str,
+        body: IndexWatchRequest,
+        _: None = Depends(require_auth),
     ) -> IndexStatusResponse:
         with repository_service() as repos:
             record = _load(repos, repository_id)
-            status = IndexingService(settings.paths).incremental(
-                record.id.value, Path(record.realpath), record.policy
+            status = _live_indexer().set_watch_enabled(
+                record.id.value, body.enabled, policy=record.policy
             )
             return _index_status(status)
 
@@ -647,7 +908,7 @@ def create_app(
     ) -> IndexSearchResponse:
         with repository_service() as repos:
             record = _load(repos, repository_id)
-            pack = IndexingService(settings.paths).search(record.id.value, q, mode=mode)
+            pack = _live_indexer().search(record.id.value, q, mode=mode)
             with recorder() as events:
                 events.emit(
                     "retrieval.searched",
@@ -673,7 +934,99 @@ def create_app(
     def index_map(repository_id: str, _: None = Depends(require_auth)) -> IndexMapResponse:
         with repository_service() as repos:
             record = _load(repos, repository_id)
-            return IndexMapResponse(text=IndexingService(settings.paths).repo_map(record.id.value))
+            return IndexMapResponse(text=_live_indexer().repo_map(record.id.value))
+
+    @app.post(
+        "/repositories/{repository_id}/conversations",
+        response_model=ConversationModel,
+    )
+    def create_conversation(
+        repository_id: str,
+        body: ConversationCreateRequest,
+        _: None = Depends(require_auth),
+    ) -> ConversationModel:
+        with chat_service() as service:
+            try:
+                created = service.create_conversation(repository_id, title=body.title)
+            except (LookupError, IdentifierError) as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return _conversation_model(created)
+
+    @app.get(
+        "/repositories/{repository_id}/conversations",
+        response_model=ConversationListResponse,
+    )
+    def list_conversations(
+        repository_id: str, _: None = Depends(require_auth)
+    ) -> ConversationListResponse:
+        with chat_service() as service:
+            try:
+                items = service.list_conversations(repository_id)
+            except (LookupError, IdentifierError) as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return ConversationListResponse(
+                conversations=[_conversation_model(item) for item in items]
+            )
+
+    @app.get("/conversations/{conversation_id}", response_model=ConversationDetailResponse)
+    def get_conversation(
+        conversation_id: str, _: None = Depends(require_auth)
+    ) -> ConversationDetailResponse:
+        with chat_service() as service:
+            try:
+                detail = service.get_conversation(conversation_id)
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return _conversation_detail(detail)
+
+    @app.delete("/conversations/{conversation_id}")
+    def delete_conversation(
+        conversation_id: str, _: None = Depends(require_auth)
+    ) -> dict[str, bool]:
+        with chat_service() as service:
+            try:
+                service.delete_conversation(conversation_id)
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return {"deleted": True}
+
+    @app.post("/conversations/{conversation_id}/messages")
+    def post_conversation_message(
+        conversation_id: str,
+        body: ChatMessageRequest,
+        _: None = Depends(require_auth),
+    ) -> StreamingResponse:
+        try:
+            with chat_service() as service:
+                try:
+                    service.prepare_reply(conversation_id, body.content)
+                except LookupError as error:
+                    raise HTTPException(status_code=404, detail="not found") from error
+        except (OrchestratorNotConfigured, SecretStoreError, CostCeilingExceeded) as error:
+            raise HTTPException(
+                status_code=409, detail=_orchestrator_conflict_detail(error)
+            ) from error
+
+        def generate() -> Iterator[str]:
+            with chat_service() as service:
+                for item in service.stream_message(conversation_id, body.content):
+                    if isinstance(item, str):
+                        yield f"data: {json.dumps({'delta': item})}\n\n"
+                        continue
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "content": item.content,
+                                "citations": list(item.citations),
+                                "goal_refs": list(item.goal_refs),
+                                "done": True,
+                            }
+                        )
+                        + "\n\n"
+                    )
+
+        return StreamingResponse(generate(), media_type="text/event-stream")
 
     GITHUB_APP_CREATE_URL = "https://github.com/settings/apps/new"
 
@@ -1337,6 +1690,7 @@ def _enrolled_github(repos: RepositoryService) -> GithubEnrolledModel | None:
             repo=name,
             integration_branch=record.policy.branches.integration,
             protected_branch=record.policy.branches.protected,
+            repository_id=record.id.value,
         )
     return None
 
@@ -1434,6 +1788,21 @@ def _detail_response(
     )
 
 
+def _embedding_identity(resolved: ResolvedEmbedder) -> EmbeddingIdentity:
+    return EmbeddingIdentity(kind=resolved.backend.kind, model_id=resolved.backend.model_id)
+
+
+def _embedding_backend_model(resolved: ResolvedEmbedder) -> EmbeddingBackendModel:
+    kind = resolved.backend.kind
+    if kind not in {"openai_compatible", "onnx", "none"}:
+        kind = "none"
+    return EmbeddingBackendModel(
+        kind=kind,  # type: ignore[arg-type]
+        model_id=resolved.backend.model_id,
+        display_name=resolved.backend.display_name,
+    )
+
+
 def _provider_model(provider: ProviderConfig) -> ProviderModel:
     return ProviderModel(
         id=provider.id,
@@ -1453,6 +1822,12 @@ def _profile_model(profile: ModelProfile) -> ProfileModel:
         model_id=profile.model_id,
         billed=profile.billed,
         approved_fallbacks=list(profile.approved_fallbacks),
+        limits=ResourceLimitsModel(
+            max_tokens=profile.limits.max_tokens,
+            max_attempts=profile.limits.max_attempts,
+            timeout_seconds=profile.limits.timeout_seconds,
+            cost_ceiling=profile.limits.cost_ceiling,
+        ),
     )
 
 
@@ -1465,6 +1840,13 @@ def _index_status(status: IndexStatus) -> IndexStatusResponse:
         index_path=status.index_path,
         disk_bytes=status.disk_bytes,
         ready=status.ready,
+        state=status.state,
+        files_done=status.files_done,
+        files_total=status.files_total,
+        chunks_embedded=status.chunks_embedded,
+        chunks_skipped=status.chunks_skipped,
+        last_activity_at=status.last_activity_at,
+        watch_enabled=status.watch_enabled,
     )
 
 
@@ -1481,6 +1863,41 @@ def _goal_model(goal: GoalRecord) -> GoalModel:
         stop_reason=goal.stop_reason,
         schedule=goal.schedule,
         max_attempts=goal.max_attempts,
+    )
+
+
+def _orchestrator_conflict_detail(error: BaseException) -> str:
+    text = str(error)
+    if "Models page" in text:
+        return text
+    return "No orchestrator model is configured. Assign a model on the Models page."
+
+
+def _conversation_model(record: ConversationRecord) -> ConversationModel:
+    return ConversationModel(
+        id=record.id,
+        repository_id=record.repository_id,
+        title=record.title,
+        created_at=record.created_at,
+    )
+
+
+def _conversation_detail(detail: ConversationDetail) -> ConversationDetailResponse:
+    return ConversationDetailResponse(
+        conversation=_conversation_model(detail.conversation),
+        messages=[
+            ConversationMessageModel(
+                id=item.id,
+                role=item.role,
+                content=item.content,
+                citations=[dict(citation) for citation in item.citations],
+                goal_refs=list(item.goal_refs),
+                model=item.model,
+                token_count=item.token_count,
+                created_at=item.created_at,
+            )
+            for item in detail.messages
+        ],
     )
 
 

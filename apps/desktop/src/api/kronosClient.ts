@@ -2,7 +2,7 @@
 
 import type { EngineConnectionState } from "../engine/client";
 
-export const DESKTOP_CLIENT_VERSION = "0.1.0";
+export const DESKTOP_CLIENT_VERSION = "0.2.0";
 
 export interface EngineLocateResult {
   baseUrl: string;

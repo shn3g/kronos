@@ -7,6 +7,7 @@ File-level notes that accumulate as subsystems land.
 - [Engine lifecycle](engine.md)
 - [Repository enrolment](enrolment.md)
 - [Models, executors, and sandboxes](models.md)
+- [Chat orchestrator](chat.md)
 - [GitHub Apps](../github-apps.md)
 - [Telegram](../telegram.md)
 - [Skills](../skills.md)

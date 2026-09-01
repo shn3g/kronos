@@ -9,11 +9,32 @@ from kronos_engine.adapters.github.client import GitHubClient, marker_in
 from kronos_engine.ports.forge import (
     CommentRef,
     ForgeTarget,
+    ForgeTransientError,
     IdempotencyKey,
     IssueRef,
     LabelChange,
     provenance_marker,
 )
+
+_LABEL_COLOR = "ededed"
+
+
+def ensure_labels(
+    client: GitHubClient,
+    target: ForgeTarget,
+    labels: Sequence[str],
+) -> None:
+    path = f"/repos/{target.owner}/{target.repo}/labels"
+    for name in labels:
+        try:
+            client.request_json(
+                "POST",
+                path,
+                json_body={"name": name, "color": _LABEL_COLOR},
+            )
+        except ForgeTransientError as error:
+            if "422" not in str(error):
+                raise
 
 
 def create_issue(
@@ -34,6 +55,7 @@ def create_issue(
                 url=str(raw.get("html_url") or ""),
                 created=False,
             )
+    ensure_labels(client, target, labels)
     payload = client.request_json(
         "POST",
         path,

@@ -44,7 +44,7 @@ describe("probeEngineState", () => {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(
           JSON.stringify({
-            engine_version: "0.1.0",
+            engine_version: "0.2.0",
             min_client_version: "0.1.0",
             compatible: true,
           }),
@@ -59,7 +59,7 @@ describe("probeEngineState", () => {
       baseUrl,
       token: "install-token",
     });
-    expect(state).toEqual({ status: "ready", version: "0.1.0" });
+    expect(state).toEqual({ status: "ready", version: "0.2.0" });
   });
 
   it("reports incompatible version when the engine says the client is incompatible", async () => {

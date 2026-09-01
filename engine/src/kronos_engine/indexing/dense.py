@@ -7,11 +7,18 @@ import math
 import sqlite3
 import struct
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from kronos_engine.ports.embedding import EmbeddingPort
 from kronos_engine.ports.index_store import IndexedChunk
 
 DOCUMENT_LANGUAGES = frozenset({"markdown", "text"})
+
+
+@dataclass(frozen=True, slots=True)
+class EmbedStats:
+    embedded: int
+    skipped: int
 
 
 def embedding_kind_for(language: str) -> str:
@@ -24,10 +31,26 @@ def upsert_embeddings(
     conn: sqlite3.Connection,
     chunks: Sequence[IndexedChunk],
     embeddings: EmbeddingPort,
-) -> bool:
-    used = False
-    by_kind: dict[str, list[IndexedChunk]] = {}
+) -> EmbedStats:
+    if not chunks:
+        return EmbedStats(embedded=0, skipped=0)
+    vector_ids = {str(row["chunk_id"]) for row in conn.execute("SELECT chunk_id FROM vectors")}
+    hash_by_id = {
+        str(row["chunk_id"]): str(row["content_hash"])
+        for row in conn.execute("SELECT chunk_id, content_hash FROM chunks")
+    }
+    skipped = 0
+    pending: list[IndexedChunk] = []
     for chunk in chunks:
+        if chunk.chunk_id in vector_ids and hash_by_id.get(chunk.chunk_id) == chunk.content_hash:
+            skipped += 1
+            continue
+        pending.append(chunk)
+    if not pending:
+        return EmbedStats(embedded=0, skipped=skipped)
+    embedded = 0
+    by_kind: dict[str, list[IndexedChunk]] = {}
+    for chunk in pending:
         kind = embedding_kind_for(chunk.language)
         by_kind.setdefault(kind, []).append(chunk)
     for kind, group in by_kind.items():
@@ -38,7 +61,6 @@ def upsert_embeddings(
         vectors = embeddings.embed([item.text for item in group], kind=kind)
         if vectors is None or len(vectors) != len(group):
             continue
-        used = True
         for chunk, vector in zip(group, vectors, strict=True):
             payload = struct.pack(f"{len(vector)}f", *[float(value) for value in vector])
             conn.execute(
@@ -48,8 +70,9 @@ def upsert_embeddings(
                 """,
                 (chunk.chunk_id, kind, len(vector), payload),
             )
+            embedded += 1
     conn.commit()
-    return used
+    return EmbedStats(embedded=embedded, skipped=skipped)
 
 
 def search_dense(

@@ -119,6 +119,7 @@ class SqliteModelRegistry:
             for row in self._conn.execute("SELECT role, profile_id FROM model_assignments")
         }
         return RoleAssignments(
+            orchestrator=rows.get("orchestrator"),
             planner=rows.get("planner"),
             coder=rows.get("coder"),
             reviewer=rows.get("reviewer"),

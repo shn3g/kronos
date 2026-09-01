@@ -66,6 +66,22 @@ class RepositoryDetailResponse(BaseModel):
     pushed: bool = False
 
 
+class SafetyCheckModel(BaseModel):
+    id: str
+    ok: bool
+    detail: str
+
+
+class SafetyResponse(BaseModel):
+    ok: bool
+    checks: list[SafetyCheckModel]
+
+
+class AutonomyRequest(BaseModel):
+    mode: str
+    freeze: bool | None = None
+
+
 class GoalModel(BaseModel):
     id: str
     repository_id: str
@@ -166,6 +182,13 @@ class ProviderModel(BaseModel):
     billed: bool
 
 
+class ResourceLimitsModel(BaseModel):
+    max_tokens: int
+    max_attempts: int
+    timeout_seconds: float
+    cost_ceiling: float
+
+
 class ProfileModel(BaseModel):
     id: str
     display_name: str
@@ -174,6 +197,7 @@ class ProfileModel(BaseModel):
     model_id: str
     billed: bool
     approved_fallbacks: list[str]
+    limits: ResourceLimitsModel
 
 
 class DetectedToolModel(BaseModel):
@@ -182,11 +206,18 @@ class DetectedToolModel(BaseModel):
     present: bool
 
 
+class EmbeddingBackendModel(BaseModel):
+    kind: Literal["openai_compatible", "onnx", "none"]
+    model_id: str
+    display_name: str
+
+
 class ModelsSnapshotResponse(BaseModel):
     detected: list[DetectedToolModel]
     providers: list[ProviderModel]
     profiles: list[ProfileModel]
     assignments: dict[str, str | None]
+    embedding_backend: EmbeddingBackendModel
 
 
 class ProviderCreateRequest(BaseModel):
@@ -195,6 +226,7 @@ class ProviderCreateRequest(BaseModel):
     base_url: str | None = None
     billed: bool = False
     api_key: str | None = None
+    model_id: str | None = None
 
 
 class ProviderCreateResponse(BaseModel):
@@ -204,6 +236,7 @@ class ProviderCreateResponse(BaseModel):
 
 
 class AssignmentsRequest(BaseModel):
+    orchestrator: str = ""
     planner: str = ""
     coder: str = ""
     reviewer: str = ""
@@ -215,6 +248,11 @@ class AssignmentsResponse(BaseModel):
     assignments: dict[str, str | None]
 
 
+class ProfileUpdateRequest(BaseModel):
+    model_id: str
+    limits: ResourceLimitsModel
+
+
 class IndexStatusResponse(BaseModel):
     repository_id: str
     commit: str | None
@@ -223,6 +261,17 @@ class IndexStatusResponse(BaseModel):
     index_path: str
     disk_bytes: int
     ready: bool
+    state: str
+    files_done: int
+    files_total: int
+    chunks_embedded: int
+    chunks_skipped: int
+    last_activity_at: str | None
+    watch_enabled: bool
+
+
+class IndexWatchRequest(BaseModel):
+    enabled: bool
 
 
 class IndexSearchHit(BaseModel):
@@ -259,6 +308,7 @@ class GithubEnrolledModel(BaseModel):
     repo: str
     integration_branch: str
     protected_branch: str
+    repository_id: str | None = None
 
 
 class GithubStatusResponse(BaseModel):
@@ -352,3 +402,37 @@ class OpsSettingsRequest(BaseModel):
     otel_export: bool = False
     langfuse_export: bool = False
 
+
+class ConversationCreateRequest(BaseModel):
+    title: str = "New conversation"
+
+
+class ConversationModel(BaseModel):
+    id: str
+    repository_id: str
+    title: str
+    created_at: str
+
+
+class ConversationListResponse(BaseModel):
+    conversations: list[ConversationModel]
+
+
+class ConversationMessageModel(BaseModel):
+    id: str
+    role: str
+    content: str
+    citations: list[dict[str, Any]]
+    goal_refs: list[str]
+    model: str | None = None
+    token_count: int | None = None
+    created_at: str
+
+
+class ConversationDetailResponse(BaseModel):
+    conversation: ConversationModel
+    messages: list[ConversationMessageModel]
+
+
+class ChatMessageRequest(BaseModel):
+    content: str

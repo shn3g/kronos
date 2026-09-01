@@ -316,6 +316,32 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        10,
+        """
+        CREATE TABLE conversations (
+            id TEXT PRIMARY KEY,
+            repository_id TEXT NOT NULL REFERENCES repositories(id),
+            title TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_conversations_repository_id ON conversations(repository_id);
+
+        CREATE TABLE conversation_messages (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+            content TEXT NOT NULL,
+            citations_json TEXT NOT NULL,
+            goal_refs_json TEXT NOT NULL,
+            model TEXT,
+            token_count INTEGER,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_conversation_messages_conversation_id
+            ON conversation_messages(conversation_id);
+        """,
+    ),
 )
 
 

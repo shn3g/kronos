@@ -148,3 +148,50 @@ async def test_enrol_builds_index_and_refresh_indexes_new_commits(
     )
     assert search.status_code == 200
     assert any("added.py" in item["path"] for item in search.json()["items"])
+
+
+@pytest.mark.asyncio
+async def test_index_status_progress_fields_and_watch_toggle(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    http, headers, tmp_path = client
+    root = init_git_repo(
+        tmp_path / "watched",
+        files={"src/mod.py": "WATCH_HTTP_TOKEN = 1\n"},
+    )
+    before = {path.relative_to(root) for path in root.rglob("*") if path.is_file()}
+    enrolled = await http.post("/repositories", headers=headers, json={"path": str(root)})
+    assert enrolled.status_code == 200
+    repo_id = enrolled.json()["repository"]["id"]
+
+    status = await http.get(f"/repositories/{repo_id}/index", headers=headers)
+    assert status.status_code == 200
+    body = status.json()
+    assert body["state"] in {"idle", "scanning", "embedding"}
+    assert isinstance(body["files_done"], int)
+    assert isinstance(body["files_total"], int)
+    assert isinstance(body["chunks_embedded"], int)
+    assert isinstance(body["chunks_skipped"], int)
+    assert body["watch_enabled"] is True
+    assert body["last_activity_at"]
+    assert "T" in body["last_activity_at"]
+
+    unauth = await http.post(f"/repositories/{repo_id}/index/watch", json={"enabled": False})
+    assert unauth.status_code == 401
+    toggled = await http.post(
+        f"/repositories/{repo_id}/index/watch",
+        headers=headers,
+        json={"enabled": False},
+    )
+    assert toggled.status_code == 200
+    assert toggled.json()["watch_enabled"] is False
+    loaded = await http.get(f"/repositories/{repo_id}/index", headers=headers)
+    assert loaded.json()["watch_enabled"] is False
+    after = {path.relative_to(root) for path in root.rglob("*") if path.is_file()}
+    assert after == before
+
+    events = await http.get("/events", headers=headers)
+    assert events.status_code == 200
+    kinds = [item["type"] for item in events.json()["events"]]
+    assert "index.progress" in kinds
+    assert "index.idle" in kinds

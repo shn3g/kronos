@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import re
 import sqlite3
@@ -23,6 +24,8 @@ from kronos_engine.memory.records import (
 from kronos_engine.ports.embedding import EmbeddingPort
 
 _WORD = re.compile(r"[A-Za-z0-9]+")
+_BACKFILL_BATCH = 64
+_LOG = logging.getLogger(__name__)
 
 
 class ProceduralStore:
@@ -187,6 +190,62 @@ def persist_record(
                 (record.id, "document", len(vector), payload),
             )
     conn.commit()
+
+
+def backfill_memory_vectors(
+    conn: sqlite3.Connection,
+    embeddings: EmbeddingPort | None,
+) -> int:
+    if embeddings is None or not embeddings.available("document"):
+        return 0
+    rows = conn.execute(
+        """
+        SELECT r.id, r.text
+        FROM memory_records r
+        WHERE NOT EXISTS (
+            SELECT 1 FROM memory_vectors v WHERE v.record_id = r.id
+        )
+        ORDER BY r.created_at, r.id
+        """
+    ).fetchall()
+    if not rows:
+        return 0
+    filled = 0
+    for start in range(0, len(rows), _BACKFILL_BATCH):
+        batch = rows[start : start + _BACKFILL_BATCH]
+        try:
+            vectors = embeddings.embed([str(row["text"]) for row in batch], kind="document")
+        except Exception:
+            _LOG.exception("memory embedding backfill batch failed")
+            continue
+        if vectors is None or len(vectors) != len(batch):
+            _LOG.warning("memory embedding backfill batch returned no vectors")
+            continue
+        try:
+            conn.execute("SAVEPOINT backfill_batch")
+            for row, vector in zip(batch, vectors, strict=True):
+                values = [float(value) for value in vector]
+                payload = struct.pack(f"{len(values)}f", *values)
+                conn.execute(
+                    "INSERT INTO memory_vectors(record_id, kind, dim, embedding)"
+                    " VALUES (?, ?, ?, ?)",
+                    (str(row["id"]), "document", len(values), payload),
+                )
+            conn.execute("RELEASE SAVEPOINT backfill_batch")
+            conn.commit()
+        except Exception:
+            _LOG.exception("memory embedding backfill persist failed")
+            try:
+                conn.execute("ROLLBACK TO SAVEPOINT backfill_batch")
+                conn.execute("RELEASE SAVEPOINT backfill_batch")
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    _LOG.exception("memory embedding backfill rollback failed")
+            continue
+        filled += len(batch)
+    return filled
 
 
 def load_record(conn: sqlite3.Connection, record_id: str) -> MemoryRecord | None:

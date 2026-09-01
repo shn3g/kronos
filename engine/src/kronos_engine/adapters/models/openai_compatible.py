@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -106,7 +106,7 @@ class OpenAICompatibleProvider:
             f"{self._base_url}/chat/completions",
             {
                 "model": model,
-                "messages": [{"role": "user", "content": request.prompt}],
+                "messages": _messages(request),
                 "max_tokens": request.profile.limits.max_tokens,
             },
             headers,
@@ -117,6 +117,96 @@ class OpenAICompatibleProvider:
         text = _choice_text(payload)
         tokens = _usage_tokens(payload)
         return CompletionResult(text=text, usage=TokenUsage(tokens=tokens))
+
+    def stream(
+        self, request: CompletionRequest, secret: ScopedSecret | None
+    ) -> Iterator[str]:
+        _assert_http_url(self._base_url)
+        token = secret.require_fresh() if secret is not None else None
+        model = select_completion_model(
+            request.profile,
+            fallback_model_id=request.fallback_model_id,
+            fallback_billed=request.fallback_billed,
+            provider_billed=self._billed,
+        )
+        billed = self._billed or request.profile.billed
+        assert_cost_allowed(request.profile.limits, estimated_cost=0.0, billed=billed)
+        headers: dict[str, str] = {
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        }
+        if token is not None:
+            headers["Authorization"] = f"Bearer {token}"
+        yield from _stream_chat_completions(
+            f"{self._base_url}/chat/completions",
+            {
+                "model": model,
+                "messages": _messages(request),
+                "max_tokens": request.profile.limits.max_tokens,
+                "stream": True,
+            },
+            headers,
+            request.profile.limits.timeout_seconds,
+        )
+
+
+def _messages(request: CompletionRequest) -> list[dict[str, str]]:
+    if request.messages is not None:
+        return [{"role": item["role"], "content": item["content"]} for item in request.messages]
+    return [{"role": "user", "content": request.prompt}]
+
+
+def _delta_content(payload: object) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first = choices[0]
+    if not isinstance(first, dict):
+        return ""
+    delta = first.get("delta")
+    if not isinstance(delta, dict):
+        return ""
+    content = delta.get("content")
+    return content if isinstance(content, str) else ""
+
+
+def _stream_chat_completions(
+    url: str,
+    payload: dict[str, object],
+    headers: dict[str, str],
+    timeout: float,
+) -> Iterator[str]:
+    _assert_http_url(url)
+    body = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(url, data=body, method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+            status = int(response.status)
+            if status != 200:
+                raise RuntimeError(f"openai-compatible completion failed: {status}")
+            while True:
+                raw = response.readline()
+                if not raw:
+                    break
+                line = raw.decode("utf-8").strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    return
+                try:
+                    parsed: object = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                content = _delta_content(parsed)
+                if content:
+                    yield content
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(f"openai-compatible completion failed: {int(error.code)}") from error
+    except OSError as error:
+        raise RuntimeError("openai-compatible completion failed: 599") from error
 
 
 def _assert_http_url(url: str) -> None:

@@ -10,11 +10,14 @@ pub fn run() {
             let handle = app.handle().clone();
             let supervisor = engine::EngineSupervisor::spawn(&handle);
             app.manage(supervisor);
+            app.manage(engine::StreamCancels::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             engine::engine_state,
             engine::engine_json,
+            engine::engine_stream,
+            engine::engine_stream_cancel,
             engine::pick_repository_folder,
             engine::import_telegram_bot_token
         ])

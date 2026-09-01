@@ -9,10 +9,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
+from kronos_engine.application.issue_hygiene import render_pull_request_body
 from kronos_engine.application.merge import MergeRefused, MergeService
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import RepositoryService
-from kronos_engine.domain.entities import TaskId
+from kronos_engine.application.safety import SafetyElevationRefused
+from kronos_engine.domain.entities import EnrolledRepository, TaskId
 from kronos_engine.domain.goals import GoalState, transition_goal
 from kronos_engine.domain.policy import ModeWriteRefused, refuse_mode_write
 from kronos_engine.domain.results import StaleFenceError
@@ -64,6 +66,7 @@ class VerificationService:
         leases: LeaseStore,
         *,
         clock: Callable[[], datetime],
+        forge_for: Callable[[EnrolledRepository], object | None] | None = None,
     ) -> None:
         self._store = store
         self._repos = repos
@@ -72,6 +75,7 @@ class VerificationService:
         self._gates = gates
         self._leases = leases
         self._clock = clock
+        self._forge_for = forge_for
 
     def gate(self, task_id: TaskId) -> VerifyResult:
         task = self._store.get_task(task_id)
@@ -177,14 +181,19 @@ class VerificationService:
             refuse_mode_write(repo.policy.autonomy.mode, "open_draft_pr")
         except ModeWriteRefused as error:
             raise ForgeError(str(error)) from error
+        try:
+            self._repos.require_pr_write_safety(repo)
+        except SafetyElevationRefused as error:
+            raise ForgeError(str(error)) from error
+        forge = self._resolved_forge(repo)
         goal = self._store.get_goal(task.goal_id)
         branch = f"kronos/{task.id.value}"
-        create_branch = getattr(self._forge, "create_feature_branch")
+        create_branch = getattr(forge, "create_feature_branch")
         create_branch(branch, IdempotencyKey(f"branch:{task.id.value}"))
-        open_draft = getattr(self._forge, "open_draft_pr")
+        open_draft = getattr(forge, "open_draft_pr")
         pull = open_draft(
             task.title,
-            goal.success_criteria,
+            render_pull_request_body(goal, task),
             branch,
             IdempotencyKey(f"pr:{task.id.value}"),
         )
@@ -237,6 +246,13 @@ class VerificationService:
                 staged_stop=reason != "never write the protected default branch",
             )
         try:
+            self._repos.require_pr_write_safety(repo)
+        except SafetyElevationRefused as error:
+            return MergeAttempt(ok=False, reason=str(error), staged_stop=True)
+        forge = self._resolved_forge(repo)
+        if forge is not None and forge is not self._forge:
+            merge = merge.rebind(forge)  # type: ignore[arg-type]
+        try:
             decision = merge.merge_if_eligible(task.pr_number)
         except MergeRefused as error:
             return MergeAttempt(ok=False, reason=str(error))
@@ -256,9 +272,7 @@ class VerificationService:
         if siblings and all(item.state is TaskState.MERGED for item in siblings):
             goal = self._store.get_goal(task.goal_id)
             if goal.state is GoalState.ACTIVE:
-                completed = replace(
-                    goal, state=transition_goal(goal.state, GoalState.COMPLETED)
-                )
+                completed = replace(goal, state=transition_goal(goal.state, GoalState.COMPLETED))
                 self._store.save_goal(completed)
                 self._recorder.emit(
                     "goal.transitioned",
@@ -279,3 +293,10 @@ class VerificationService:
             raise StaleFenceError("fence required")
         key = lease_resource_key(task.repository_id.value, task.scope_paths, task.id.value)
         self._leases.assert_fence(key, task.fence_token, now=self._clock())
+
+    def _resolved_forge(self, repo: EnrolledRepository) -> object:
+        if self._forge_for is not None:
+            resolved = self._forge_for(repo)
+            if resolved is not None:
+                return resolved
+        return self._forge

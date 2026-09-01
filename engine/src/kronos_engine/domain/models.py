@@ -8,7 +8,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TypeVar
 
-MODEL_ROLES: tuple[str, ...] = ("planner", "coder", "reviewer", "embedding")
+MODEL_ROLES: tuple[str, ...] = ("orchestrator", "planner", "coder", "reviewer", "embedding")
 
 FORBIDDEN_WORKER_SECRET_KEYS = frozenset(
     {

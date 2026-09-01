@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 from tests.support.git_fixtures import init_git_repo
+from tests.support.secrets import InMemorySecretStore
 
 from kronos_engine.api.app import create_app
 from kronos_engine.config.paths import resolve_paths
@@ -37,7 +38,7 @@ def _settings(tmp_path: Path) -> Settings:
 @pytest.fixture
 async def client(tmp_path: Path) -> AsyncIterator[tuple[AsyncClient, dict[str, str], Path]]:
     database = Database(tmp_path / "data" / "kronos.sqlite3")
-    app = create_app(_settings(tmp_path), database)
+    app = create_app(_settings(tmp_path), database, secret_store=InMemorySecretStore())
     http = AsyncClient(
         transport=ASGITransport(app=app, client=("127.0.0.1", 50000)),
         base_url="http://127.0.0.1",
@@ -133,7 +134,7 @@ POLICY_LIVE = {
         "freeze": False,
         "invent_issues": False,
         "refill_enabled": False,
-        "mode": "merge_integration",
+        "mode": "write_issues",
     },
     "paths": {"locked_prefixes": []},
     "risk": {"floor": "low"},
