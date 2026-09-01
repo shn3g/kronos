@@ -402,6 +402,7 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
                     | ("GET", Some("changes"))
                     | ("GET", Some("files"))
                     | ("GET", Some("files/contents"))
+                    | ("PUT", Some("files/contents"))
                     | ("POST", Some("index/rebuild"))
                     | ("POST", Some("index/refresh"))
                     | ("POST", Some("commits"))
@@ -935,6 +936,10 @@ mod tests {
         assert!(engine_path_allowed(
             "GET",
             "/repositories/repo_alpha/files/contents?path=src%2Fapp.py"
+        ));
+        assert!(engine_path_allowed(
+            "PUT",
+            "/repositories/repo_alpha/files/contents"
         ));
         assert!(engine_path_allowed("GET", "/repositories/repo_alpha/changes"));
         assert!(engine_path_allowed("POST", "/repositories/repo_alpha/commits"));

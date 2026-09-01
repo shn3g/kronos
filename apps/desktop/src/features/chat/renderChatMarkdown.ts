@@ -9,9 +9,9 @@ export type ChatMarkdownBlock =
   | { type: "paragraph"; spans: ChatMarkdownSpan[] }
   | { type: "heading"; level: 1 | 2 | 3 | 4 | 5 | 6; spans: ChatMarkdownSpan[] }
   | { type: "list"; ordered: boolean; items: ChatMarkdownSpan[][] }
-  | { type: "code"; language: string; text: string };
+  | { type: "code"; language: string; path: string; text: string };
 
-const FENCE = /```(\w*)\n([\s\S]*?)```/g;
+const FENCE = /```([^\n]*)\n([\s\S]*?)```/g;
 const INLINE = /(\*\*([^*]+)\*\*|`([^`]+)`)/g;
 const HEADING = /^(#{1,6}) (.+)$/;
 const UNORDERED = /^[-*] (.+)$/;
@@ -24,9 +24,11 @@ export function renderChatMarkdown(source: string): ChatMarkdownBlock[] {
   let match = fence.exec(source);
   while (match !== null) {
     pushBlocks(blocks, source.slice(last, match.index));
+    const info = parseFenceInfo(match[1] ?? "");
     blocks.push({
       type: "code",
-      language: match[1] ?? "",
+      language: info.language,
+      path: info.path,
       text: trimTrailingNewline(match[2] ?? ""),
     });
     last = match.index + match[0].length;
@@ -132,4 +134,55 @@ function parseSpans(text: string): ChatMarkdownSpan[] {
 
 function trimTrailingNewline(text: string): string {
   return text.endsWith("\n") ? text.slice(0, -1) : text;
+}
+
+export function parseFenceInfo(info: string): { language: string; path: string } {
+  const trimmed = info.trim().replace(/\\/g, "/");
+  if (trimmed === "") {
+    return { language: "", path: "" };
+  }
+  const colon = colonFence(trimmed);
+  if (colon) {
+    return colon;
+  }
+  const space = trimmed.indexOf(" ");
+  if (space === -1) {
+    if (looksLikePath(trimmed)) {
+      return { language: "", path: safeRelPath(trimmed) };
+    }
+    return { language: trimmed, path: "" };
+  }
+  return {
+    language: trimmed.slice(0, space),
+    path: safeRelPath(trimmed.slice(space + 1).trim()),
+  };
+}
+
+function colonFence(trimmed: string): { language: string; path: string } | null {
+  const index = trimmed.indexOf(":");
+  if (index <= 0) {
+    return null;
+  }
+  const rest = trimmed.slice(index + 1);
+  if (!looksLikePath(rest)) {
+    return null;
+  }
+  return { language: trimmed.slice(0, index), path: safeRelPath(rest) };
+}
+
+function looksLikePath(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.includes("/") || trimmed.includes(".");
+}
+
+function safeRelPath(value: string): string {
+  const trimmed = value.trim().replace(/\\/g, "/").replace(/^\/+/, "");
+  if (trimmed === "") {
+    return "";
+  }
+  const parts = trimmed.split("/");
+  if (parts.some((part) => part === "" || part === "." || part === ".." || part === ".git")) {
+    return "";
+  }
+  return parts.join("/");
 }

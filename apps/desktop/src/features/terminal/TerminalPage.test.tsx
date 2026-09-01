@@ -31,6 +31,7 @@ function repos(overrides: Partial<RepositoriesClient> = {}): RepositoriesClient 
     commitFiles: unused,
     listWorkspaceFiles: async () => [],
     readWorkspaceFile: unused,
+    writeWorkspaceFile: unused,
     runWorkspaceCommand: async () => ({
       command: "echo hi",
       exitCode: 0,

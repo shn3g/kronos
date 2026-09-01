@@ -1,7 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, it } from "vitest";
-import { renderChatMarkdown } from "./renderChatMarkdown";
+import { parseFenceInfo, renderChatMarkdown } from "./renderChatMarkdown";
+
+describe("parseFenceInfo", () => {
+  it("splits a language token from a relative path", () => {
+    expect(parseFenceInfo("ts src/ok.ts")).toEqual({ language: "ts", path: "src/ok.ts" });
+    expect(parseFenceInfo("ts:src/ok.ts")).toEqual({ language: "ts", path: "src/ok.ts" });
+    expect(parseFenceInfo("package.json")).toEqual({ language: "", path: "package.json" });
+    expect(parseFenceInfo("ts")).toEqual({ language: "ts", path: "" });
+  });
+
+  it("rejects parent segments in a fence path", () => {
+    expect(parseFenceInfo("ts ../secret.txt")).toEqual({ language: "ts", path: "" });
+  });
+});
 
 describe("renderChatMarkdown", () => {
   it("turns fenced code and bold into structured blocks without HTML", () => {
@@ -18,7 +31,15 @@ describe("renderChatMarkdown", () => {
           { type: "text", text: "." },
         ],
       },
-      { type: "code", language: "ts", text: "const ok = false;" },
+      { type: "code", language: "ts", text: "const ok = false;", path: "" },
+    ]);
+  });
+
+  it("reads a workspace path from the fence line", () => {
+    const blocks = renderChatMarkdown("```ts src/ok.ts\nconst ok = false;\n```\n");
+
+    expect(blocks).toEqual([
+      { type: "code", language: "ts", text: "const ok = false;", path: "src/ok.ts" },
     ]);
   });
 

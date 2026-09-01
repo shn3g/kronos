@@ -42,6 +42,9 @@ function repos(listImpl?: RepositoriesClient["list"]): RepositoriesClient {
     readWorkspaceFile: async () => {
       throw new Error("read should not run");
     },
+    writeWorkspaceFile: async () => {
+      throw new Error("write should not run");
+    },
     runWorkspaceCommand: async () => {
       throw new Error("terminal should not run");
     },
@@ -107,6 +110,9 @@ describe("WorkspacesPage", () => {
       listWorkspaceFiles: async () => [],
       readWorkspaceFile: async () => {
         throw new Error("read should not run");
+      },
+      writeWorkspaceFile: async () => {
+        throw new Error("write should not run");
       },
       runWorkspaceCommand: async () => {
         throw new Error("terminal should not run");
@@ -209,6 +215,9 @@ describe("WorkspacesPage", () => {
       listWorkspaceFiles: async () => [],
       readWorkspaceFile: async () => {
         throw new Error("read should not run");
+      },
+      writeWorkspaceFile: async () => {
+        throw new Error("write should not run");
       },
       runWorkspaceCommand: async () => {
         throw new Error("terminal should not run");

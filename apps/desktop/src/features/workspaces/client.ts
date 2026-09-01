@@ -70,6 +70,7 @@ export interface RepositoriesClient {
   commitFiles(id: string, message: string, paths: string[]): Promise<void>;
   listWorkspaceFiles(id: string): Promise<WorkspaceListedFile[]>;
   readWorkspaceFile(id: string, path: string): Promise<WorkspaceFileContents>;
+  writeWorkspaceFile(id: string, path: string, content: string): Promise<void>;
   runWorkspaceCommand(id: string, command: string): Promise<WorkspaceTerminalRun>;
 }
 
@@ -145,6 +146,9 @@ export function createProductionRepositoriesClient(
         content: stringField(payload, "content"),
         binary: payload.binary === true,
       };
+    },
+    async writeWorkspaceFile(id: string, path: string, content: string) {
+      await jsonRequest(request, "PUT", `/repositories/${id}/files/contents`, { path, content });
     },
     async runWorkspaceCommand(id: string, command: string) {
       const payload = await jsonRequest(request, "POST", `/repositories/${id}/terminal/runs`, {

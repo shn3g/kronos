@@ -314,6 +314,8 @@ export function App({
     );
   }
 
+  const workspaceId = session.workspaceId;
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main">
@@ -363,7 +365,7 @@ export function App({
               <div hidden={activity !== "chat"} className="app-main__panel app-main__panel--chat">
                 <ChatPage
                   chatClient={chat}
-                  repositoryId={session.workspaceId}
+                  repositoryId={workspaceId}
                   historyOpen={historyOpen}
                   newChatRequest={newChatRequest}
                   mentionRequest={mentionRequest}
@@ -375,6 +377,13 @@ export function App({
                   onOpenModels={() => {
                     setActivity("settings");
                   }}
+                  onApplyFile={
+                    workspaceId
+                      ? async (path, content) => {
+                          await repos.writeWorkspaceFile(workspaceId, path, content);
+                        }
+                      : undefined
+                  }
                 />
               </div>
               {activity === "workspaces" ? (

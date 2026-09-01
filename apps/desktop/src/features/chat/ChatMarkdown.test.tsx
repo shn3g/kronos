@@ -38,4 +38,56 @@ describe("ChatMarkdown", () => {
       await screen.findByText("Could not copy. Select the text and copy it yourself."),
     ).toBeInTheDocument();
   });
+
+  it("applies a fenced block to the workspace path on the fence", async () => {
+    const user = userEvent.setup();
+    const onApply = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ChatMarkdown
+        source={"```ts src/ok.ts\nconst ok = false;\n```\n"}
+        onApply={onApply}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    expect(onApply).toHaveBeenCalledWith("src/ok.ts", "const ok = false;");
+    expect(screen.getByRole("button", { name: /^applied$/i })).toBeInTheDocument();
+  });
+
+  it("asks for a path when the fence has none", async () => {
+    const user = userEvent.setup();
+    const onApply = vi.fn();
+
+    render(<ChatMarkdown source={"```ts\nconst ok = false;\n```\n"} onApply={onApply} />);
+
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    expect(onApply).not.toHaveBeenCalled();
+    expect(await screen.findByText("Add a file path to apply this.")).toBeInTheDocument();
+
+    await user.type(screen.getByRole("textbox", { name: /file path/i }), "src/ok.ts");
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    expect(onApply).toHaveBeenCalledWith("src/ok.ts", "const ok = false;");
+  });
+
+  it("says so when apply cannot write the file", async () => {
+    const user = userEvent.setup();
+    const onApply = vi.fn().mockRejectedValue(new Error("denied"));
+
+    render(
+      <ChatMarkdown
+        source={"```ts src/ok.ts\nconst ok = false;\n```\n"}
+        onApply={onApply}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    expect(
+      await screen.findByText("Could not apply that file. Check the path and try again."),
+    ).toBeInTheDocument();
+  });
 });

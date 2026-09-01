@@ -955,12 +955,24 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 6px;
 }
 
 .chat-md__lang {
   color: var(--muted);
+  font-size: 11px;
+}
+
+.chat-md__path {
+  flex: 1;
+  min-width: 8rem;
+  border: 0;
+  padding: 2px 4px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
   font-size: 11px;
 }
 

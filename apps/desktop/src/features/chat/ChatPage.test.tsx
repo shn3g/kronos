@@ -495,6 +495,40 @@ describe("ChatPage", () => {
     expect(screen.getByRole("button", { name: /^copy$/i })).toBeInTheDocument();
   });
 
+  it("applies a fenced file through onApplyFile", async () => {
+    const user = userEvent.setup();
+    const onApplyFile = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ChatPage
+        chatClient={chatClient({
+          sendMessage: async () => ({
+            messages: [
+              { id: "u1", role: "user", content: "Show me", toolName: null, toolStatus: null },
+              {
+                id: "a1",
+                role: "assistant",
+                content: "```ts src/ok.ts\nconst ok = false;\n```\n",
+                toolName: null,
+                toolStatus: null,
+              },
+            ],
+          }),
+        })}
+        repositoryId="repo_alpha"
+        historyOpen={false}
+        onOpenWorkspace={() => undefined}
+        onApplyFile={onApplyFile}
+      />,
+    );
+
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "Show me");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    await user.click(await screen.findByRole("button", { name: /^apply$/i }));
+
+    expect(onApplyFile).toHaveBeenCalledWith("src/ok.ts", "const ok = false;");
+  });
+
   it("renders @ file mentions in the user bubble as code", async () => {
     const user = userEvent.setup();
     render(

@@ -21,6 +21,7 @@ interface ChatPageProps {
   indexClient?: IndexClient;
   onOpenWorkspace: () => void;
   onOpenModels?: () => void;
+  onApplyFile?: ((path: string, content: string) => Promise<void>) | undefined;
 }
 
 export function ChatPage({
@@ -33,6 +34,7 @@ export function ChatPage({
   indexClient,
   onOpenWorkspace,
   onOpenModels,
+  onApplyFile,
 }: ChatPageProps) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -330,7 +332,7 @@ export function ChatPage({
             <h1 className="chat-empty__title">Ask Kronos</h1>
             <p>
               {repositoryId
-                ? "Chat can search this workspace, read and write files, run commands, and start a longer goal when you want unattended work. AGENTS.md and Cursor rules files in this folder are followed on every turn."
+                ? "Chat can search this workspace, read and write files, run commands, and start a longer goal when you want unattended work. AGENTS.md and Cursor rules files in this folder are followed on every turn. Apply on a code block writes that file here."
                 : "You can ask how Kronos works now. Open a git folder to index code."}
             </p>
             {repositoryId ? null : (
@@ -348,7 +350,7 @@ export function ChatPage({
                 data-tool={item.toolName ?? undefined}
               >
                 {item.role === "assistant" ? (
-                  <ChatMarkdown source={item.content} />
+                  <ChatMarkdown source={item.content} onApply={onApplyFile} />
                 ) : item.role === "user" ? (
                   <UserMentionText content={item.content} />
                 ) : item.role === "tool" ? (

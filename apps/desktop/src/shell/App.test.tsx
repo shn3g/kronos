@@ -103,6 +103,7 @@ function quietRepos(): RepositoriesClient {
     commitFiles: unused,
     listWorkspaceFiles: async () => [],
     readWorkspaceFile: unused,
+    writeWorkspaceFile: unused,
     runWorkspaceCommand: unused,
   };
 }
