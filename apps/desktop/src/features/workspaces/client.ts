@@ -40,6 +40,7 @@ export interface RepositoriesClient {
   pause(id: string): Promise<EnrolledRepository>;
   disable(id: string): Promise<EnrolledRepository>;
   resume(id: string): Promise<EnrolledRepository>;
+  revertWrite(id: string, path: string): Promise<void>;
 }
 
 export async function pickRepositoryFolder(): Promise<string | null> {
@@ -84,6 +85,9 @@ export function createProductionRepositoriesClient(
     async resume(id: string) {
       const payload = await jsonRequest(request, "POST", `/repositories/${id}/resume`);
       return mapRepository(payload.repository);
+    },
+    async revertWrite(id: string, path: string) {
+      await jsonRequest(request, "POST", `/repositories/${id}/writes/revert`, { path });
     },
   };
 }

@@ -31,6 +31,9 @@ function repos(listImpl?: RepositoriesClient["list"]): RepositoriesClient {
     resume: async () => {
       throw new Error("resume should not run");
     },
+    revertWrite: async () => {
+      throw new Error("revert should not run");
+    },
   };
 }
 
@@ -87,6 +90,7 @@ describe("WorkspacesPage", () => {
       pause: async () => ({ ...enrolled, status: "paused" }),
       disable: async () => ({ ...enrolled, status: "disabled" }),
       resume: async () => ({ ...enrolled, status: "active" }),
+      revertWrite: async () => undefined,
     };
 
     render(
@@ -174,6 +178,9 @@ describe("WorkspacesPage", () => {
       },
       resume: async () => {
         throw new Error("resume should not run");
+      },
+      revertWrite: async () => {
+        throw new Error("revert should not run");
       },
     };
 

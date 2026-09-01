@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { InspectorDrawer, type InspectorTab } from "./InspectorDrawer";
 
 function Harness() {
@@ -39,6 +39,30 @@ describe("InspectorDrawer", () => {
     await user.click(screen.getByRole("button", { name: /src\/app\.tsx/i }));
     expect(screen.getByText(/-old/)).toBeInTheDocument();
     expect(screen.getByText(/\+new/)).toBeInTheDocument();
+  });
+
+  it("reverts a chat write from the Changes list", async () => {
+    const user = userEvent.setup();
+    const onRevert = vi.fn();
+    render(
+      <InspectorDrawer
+        tab="changes"
+        onTab={() => undefined}
+        changes={[
+          {
+            path: "src/App.tsx",
+            summary: "Wrote src/App.tsx",
+            patch: "--- a/src/App.tsx\n+++ b/src/App.tsx\n-old\n+new\n",
+          },
+        ]}
+        goals={[]}
+        checks={[]}
+        onRevert={onRevert}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /revert src\/app\.tsx/i }));
+    expect(onRevert).toHaveBeenCalledWith("src/App.tsx");
   });
 
   it("lists workspace diffs and goal titles with text status", async () => {

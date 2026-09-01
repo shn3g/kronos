@@ -27,7 +27,7 @@ This is how we design in Cursor, not a Kronos product. Sources: Cursor Agents Wi
 
 - Progressive specification: no Goal form on every message. Short follow-ups stay in the same thread.
 - Persistent plan: Goals tab is the place for unattended work, matching developers who pin a plan when a chat gets long.
-- Review on the right: Changes is the default inspector tab (Cursor diffs, VS Code Changes panel). Chat file writes appear there as soon as they land. Files tree, last-turn filter, commit, terminal, and context meter stay later.
+- Review on the right: Changes is the default inspector tab (Cursor diffs, VS Code Changes panel). Chat file writes appear there as soon as they land. Revert restores the last chat write for that file. New files created by chat are deleted. Files tree, last-turn filter, commit, terminal, and context meter stay later.
 - History is a View toggle, not a permanent column.
 
 ## Health

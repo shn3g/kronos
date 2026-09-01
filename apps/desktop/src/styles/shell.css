@@ -306,12 +306,32 @@
   font-weight: 600;
 }
 
+.inspector__error {
+  margin: 0 0 10px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.inspector__change-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inspector__change-row .btn-quiet {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
 .inspector__change {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-  width: 100%;
+  min-width: 0;
+  flex: 1;
   border: 0;
   padding: 0;
   background: transparent;
@@ -905,6 +925,11 @@ button.chat-composer__model:focus-visible {
   border: 1px solid var(--hairline);
   background: transparent;
   color: var(--ink);
+}
+
+.btn-quiet:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
 }
 
 .wizard {

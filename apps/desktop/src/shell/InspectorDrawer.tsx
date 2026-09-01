@@ -18,9 +18,21 @@ interface InspectorDrawerProps {
   changes: InspectorChange[];
   goals: { id: string; title: string; state: string }[];
   checks: HealthCheck[];
+  onRevert?: (path: string) => void;
+  revertError?: string | null;
+  revertingPath?: string | null;
 }
 
-export function InspectorDrawer({ tab, onTab, changes, goals, checks }: InspectorDrawerProps) {
+export function InspectorDrawer({
+  tab,
+  onTab,
+  changes,
+  goals,
+  checks,
+  onRevert,
+  revertError = null,
+  revertingPath = null,
+}: InspectorDrawerProps) {
   return (
     <aside className="inspector" aria-label="Session details">
       <div className="inspector__tabs" role="tablist" aria-label="Inspector">
@@ -39,11 +51,23 @@ export function InspectorDrawer({ tab, onTab, changes, goals, checks }: Inspecto
           changes.length === 0 ? (
             <p className="inspector__empty">No file changes in this workspace yet.</p>
           ) : (
-            <ul className="inspector__list">
-              {changes.map((item) => (
-                <ChangeRow key={`${item.path}:${item.summary}`} item={item} />
-              ))}
-            </ul>
+            <>
+              {revertError ? (
+                <p className="inspector__error" role="alert">
+                  {revertError}
+                </p>
+              ) : null}
+              <ul className="inspector__list">
+                {changes.map((item) => (
+                  <ChangeRow
+                    key={`${item.path}:${item.summary}`}
+                    item={item}
+                    onRevert={onRevert}
+                    reverting={revertingPath === item.path}
+                  />
+                ))}
+              </ul>
+            </>
           )
         ) : null}
         {tab === "goals" ? (
@@ -68,31 +92,53 @@ export function InspectorDrawer({ tab, onTab, changes, goals, checks }: Inspecto
   );
 }
 
-function ChangeRow({ item }: { item: InspectorChange }) {
+function ChangeRow({
+  item,
+  onRevert,
+  reverting,
+}: {
+  item: InspectorChange;
+  onRevert: ((path: string) => void) | undefined;
+  reverting: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const patch = item.patch ?? "";
-  if (patch === "") {
-    return (
-      <li>
-        <strong>{item.path}</strong>
-        <span>{item.summary}</span>
-      </li>
-    );
-  }
   return (
     <li>
-      <button
-        type="button"
-        className="inspector__change"
-        aria-expanded={open}
-        onClick={() => {
-          setOpen((current) => !current);
-        }}
-      >
-        <strong>{item.path}</strong>
-        <span>{item.summary}</span>
-      </button>
-      {open ? <pre className="inspector__diff">{patch}</pre> : null}
+      <div className="inspector__change-row">
+        {patch === "" ? (
+          <div className="inspector__change">
+            <strong>{item.path}</strong>
+            <span>{item.summary}</span>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="inspector__change"
+            aria-expanded={open}
+            onClick={() => {
+              setOpen((current) => !current);
+            }}
+          >
+            <strong>{item.path}</strong>
+            <span>{item.summary}</span>
+          </button>
+        )}
+        {onRevert ? (
+          <button
+            type="button"
+            className="btn-quiet"
+            aria-label={`Revert ${item.path}`}
+            disabled={reverting}
+            onClick={() => {
+              onRevert(item.path);
+            }}
+          >
+            Revert
+          </button>
+        ) : null}
+      </div>
+      {open && patch !== "" ? <pre className="inspector__diff">{patch}</pre> : null}
     </li>
   );
 }

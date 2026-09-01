@@ -61,4 +61,15 @@ describe("createProductionRepositoriesClient", () => {
       status: "active",
     });
   });
+
+  it("reverts a chat write through the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path, body) => {
+      expect(method).toBe("POST");
+      expect(path).toBe("/repositories/repo_alpha/writes/revert");
+      expect(body).toEqual({ path: "src/App.tsx" });
+      return { status: 200, body: JSON.stringify({ ok: true, path: "src/App.tsx" }) };
+    });
+
+    await expect(client.revertWrite("repo_alpha", "src/App.tsx")).resolves.toBeUndefined();
+  });
 });

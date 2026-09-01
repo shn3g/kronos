@@ -57,6 +57,7 @@ export function useSessionContext({
   changes: InspectorChange[];
   goals: { id: string; title: string; state: string }[];
   checks: HealthCheck[];
+  refresh: () => Promise<void>;
 } {
   const [repositories, setRepositories] = useState<EnrolledRepository[]>([]);
   const [workspaceId, setWorkspaceIdState] = useState<string | null>(null);
@@ -66,6 +67,7 @@ export function useSessionContext({
   const [indexReady, setIndexReady] = useState(false);
   const dashboardRef = useRef<HomeDashboard | null>(null);
   const goalsRef = useRef<GoalRecord[]>([]);
+  const refreshRef = useRef<() => Promise<void>>(async () => undefined);
 
   function applyWorkspace(id: string | null): void {
     setWorkspaceIdState(id);
@@ -140,6 +142,7 @@ export function useSessionContext({
       }
       applyWorkspace(resolveActiveWorkspaceId(listedRepos, readStoredWorkspaceId()));
     };
+    refreshRef.current = refresh;
     void refresh();
     const interval = window.setInterval(() => {
       void refresh();
@@ -164,5 +167,6 @@ export function useSessionContext({
     changes,
     goals,
     checks: doctorChecks ?? localChecks,
+    refresh: () => refreshRef.current(),
   };
 }

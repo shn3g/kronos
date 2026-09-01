@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../shell/App";
 import type { EngineClient, EngineConnectionState } from "../engine/client";
 import type { ModelsClient } from "../features/models/client";
@@ -98,6 +98,7 @@ function quietRepos(): RepositoriesClient {
     pause: unused,
     disable: unused,
     resume: unused,
+    revertWrite: unused,
   };
 }
 
@@ -450,5 +451,71 @@ describe("App shell", () => {
     await screen.findByRole("textbox", { name: /ask kronos/i });
     await user.click(screen.getByRole("button", { name: "Local llama" }));
     expect(await screen.findByRole("heading", { name: /^models$/i })).toBeInTheDocument();
+  });
+
+  it("reverts a chat write from the Changes list", async () => {
+    const user = userEvent.setup();
+    let diffs = [
+      {
+        path: "src/App.tsx",
+        summary: "guard staff before calendar",
+        repositoryId: "repo_alpha",
+      },
+    ];
+    const revertWrite = vi.fn(async () => {
+      diffs = [];
+    });
+    const session = liveSession();
+    render(
+      <App
+        engineClient={clientOf({ status: "ready", version: "0.1.0" })}
+        modelsClient={assignedModels()}
+        chatClient={quietChat()}
+        repositoriesClient={{ ...session.repositoriesClient, revertWrite }}
+        homeClient={{
+          dashboard: async () => {
+            const snapshot = await session.homeClient.dashboard();
+            return { ...snapshot, diffs };
+          },
+        }}
+        goalsClient={session.goalsClient}
+        settingsClient={session.settingsClient}
+      />,
+    );
+
+    expect(await screen.findByText("src/App.tsx")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /revert src\/app\.tsx/i }));
+    expect(revertWrite).toHaveBeenCalledWith("repo_alpha", "src/App.tsx");
+    expect(
+      await screen.findByText(/no file changes in this workspace yet/i),
+    ).toBeInTheDocument();
+  });
+
+  it("explains when a chat write cannot be reverted", async () => {
+    const user = userEvent.setup();
+    const session = liveSession();
+    render(
+      <App
+        engineClient={clientOf({ status: "ready", version: "0.1.0" })}
+        modelsClient={assignedModels()}
+        chatClient={quietChat()}
+        repositoriesClient={{
+          ...session.repositoriesClient,
+          revertWrite: async () => {
+            throw new Error("engine request failed: 409");
+          },
+        }}
+        homeClient={session.homeClient}
+        goalsClient={session.goalsClient}
+        settingsClient={session.settingsClient}
+      />,
+    );
+
+    expect(await screen.findByText("src/App.tsx")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /revert src\/app\.tsx/i }));
+    expect(
+      await screen.findByRole("alert"),
+    ).toHaveTextContent("Could not revert that file. Check the workspace and try again.");
+    expect(screen.getByText("src/App.tsx")).toBeInTheDocument();
   });
 });
