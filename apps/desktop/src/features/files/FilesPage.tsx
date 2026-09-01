@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { EngineClient } from "../../engine/client";
 import type { IndexClient, IndexHit } from "../index/client";
 import {
@@ -8,6 +8,11 @@ import {
   type RepositoriesClient,
   type WorkspaceFileContents,
 } from "../workspaces/client";
+import {
+  fileDraftIsDirty,
+  insertEditorText,
+  SAVE_FILE_EVENT,
+} from "./fileEditor";
 import {
   fileTreeFromPaths,
   filterFileTree,
@@ -25,6 +30,7 @@ interface FilesPageProps {
   indexClient?: IndexClient;
   onOpenWorkspace: () => void;
   onAskInChat?: (path: string) => void;
+  onWroteFile?: () => void;
   revealRequest?: { path: string; nonce: number };
 }
 
@@ -37,6 +43,7 @@ export function FilesPage({
   indexClient,
   onOpenWorkspace,
   onAskInChat,
+  onWroteFile,
   revealRequest = EMPTY_REVEAL,
 }: FilesPageProps) {
   const client = repositoriesClient ?? productionRepos;
@@ -50,10 +57,19 @@ export function FilesPage({
   const [preview, setPreview] = useState<WorkspaceFileContents | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [savedContent, setSavedContent] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchHits, setSearchHits] = useState<IndexHit[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
+  const dirty = fileDraftIsDirty(savedContent, draft);
+  const dirtyRef = useRef(dirty);
+  const saveRef = useRef<() => Promise<void>>(async () => undefined);
+  dirtyRef.current = dirty;
 
   useEffect(() => {
     let cancelled = false;
@@ -77,6 +93,10 @@ export function FilesPage({
     setSelectedPath(null);
     setPreview(null);
     setPreviewError(null);
+    setDraft(null);
+    setSavedContent(null);
+    setSaveError(null);
+    setPendingPath(null);
     setExpanded(new Set());
     setPaths([]);
     setListError(null);
@@ -85,19 +105,34 @@ export function FilesPage({
     setSearchError(null);
   }, [repositoryId]);
 
+  function openPath(path: string): void {
+    const safe = safeWorkspaceRelPath(path);
+    if (safe === "") {
+      return;
+    }
+    if (safe === selectedPath) {
+      setPendingPath(null);
+      return;
+    }
+    if (dirtyRef.current) {
+      setPendingPath(safe);
+      return;
+    }
+    setPendingPath(null);
+    setSelectedPath(safe);
+    setPreview(null);
+    setDraft(null);
+    setSavedContent(null);
+    setLoadingPreview(true);
+    setExpanded((current) => expandAncestors(current, safe));
+  }
+
   useEffect(() => {
     const path = safeWorkspaceRelPath(revealRequest.path);
     if (revealRequest.nonce === 0 || path === "") {
       return;
     }
-    setSelectedPath(path);
-    setExpanded((current) => {
-      const next = new Set(current);
-      for (const folder of ancestorFolderPaths(path)) {
-        next.add(folder);
-      }
-      return next;
-    });
+    openPath(path);
   }, [revealRequest.nonce, revealRequest.path]);
 
   useEffect(() => {
@@ -136,12 +171,19 @@ export function FilesPage({
     let cancelled = false;
     setLoadingPreview(true);
     setPreviewError(null);
+    setDraft(null);
+    setSavedContent(null);
+    setSaveError(null);
     void client.readWorkspaceFile(repositoryId, selectedPath).then(
       (payload) => {
         if (cancelled) {
           return;
         }
         setPreview(payload);
+        if (!payload.binary) {
+          setDraft(payload.content);
+          setSavedContent(payload.content);
+        }
         setLoadingPreview(false);
       },
       () => {
@@ -149,6 +191,8 @@ export function FilesPage({
           return;
         }
         setPreview(null);
+        setDraft(null);
+        setSavedContent(null);
         setLoadingPreview(false);
         setPreviewError("Could not open that file. It may be outside the workspace or missing.");
       },
@@ -157,6 +201,51 @@ export function FilesPage({
       cancelled = true;
     };
   }, [client, ready, repositoryId, selectedPath]);
+
+  async function onSave(): Promise<void> {
+    if (!repositoryId || !selectedPath || draft === null || preview?.binary || !dirty || saving) {
+      return;
+    }
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await client.writeWorkspaceFile(repositoryId, selectedPath, draft);
+      setSavedContent(draft);
+      setPreview((current) => (current ? { ...current, content: draft } : current));
+      const next = pendingPath;
+      setPendingPath(null);
+      onWroteFile?.();
+      if (next) {
+        setSelectedPath(next);
+        setExpanded((current) => expandAncestors(current, next));
+      }
+    } catch {
+      setSaveError("Could not save that file. Check that the engine is running, then try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  saveRef.current = onSave;
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.key.toLowerCase() !== "s" || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) {
+        return;
+      }
+      event.preventDefault();
+      void saveRef.current();
+    }
+    function onMenuSave(): void {
+      void saveRef.current();
+    }
+    window.addEventListener("keydown", onKey);
+    window.addEventListener(SAVE_FILE_EVENT, onMenuSave);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener(SAVE_FILE_EVENT, onMenuSave);
+    };
+  }, []);
 
   const tree = useMemo(() => fileTreeFromPaths(paths), [paths]);
   const visible = useMemo(() => filterFileTree(tree, filter), [filter, tree]);
@@ -213,6 +302,8 @@ export function FilesPage({
     );
   }
 
+  const canEdit = Boolean(preview && !preview.binary && draft !== null && !loadingPreview);
+
   return (
     <section className="files-page">
       <header className="files-page__header">
@@ -256,7 +347,7 @@ export function FilesPage({
                     setExpanded((current) => toggleExpanded(current, row.path));
                     return;
                   }
-                  setSelectedPath(row.path);
+                  openPath(row.path);
                 }}
               >
                 {row.name}
@@ -266,19 +357,65 @@ export function FilesPage({
         </div>
         <div className="files-page__pane files-page__pane--preview">
           <div className="files-page__preview-head">
-            <p className="files-page__preview-kicker">Read-only preview</p>
-            {selectedPath && onAskInChat ? (
-              <button
-                type="button"
-                className="btn-quiet"
-                onClick={() => {
-                  onAskInChat(selectedPath);
-                }}
-              >
-                Ask in chat
-              </button>
-            ) : null}
+            <p className="files-page__preview-kicker">{selectedPath ?? "File"}</p>
+            <div className="files-page__preview-actions">
+              {dirty ? (
+                <p className="files-page__unsaved" aria-live="polite">
+                  Unsaved
+                </p>
+              ) : null}
+              {canEdit ? (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={!dirty || saving}
+                  onClick={() => {
+                    void onSave();
+                  }}
+                >
+                  {saving ? "Saving" : "Save"}
+                </button>
+              ) : null}
+              {pendingPath ? (
+                <button
+                  type="button"
+                  className="btn-quiet"
+                  onClick={() => {
+                    const next = pendingPath;
+                    if (next === null) {
+                      return;
+                    }
+                    setPendingPath(null);
+                    setSelectedPath(next);
+                    setPreview(null);
+                    setDraft(null);
+                    setSavedContent(null);
+                    setLoadingPreview(true);
+                    setExpanded((current) => expandAncestors(current, next));
+                  }}
+                >
+                  Discard
+                </button>
+              ) : null}
+              {selectedPath && onAskInChat ? (
+                <button
+                  type="button"
+                  className="btn-quiet"
+                  onClick={() => {
+                    onAskInChat(selectedPath);
+                  }}
+                >
+                  Ask in chat
+                </button>
+              ) : null}
+            </div>
           </div>
+          {saveError ? <p className="wizard__error">{saveError}</p> : null}
+          {pendingPath ? (
+            <p className="wizard__error">
+              {`Save or discard changes to ${selectedPath} before opening another file.`}
+            </p>
+          ) : null}
           {previewError ? <p className="wizard__error">{previewError}</p> : null}
           {loadingPreview ? (
             <p className="files-page__status" aria-live="polite">
@@ -286,9 +423,16 @@ export function FilesPage({
             </p>
           ) : null}
           {!selectedPath && !loadingPreview ? (
-            <p className="files-page__status">Select a file to read it.</p>
+            <p className="files-page__status">Select a file to open it.</p>
           ) : null}
-          {preview && !loadingPreview ? <PreviewBody preview={preview} /> : null}
+          {preview && !loadingPreview ? (
+            <EditorBody
+              preview={preview}
+              draft={draft}
+              disabled={saving}
+              onDraft={setDraft}
+            />
+          ) : null}
         </div>
       </div>
       {indexClient ? (
@@ -325,7 +469,7 @@ export function FilesPage({
                 type="button"
                 className="files-page__hit"
                 onClick={() => {
-                  setSelectedPath(hit.path);
+                  openPath(hit.path);
                 }}
               >
                 {hit.path}
@@ -338,13 +482,67 @@ export function FilesPage({
   );
 }
 
-function PreviewBody({ preview }: { preview: WorkspaceFileContents }) {
+function EditorBody({
+  preview,
+  draft,
+  disabled,
+  onDraft,
+}: {
+  preview: WorkspaceFileContents;
+  draft: string | null;
+  disabled: boolean;
+  onDraft: (value: string) => void;
+}) {
   if (preview.binary) {
     return (
       <p className="files-page__status">This file is binary, so Kronos is not showing its contents.</p>
     );
   }
-  return <pre className="files-page__preview-body">{preview.content}</pre>;
+  if (draft === null) {
+    return null;
+  }
+  return (
+    <textarea
+      className="files-page__preview-body files-page__editor"
+      aria-label={preview.path}
+      spellCheck={false}
+      value={draft}
+      disabled={disabled}
+      onChange={(event) => {
+        onDraft(event.target.value);
+      }}
+      onKeyDown={(event) => {
+        onEditorKeyDown(event, draft, onDraft);
+      }}
+    />
+  );
+}
+
+function onEditorKeyDown(
+  event: ReactKeyboardEvent<HTMLTextAreaElement>,
+  draft: string,
+  onDraft: (value: string) => void,
+): void {
+  if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey) {
+    return;
+  }
+  event.preventDefault();
+  const node = event.currentTarget;
+  const next = insertEditorText(draft, node.selectionStart, node.selectionEnd, "  ");
+  onDraft(next.content);
+  const caret = next.caret;
+  window.requestAnimationFrame(() => {
+    node.selectionStart = caret;
+    node.selectionEnd = caret;
+  });
+}
+
+function expandAncestors(current: ReadonlySet<string>, path: string): Set<string> {
+  const next = new Set(current);
+  for (const folder of ancestorFolderPaths(path)) {
+    next.add(folder);
+  }
+  return next;
 }
 
 function toggleExpanded(current: ReadonlySet<string>, path: string): Set<string> {

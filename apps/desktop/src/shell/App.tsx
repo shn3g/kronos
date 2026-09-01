@@ -425,6 +425,9 @@ export function App({
                       setMentionRequest((current) => ({ path, nonce: current.nonce + 1 }));
                       setActivity("chat");
                     }}
+                    onWroteFile={() => {
+                      void session.refresh();
+                    }}
                     revealRequest={fileReveal}
                   />
                 </div>

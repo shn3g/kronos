@@ -48,7 +48,7 @@ export const ROUTES = [
     path: "/index",
     name: "Files",
     heading: "Files",
-    summary: "Read-only tree of the current workspace, with fail-closed search still available from chat.",
+    summary: "Browse and edit text files in the current workspace. Search still fail-closes without an engine.",
   },
   {
     path: "/connections",

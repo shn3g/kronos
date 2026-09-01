@@ -411,6 +411,7 @@ describe("App shell", () => {
     await screen.findByRole("textbox", { name: /ask kronos/i });
     await user.click(screen.getByRole("menuitem", { name: /^File$/ }));
     expect(screen.getByRole("menuitem", { name: /^models$/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^save$/i })).toBeInTheDocument();
     await user.click(screen.getByRole("menuitem", { name: /^Edit$/ }));
     expect(screen.getByRole("menuitem", { name: /^cut$/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^copy$/i })).toBeInTheDocument();
@@ -697,7 +698,7 @@ describe("App shell", () => {
     await user.click(await screen.findByRole("button", { name: /open src\/app\.py/i }));
 
     expect(await screen.findByRole("heading", { level: 1, name: "Files" })).toBeInTheDocument();
-    expect(await screen.findByText("print(1)")).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "src/app.py" })).toHaveValue("print(1)\n");
     expect(readWorkspaceFile).toHaveBeenCalledWith("repo_alpha", "src/app.py");
   });
 
@@ -729,7 +730,9 @@ describe("App shell", () => {
     await user.click(await screen.findByRole("button", { name: /open src\/app\.tsx/i }));
 
     expect(await screen.findByRole("heading", { level: 1, name: "Files" })).toBeInTheDocument();
-    expect(await screen.findByText("export function App() {}")).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "src/App.tsx" })).toHaveValue(
+      "export function App() {}\n",
+    );
     expect(readWorkspaceFile).toHaveBeenCalledWith("repo_alpha", "src/App.tsx");
   });
 });

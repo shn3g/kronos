@@ -75,7 +75,7 @@ describe("FilesPage", () => {
     expect(listWorkspaceFiles).not.toHaveBeenCalled();
   });
 
-  it("lists files and shows a read-only preview", async () => {
+  it("lists files and opens a text file for editing", async () => {
     const user = userEvent.setup();
     const readWorkspaceFile = vi.fn(async (id: string, path: string) => {
       expect(id).toBe("repo_alpha");
@@ -96,8 +96,136 @@ describe("FilesPage", () => {
     expect(await screen.findByRole("treeitem", { name: "README.md" })).toBeInTheDocument();
     await user.click(screen.getByRole("treeitem", { name: "src" }));
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
-    expect(await screen.findByText("print(1)")).toBeInTheDocument();
-    expect(screen.getByText(/read-only/i)).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "src/app.py" })).toHaveValue("print(1)\n");
+    expect(screen.queryByText(/read-only/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled();
+  });
+
+  it("saves edited text into the workspace", async () => {
+    const user = userEvent.setup();
+    const writeWorkspaceFile = vi.fn(async () => undefined);
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({ writeWorkspaceFile })}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    const editor = await screen.findByRole("textbox", { name: "src/app.py" });
+    await user.clear(editor);
+    await user.type(editor, "print(2)");
+    expect(screen.getByText(/^unsaved$/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(writeWorkspaceFile).toHaveBeenCalledWith("repo_alpha", "src/app.py", "print(2)");
+    expect(await screen.findByRole("button", { name: /^save$/i })).toBeDisabled();
+    expect(screen.queryByText(/^unsaved$/i)).not.toBeInTheDocument();
+  });
+
+  it("says so when save cannot reach the engine", async () => {
+    const user = userEvent.setup();
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({
+          writeWorkspaceFile: async () => {
+            throw new Error("engine request failed: 500");
+          },
+        })}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    const editor = await screen.findByRole("textbox", { name: "src/app.py" });
+    await user.type(editor, "x");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(
+      await screen.findByText(/could not save that file\. check that the engine is running, then try again/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/^unsaved$/i)).toBeInTheDocument();
+  });
+
+  it("keeps unsaved edits until save or discard when opening another file", async () => {
+    const user = userEvent.setup();
+    const writeWorkspaceFile = vi.fn(async () => undefined);
+    const readWorkspaceFile = vi.fn(async (_id: string, path: string) => {
+      if (path === "README.md") {
+        return { path, content: "# hello\n", binary: false };
+      }
+      return { path, content: "print(1)\n", binary: false };
+    });
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({ readWorkspaceFile, writeWorkspaceFile })}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    const editor = await screen.findByRole("textbox", { name: "src/app.py" });
+    await user.type(editor, "x");
+    await user.click(screen.getByRole("treeitem", { name: "README.md" }));
+    expect(writeWorkspaceFile).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "src/app.py" })).toHaveValue("print(1)\nx");
+    expect(
+      screen.getByText(/save or discard changes to src\/app\.py before opening another file/i),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^discard$/i }));
+    expect(await screen.findByRole("textbox", { name: "README.md" })).toHaveValue("# hello\n");
+  });
+
+  it("saves from Ctrl+S while the editor is open", async () => {
+    const user = userEvent.setup();
+    const writeWorkspaceFile = vi.fn(async () => undefined);
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({ writeWorkspaceFile })}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    const editor = await screen.findByRole("textbox", { name: "src/app.py" });
+    await user.type(editor, "x");
+    await user.keyboard("{Control>}s{/Control}");
+    expect(writeWorkspaceFile).toHaveBeenCalledWith("repo_alpha", "src/app.py", "print(1)\nx");
+  });
+
+  it("does not edit binary files", async () => {
+    const user = userEvent.setup();
+    const writeWorkspaceFile = vi.fn(async () => undefined);
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({
+          listWorkspaceFiles: async () => [{ path: "logo.png" }],
+          readWorkspaceFile: async () => ({ path: "logo.png", content: "", binary: true }),
+          writeWorkspaceFile,
+        })}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("treeitem", { name: "logo.png" }));
+    expect(
+      await screen.findByText(/this file is binary, so kronos is not showing its contents/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "logo.png" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument();
+    expect(writeWorkspaceFile).not.toHaveBeenCalled();
   });
 
   it("shows a specific error when listing fails", async () => {
@@ -202,7 +330,7 @@ describe("FilesPage", () => {
     expect(search).toHaveBeenCalledWith("repo_alpha", "connect");
     await user.click(await screen.findByRole("button", { name: "src/app.py" }));
     expect(readWorkspaceFile).toHaveBeenCalledWith("repo_alpha", "src/app.py");
-    expect(await screen.findByText("print(1)")).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "src/app.py" })).toHaveValue("print(1)\n");
   });
 
   it("shows a specific error when content search fails", async () => {
@@ -258,7 +386,7 @@ describe("FilesPage", () => {
       />,
     );
 
-    expect(await screen.findByText("print(1)")).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "src/app.py" })).toHaveValue("print(1)\n");
     expect(readWorkspaceFile).toHaveBeenCalledWith("repo_alpha", "src/app.py");
     expect(screen.getByRole("treeitem", { name: "app.py" })).toHaveAttribute("aria-selected", "true");
   });
@@ -281,7 +409,7 @@ describe("FilesPage", () => {
     );
 
     expect(await screen.findByRole("treeitem", { name: "src" })).toBeInTheDocument();
-    expect(screen.getByText(/select a file to read it/i)).toBeInTheDocument();
+    expect(screen.getByText(/select a file to open it/i)).toBeInTheDocument();
     expect(readWorkspaceFile).not.toHaveBeenCalled();
   });
 
@@ -303,7 +431,7 @@ describe("FilesPage", () => {
     );
 
     expect(await screen.findByRole("treeitem", { name: "src" })).toBeInTheDocument();
-    expect(screen.getByText(/select a file to read it/i)).toBeInTheDocument();
+    expect(screen.getByText(/select a file to open it/i)).toBeInTheDocument();
     expect(readWorkspaceFile).not.toHaveBeenCalled();
   });
 });

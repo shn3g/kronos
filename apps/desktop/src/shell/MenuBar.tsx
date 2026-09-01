@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useEffect, useId, useState, type ReactNode } from "react";
+import { SAVE_FILE_EVENT } from "../features/files/fileEditor";
 
 export type MenuId = "file" | "edit" | "view" | "help" | null;
 
@@ -71,6 +72,13 @@ export function MenuBar({
           onSelect={() => {
             setOpen(null);
             onOpenWorkspace();
+          }}
+        />
+        <MenuItem
+          label="Save"
+          onSelect={() => {
+            setOpen(null);
+            window.dispatchEvent(new Event(SAVE_FILE_EVENT));
           }}
         />
         <MenuItem
@@ -182,7 +190,8 @@ export function MenuBar({
           .cursorrules, and files under .cursor/rules are followed on every chat turn. Apply on a
           code block writes that file into the open folder and lists it in Changes. Retry
           sends the last prompt again. Try again resends after a failed send. Click a file mention
-          in chat, or Open in Changes, to read that file in Files.
+          in chat, or Open in Changes, to edit that file in Files. Save or Ctrl+S writes it into
+          the folder.
         </p>
       </Menu>
     </div>
