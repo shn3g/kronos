@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, it } from "vitest";
-import { insertMention, mentionQueryAtCursor, uniqueMentionPaths } from "./mentionQuery";
+import { insertMention, mentionQueryAtCursor, mentionSegments, uniqueMentionPaths } from "./mentionQuery";
 
 describe("mentionQueryAtCursor", () => {
   it("reads the query after the last @ before the cursor", () => {
@@ -32,5 +32,19 @@ describe("uniqueMentionPaths", () => {
         { path: "src/main.tsx" },
       ]),
     ).toEqual(["src/App.tsx", "src/main.tsx"]);
+  });
+});
+
+describe("mentionSegments", () => {
+  it("splits @path tokens from surrounding text", () => {
+    expect(mentionSegments("Fix @src/App.tsx please")).toEqual([
+      { kind: "text", value: "Fix " },
+      { kind: "path", value: "src/App.tsx" },
+      { kind: "text", value: " please" },
+    ]);
+  });
+
+  it("leaves email addresses as plain text", () => {
+    expect(mentionSegments("mail a@b.com")).toEqual([{ kind: "text", value: "mail a@b.com" }]);
   });
 });

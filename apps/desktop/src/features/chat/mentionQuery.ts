@@ -41,3 +41,30 @@ export function uniqueMentionPaths(hits: { path: string }[]): string[] {
   }
   return paths;
 }
+
+export interface MentionSegment {
+  kind: "text" | "path";
+  value: string;
+}
+
+export function mentionSegments(text: string): MentionSegment[] {
+  const segments: MentionSegment[] = [];
+  let cursor = 0;
+  const pattern = /(?<![\w.])@([A-Za-z0-9_./\\-]+)/g;
+  for (const match of text.matchAll(pattern)) {
+    const index = match.index ?? 0;
+    const token = match[1];
+    if (token === undefined) {
+      continue;
+    }
+    if (index > cursor) {
+      segments.push({ kind: "text", value: text.slice(cursor, index) });
+    }
+    segments.push({ kind: "path", value: token.replaceAll("\\", "/") });
+    cursor = index + match[0].length;
+  }
+  if (cursor < text.length || segments.length === 0) {
+    segments.push({ kind: "text", value: text.slice(cursor) });
+  }
+  return segments;
+}

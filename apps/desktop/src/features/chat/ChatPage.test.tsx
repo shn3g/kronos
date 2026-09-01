@@ -388,6 +388,24 @@ describe("ChatPage", () => {
     expect(screen.getByText("const ok = false;")).toBeInTheDocument();
   });
 
+  it("renders @ file mentions in the user bubble as code", async () => {
+    const user = userEvent.setup();
+    render(
+      <ChatPage
+        chatClient={chatClient()}
+        repositoryId={null}
+        historyOpen={false}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "Fix @src/App.tsx");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    const mentioned = await screen.findAllByText("src/App.tsx");
+    expect(mentioned[0]?.tagName).toBe("CODE");
+  });
+
   it("inserts an indexed file path when an @ mention is chosen", async () => {
     const user = userEvent.setup();
     const search = vi.fn(async () => [

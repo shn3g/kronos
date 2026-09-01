@@ -620,6 +620,13 @@
   color: var(--ink);
 }
 
+.chat-bubble--user code {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 0.08);
+  font-size: 12px;
+}
+
 .chat-bubble__tool {
   margin: 0 0 6px;
   color: var(--muted);

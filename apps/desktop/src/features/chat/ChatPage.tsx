@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatClient, ChatMessage, ChatSession } from "./client";
 import { ChatMarkdown } from "./ChatMarkdown";
-import { insertMention, mentionQueryAtCursor, uniqueMentionPaths } from "./mentionQuery";
+import { insertMention, mentionQueryAtCursor, mentionSegments, uniqueMentionPaths } from "./mentionQuery";
 import { toolCardLabel } from "./toolCard";
 import type { IndexClient } from "../index/client";
 
@@ -320,6 +320,8 @@ export function ChatPage({
                 ) : null}
                 {item.role === "assistant" ? (
                   <ChatMarkdown source={item.content} />
+                ) : item.role === "user" ? (
+                  <UserMentionText content={item.content} />
                 ) : (
                   <p>{item.content}</p>
                 )}
@@ -439,5 +441,19 @@ export function ChatPage({
         </div>
       </section>
     </div>
+  );
+}
+
+function UserMentionText({ content }: { content: string }) {
+  return (
+    <p>
+      {mentionSegments(content).map((part, index) =>
+        part.kind === "path" ? (
+          <code key={`${part.value}:${index}`}>{part.value}</code>
+        ) : (
+          <span key={`${part.value}:${index}`}>{part.value}</span>
+        ),
+      )}
+    </p>
   );
 }
