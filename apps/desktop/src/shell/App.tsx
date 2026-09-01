@@ -19,7 +19,7 @@ import {
   type ModelsClient,
 } from "../features/models/client";
 import { plannerDisplayName } from "../features/models/plannerLabel";
-import { IndexPage } from "../features/index/IndexPage";
+import { FilesPage } from "../features/files/FilesPage";
 import { createProductionIndexClient, type IndexClient } from "../features/index/client";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import {
@@ -372,9 +372,16 @@ export function App({
                   />
                 </div>
               ) : null}
-              {activity === "index" ? (
-                <div className="app-main__panel">
-                  <IndexPage engineClient={engine} />
+              {activity === "files" ? (
+                <div className="app-main__panel app-main__panel--files">
+                  <FilesPage
+                    engineClient={engine}
+                    repositoryId={session.workspaceId}
+                    repositoriesClient={repos}
+                    onOpenWorkspace={() => {
+                      setActivity("workspaces");
+                    }}
+                  />
                 </div>
               ) : null}
               {activity === "settings" ? (

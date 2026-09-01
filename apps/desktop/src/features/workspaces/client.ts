@@ -41,6 +41,16 @@ export interface WorkspaceFileChange {
   fromChat: boolean;
 }
 
+export interface WorkspaceListedFile {
+  path: string;
+}
+
+export interface WorkspaceFileContents {
+  path: string;
+  content: string;
+  binary: boolean;
+}
+
 export interface RepositoriesClient {
   list(): Promise<EnrolledRepository[]>;
   inspect(path: string): Promise<InspectResult>;
@@ -51,6 +61,8 @@ export interface RepositoriesClient {
   revertWrite(id: string, path: string): Promise<void>;
   listChanges(id: string): Promise<WorkspaceFileChange[]>;
   commitFiles(id: string, message: string, paths: string[]): Promise<void>;
+  listWorkspaceFiles(id: string): Promise<WorkspaceListedFile[]>;
+  readWorkspaceFile(id: string, path: string): Promise<WorkspaceFileContents>;
 }
 
 export async function pickRepositoryFolder(): Promise<string | null> {
@@ -106,6 +118,25 @@ export function createProductionRepositoriesClient(
     },
     async commitFiles(id: string, message: string, paths: string[]) {
       await jsonRequest(request, "POST", `/repositories/${id}/commits`, { message, paths });
+    },
+    async listWorkspaceFiles(id: string) {
+      const payload = await jsonRequest(request, "GET", `/repositories/${id}/files`);
+      const files = Array.isArray(payload.files) ? payload.files : [];
+      return files
+        .map((raw) => ({ path: stringField(asRecord(raw), "path") }))
+        .filter((item) => item.path !== "");
+    },
+    async readWorkspaceFile(id: string, path: string) {
+      const payload = await jsonRequest(
+        request,
+        "GET",
+        `/repositories/${id}/files/contents?path=${encodeURIComponent(path)}`,
+      );
+      return {
+        path: stringField(payload, "path") || path,
+        content: stringField(payload, "content"),
+        binary: payload.binary === true,
+      };
     },
   };
 }

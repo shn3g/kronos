@@ -101,6 +101,8 @@ function quietRepos(): RepositoriesClient {
     revertWrite: unused,
     listChanges: async () => [],
     commitFiles: unused,
+    listWorkspaceFiles: async () => [],
+    readWorkspaceFile: unused,
   };
 }
 
@@ -355,6 +357,13 @@ describe("App shell", () => {
     expect(screen.getByRole("tab", { name: /goals/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /health/i })).toBeInTheDocument();
     expect(screen.queryByText(/engineering OS/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^files$/i }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Files" })).toBeInTheDocument();
+    expect(
+      screen.getByText(/open a git folder from workspaces to browse files here/i),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^chat$/i }));
 
     await user.click(screen.getByRole("menuitem", { name: /^View$/ }));
     await user.click(screen.getByRole("menuitem", { name: /chat history/i }));

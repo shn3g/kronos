@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-export type ActivityId = "chat" | "workspaces" | "index" | "settings";
+export type ActivityId = "chat" | "workspaces" | "files" | "settings";
 
 interface ActivityBarProps {
   active: ActivityId;
@@ -11,7 +11,7 @@ interface ActivityBarProps {
 const ITEMS: { id: ActivityId; label: string; icon: string }[] = [
   { id: "chat", label: "Chat", icon: "M4 5h16v10H7l-3 3z" },
   { id: "workspaces", label: "Workspaces", icon: "M4 6h7v12H4zM13 6h7v5h-7zM13 13h7v5h-7z" },
-  { id: "index", label: "Index", icon: "M6 4h12v3H6zM6 10.5h12v3H6zM6 17h12v3H6z" },
+  { id: "files", label: "Files", icon: "M4 7h6l2 2h8v9H4z" },
 ];
 
 export function ActivityBar({ active, collapsed = false, onSelect }: ActivityBarProps) {

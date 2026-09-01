@@ -46,9 +46,9 @@ export const ROUTES = [
   },
   {
     path: "/index",
-    name: "Index",
-    heading: "Index",
-    summary: "Per-repository hybrid index status and fail-closed search.",
+    name: "Files",
+    heading: "Files",
+    summary: "Read-only tree of the current workspace, with fail-closed search still available from chat.",
   },
   {
     path: "/connections",

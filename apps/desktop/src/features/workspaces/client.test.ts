@@ -116,4 +116,37 @@ describe("createProductionRepositoriesClient", () => {
       client.commitFiles("repo_alpha", "Fix App", ["src/App.tsx"]),
     ).resolves.toBeUndefined();
   });
+
+  it("lists workspace files from the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path) => {
+      expect(method).toBe("GET");
+      expect(path).toBe("/repositories/repo_alpha/files");
+      return {
+        status: 200,
+        body: JSON.stringify({ files: [{ path: "src/app.py" }, { path: "README.md" }] }),
+      };
+    });
+
+    await expect(client.listWorkspaceFiles("repo_alpha")).resolves.toEqual([
+      { path: "src/app.py" },
+      { path: "README.md" },
+    ]);
+  });
+
+  it("reads a workspace file through the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path) => {
+      expect(method).toBe("GET");
+      expect(path).toBe("/repositories/repo_alpha/files/contents?path=src%2Fapp.py");
+      return {
+        status: 200,
+        body: JSON.stringify({ path: "src/app.py", content: "print(1)\n", binary: false }),
+      };
+    });
+
+    await expect(client.readWorkspaceFile("repo_alpha", "src/app.py")).resolves.toEqual({
+      path: "src/app.py",
+      content: "print(1)\n",
+      binary: false,
+    });
+  });
 });

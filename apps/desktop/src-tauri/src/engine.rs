@@ -399,8 +399,13 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
                     | ("GET", Some("index"))
                     | ("GET", Some("index/search"))
                     | ("GET", Some("index/map"))
+                    | ("GET", Some("changes"))
+                    | ("GET", Some("files"))
+                    | ("GET", Some("files/contents"))
                     | ("POST", Some("index/rebuild"))
                     | ("POST", Some("index/refresh"))
+                    | ("POST", Some("commits"))
+                    | ("POST", Some("writes/revert"))
                     | ("POST", Some("pause" | "disable" | "remove" | "re-enrol" | "resume"))
             )
         }
@@ -925,6 +930,14 @@ mod tests {
         assert!(engine_path_allowed("POST", "/repositories/repo_alpha/index/rebuild"));
         assert!(engine_path_allowed("POST", "/repositories/repo_alpha/index/refresh"));
         assert!(engine_path_allowed("GET", "/repositories/repo_alpha/index/map"));
+        assert!(engine_path_allowed("GET", "/repositories/repo_alpha/files"));
+        assert!(engine_path_allowed(
+            "GET",
+            "/repositories/repo_alpha/files/contents?path=src%2Fapp.py"
+        ));
+        assert!(engine_path_allowed("GET", "/repositories/repo_alpha/changes"));
+        assert!(engine_path_allowed("POST", "/repositories/repo_alpha/commits"));
+        assert!(engine_path_allowed("POST", "/repositories/repo_alpha/writes/revert"));
         assert!(!engine_path_allowed("DELETE", "/repositories/repo_alpha/index"));
         assert!(engine_path_allowed("GET", "/goals"));
         assert!(engine_path_allowed("POST", "/goals"));

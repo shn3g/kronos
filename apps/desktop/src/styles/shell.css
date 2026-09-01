@@ -104,8 +104,129 @@
   padding: 0;
 }
 
-.app-main__panel--settings {
-  max-width: 44rem;
+.app-main__panel--files {
+  display: flex;
+  overflow: hidden;
+  flex-direction: column;
+  padding: 20px 24px 24px;
+}
+
+.files-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  height: 100%;
+}
+
+.files-page__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.files-page__filter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 12rem;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.files-page__filter input {
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--void);
+  color: var(--ink);
+}
+
+.files-page__split {
+  display: grid;
+  grid-template-columns: minmax(11rem, 17rem) minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+  flex: 1;
+}
+
+.files-page__pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--void-raised);
+}
+
+.files-page__tree {
+  min-height: 0;
+  overflow: auto;
+  padding: 6px;
+}
+
+.files-page__item {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  padding-left: calc(8px + (var(--tree-depth, 0) * 12px));
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--body);
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.files-page__item:hover {
+  color: var(--ink);
+  background: rgb(255 255 255 / 0.05);
+}
+
+.files-page__item[aria-selected="true"] {
+  color: var(--ink);
+  background: rgb(255 255 255 / 0.08);
+}
+
+.files-page__preview-kicker {
+  margin: 0;
+  padding: 10px 12px 0;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.files-page__status {
+  margin: 0;
+  padding: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.files-page__preview-body {
+  margin: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 12px 14px;
+  color: var(--ink);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 768px) {
+  .files-page__split {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(9rem, 38%) minmax(0, 1fr);
+  }
 }
 
 .app-main__panel[hidden] {

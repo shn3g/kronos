@@ -38,6 +38,10 @@ function repos(listImpl?: RepositoriesClient["list"]): RepositoriesClient {
     commitFiles: async () => {
       throw new Error("commit should not run");
     },
+    listWorkspaceFiles: async () => [],
+    readWorkspaceFile: async () => {
+      throw new Error("read should not run");
+    },
   };
 }
 
@@ -97,6 +101,10 @@ describe("WorkspacesPage", () => {
       revertWrite: async () => undefined,
       listChanges: async () => [],
       commitFiles: async () => undefined,
+      listWorkspaceFiles: async () => [],
+      readWorkspaceFile: async () => {
+        throw new Error("read should not run");
+      },
     };
 
     render(
@@ -191,6 +199,10 @@ describe("WorkspacesPage", () => {
       listChanges: async () => [],
       commitFiles: async () => {
         throw new Error("commit should not run");
+      },
+      listWorkspaceFiles: async () => [],
+      readWorkspaceFile: async () => {
+        throw new Error("read should not run");
       },
     };
 
