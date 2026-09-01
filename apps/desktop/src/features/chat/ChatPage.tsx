@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ChatClient, ChatMessage, ChatSession } from "./client";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { chatContextMeterLabel, chatContextUsage, chatContextWarning } from "./contextMeter";
+import { CopyTextButton } from "./CopyTextButton";
 import { appendMention, insertMention, mentionQueryAtCursor, mentionSegments, uniqueMentionPaths } from "./mentionQuery";
 import { toolCardLabel } from "./toolCard";
 import type { IndexClient } from "../index/client";
@@ -343,7 +344,10 @@ export function ChatPage({
                   <>
                     <p className="chat-bubble__tool">{toolCardLabel(item.toolName, item.toolStatus)}</p>
                     {item.toolName === "run_command" ? (
-                      <pre className="chat-bubble__output">{item.content}</pre>
+                      <div className="chat-bubble__output-wrap">
+                        <CopyTextButton text={item.content} idleLabel="Copy output" />
+                        <pre className="chat-bubble__output">{item.content}</pre>
+                      </div>
                     ) : (
                       <p>{item.content}</p>
                     )}

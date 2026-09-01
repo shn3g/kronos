@@ -167,6 +167,7 @@ describe("ChatPage", () => {
     expect(await screen.findByText("Run command · done")).toBeInTheDocument();
     const output = screen.getByText(/3 passed/i);
     expect(output.tagName).toBe("PRE");
+    expect(screen.getByRole("button", { name: /^copy output$/i })).toBeInTheDocument();
   });
 
   it("opens models when the composer model name is chosen", async () => {
@@ -476,6 +477,7 @@ describe("ChatPage", () => {
     expect(await screen.findByText("missing")).toBeInTheDocument();
     expect(screen.getByText("missing").tagName).toBe("STRONG");
     expect(screen.getByText("const ok = false;")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^copy$/i })).toBeInTheDocument();
   });
 
   it("renders @ file mentions in the user bubble as code", async () => {

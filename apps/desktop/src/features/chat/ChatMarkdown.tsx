@@ -2,6 +2,7 @@
 
 import type { ChatMarkdownBlock, ChatMarkdownSpan } from "./renderChatMarkdown";
 import { renderChatMarkdown } from "./renderChatMarkdown";
+import { CopyTextButton } from "./CopyTextButton";
 
 interface ChatMarkdownProps {
   source: string;
@@ -21,9 +22,15 @@ export function ChatMarkdown({ source }: ChatMarkdownProps) {
 function MarkdownBlock({ block }: { block: ChatMarkdownBlock }) {
   if (block.type === "code") {
     return (
-      <pre className="chat-md__pre">
-        <code>{block.text}</code>
-      </pre>
+      <div className="chat-md__code">
+        <div className="chat-md__code-bar">
+          {block.language ? <span className="chat-md__lang">{block.language}</span> : <span />}
+          <CopyTextButton text={block.text} idleLabel="Copy" />
+        </div>
+        <pre className="chat-md__pre">
+          <code>{block.text}</code>
+        </pre>
+      </div>
     );
   }
   if (block.type === "heading") {
