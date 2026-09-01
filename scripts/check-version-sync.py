@@ -82,12 +82,30 @@ def _dunder_version(path: Path) -> str:
     return _regex_version(path, PY_VERSION_RE, "__version__")
 
 
+def _cargo_lock_kronos_version(path: Path) -> str:
+    payload = tomllib.loads(path.read_text(encoding="utf-8"))
+    packages = payload.get("package")
+    if not isinstance(packages, list):
+        raise VersionReadError(f"{path}: missing package list")
+    found = [
+        pkg.get("version")
+        for pkg in packages
+        if isinstance(pkg, dict) and pkg.get("name") == "kronos"
+    ]
+    versions = [value for value in found if isinstance(value, str) and value.strip() != ""]
+    unique = sorted(set(versions))
+    if len(unique) != 1:
+        raise VersionReadError(f"{path}: missing or mixed kronos version {unique}")
+    return unique[0]
+
+
 LOCKSTEP: tuple[tuple[str, Callable[[Path], str]], ...] = (
     ("package.json", _json_version),
     ("pyproject.toml", _toml_project_version),
     ("apps/desktop/package.json", _json_version),
     ("apps/desktop/src-tauri/tauri.conf.json", _json_version),
     ("apps/desktop/src-tauri/Cargo.toml", _toml_package_version),
+    ("apps/desktop/src-tauri/Cargo.lock", _cargo_lock_kronos_version),
     ("apps/desktop/src-tauri/src/engine.rs", _client_version),
     ("apps/desktop/src/api/kronosClient.ts", _desktop_client_version),
     ("engine/pyproject.toml", _toml_project_version),
@@ -189,6 +207,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tag")
     args = parser.parse_args(argv)
     root = Path(args.root)
+    github_ref = args.tag or os.environ.get("GITHUB_REF") or os.environ.get("GITHUB_REF_NAME")
+    errors = collect_errors(root, github_ref=github_ref)
+    if errors:
+        print("\n".join(errors), file=sys.stderr)
+        return 1
     if args.write_release_notes:
         tag = args.tag or os.environ.get("GITHUB_REF_NAME") or os.environ.get("GITHUB_REF") or ""
         version = _version_from_tag(tag)
@@ -200,11 +223,6 @@ def main(argv: list[str] | None = None) -> int:
         Path(args.write_release_notes).write_text(
             build_release_notes(changelog, version), encoding="utf-8"
         )
-        return 0
-    errors = collect_errors(root, github_ref=os.environ.get("GITHUB_REF"))
-    if errors:
-        print("\n".join(errors), file=sys.stderr)
-        return 1
     return 0
 
 

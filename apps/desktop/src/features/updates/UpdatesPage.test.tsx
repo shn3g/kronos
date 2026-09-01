@@ -2,6 +2,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { DESKTOP_CLIENT_VERSION } from "../../api/kronosClient";
 import type { EngineClient } from "../../engine/client";
 import { UpdatesPage, type UpdatesPageClients } from "./UpdatesPage";
 
@@ -59,7 +60,11 @@ describe("UpdatesPage", () => {
 
   it("shows checksums and unsigned status when ready", async () => {
     render(<UpdatesPage engineClient={engine("ready")} updatesClient={clients()} />);
-    expect(await screen.findByText(/0\.2\.0/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        `Engine ${DESKTOP_CLIENT_VERSION}. Desktop ${DESKTOP_CLIENT_VERSION}.`,
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText(/not signed/i)).toBeInTheDocument();
     expect(screen.getByText(/checksums/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /rollback/i })).toBeInTheDocument();
