@@ -66,6 +66,23 @@ def test_assignments_require_all_five_roles(tmp_path: Path) -> None:
     assert assigned.embedding == profile.id
 
 
+def test_register_provider_persists_preset_model_id_on_profiles(tmp_path: Path) -> None:
+    service, _store = _service(tmp_path)
+    service.register_provider(
+        ProviderDraft(
+            kind="openai_compatible",
+            display_name="OpenAI",
+            base_url="https://api.openai.com/v1",
+            billed=True,
+            api_key=None,
+            model_id="gpt-4o-mini",
+        )
+    )
+    profiles = service.list_profiles()
+    assert profiles
+    assert {item.model_id for item in profiles} == {"gpt-4o-mini"}
+
+
 def test_register_provider_seeds_five_role_profiles(tmp_path: Path) -> None:
     service, _store = _service(tmp_path)
     service.register_provider(

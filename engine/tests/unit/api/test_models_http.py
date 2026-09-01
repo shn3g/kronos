@@ -199,6 +199,30 @@ async def test_models_snapshot_reports_onnx_embedding_backend(
 
 
 @pytest.mark.asyncio
+async def test_create_provider_persists_preset_model_id(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    http, headers, _tmp_path = client
+    created = await http.post(
+        "/models/providers",
+        headers=headers,
+        json={
+            "kind": "openai_compatible",
+            "display_name": "OpenAI",
+            "base_url": "https://api.openai.com/v1",
+            "billed": True,
+            "model_id": "gpt-4o-mini",
+        },
+    )
+    assert created.status_code == 200
+    body = created.json()
+    assert body["profiles"]
+    assert {item["model_id"] for item in body["profiles"]} == {"gpt-4o-mini"}
+    snapshot = (await http.get("/models", headers=headers)).json()
+    assert {item["model_id"] for item in snapshot["profiles"]} == {"gpt-4o-mini"}
+
+
+@pytest.mark.asyncio
 async def test_update_profile_model_id_and_limits(
     client: tuple[AsyncClient, dict[str, str], Path],
 ) -> None:

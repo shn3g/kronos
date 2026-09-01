@@ -127,6 +127,69 @@ describe("createProductionModelsClient", () => {
     });
   });
 
+  it("sends model_id when creating a provider from a preset", async () => {
+    const client = createProductionModelsClient(async (method, path, body) => {
+      expect(method).toBe("POST");
+      expect(path).toBe("/models/providers");
+      expect(body).toEqual({
+        kind: "openai_compatible",
+        display_name: "OpenAI",
+        base_url: "https://api.openai.com/v1",
+        billed: true,
+        api_key: "sk-user-paste",
+        model_id: "gpt-4o-mini",
+      });
+      return {
+        status: 200,
+        body: JSON.stringify({
+          provider: {
+            id: "prov_1",
+            kind: "openai_compatible",
+            display_name: "OpenAI",
+            billed: true,
+          },
+          profiles: [
+            {
+              id: "prof_coder",
+              display_name: "OpenAI (coder)",
+              role: "coder",
+              billed: true,
+              model_id: "gpt-4o-mini",
+            },
+          ],
+        }),
+      };
+    });
+
+    await expect(
+      client.createProvider({
+        kind: "openai_compatible",
+        displayName: "OpenAI",
+        baseUrl: "https://api.openai.com/v1",
+        billed: true,
+        apiKey: "sk-user-paste",
+        modelId: "gpt-4o-mini",
+      }),
+    ).resolves.toEqual({
+      provider: {
+        id: "prov_1",
+        kind: "openai_compatible",
+        displayName: "OpenAI",
+        billed: true,
+      },
+      profiles: [
+        {
+          id: "prof_coder",
+          displayName: "OpenAI (coder)",
+          role: "coder",
+          billed: true,
+          modelId: "gpt-4o-mini",
+          limits: { maxTokens: 0, maxAttempts: 0, timeoutSeconds: 0, costCeiling: 0 },
+        },
+      ],
+    });
+  });
+
   it("registers a local provider through POST /models/providers", async () => {
     const client = createProductionModelsClient(async (method, path, body) => {
       expect(method).toBe("POST");

@@ -31,6 +31,7 @@ export interface ProviderDraft {
   baseUrl: string | null;
   billed: boolean;
   apiKey?: string | null;
+  modelId?: string | null;
 }
 
 export interface CreatedProvider {
@@ -100,6 +101,7 @@ export function createProductionModelsClient(
         base_url: draft.baseUrl,
         billed: draft.billed,
         ...(draft.apiKey ? { api_key: draft.apiKey } : {}),
+        ...(draft.modelId ? { model_id: draft.modelId } : {}),
       });
       return mapCreatedProvider(payload);
     },

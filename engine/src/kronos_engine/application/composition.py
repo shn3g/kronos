@@ -31,8 +31,9 @@ from kronos_engine.config.repository import github_owner_repo
 from kronos_engine.config.settings import Settings
 from kronos_engine.domain.attestations import ATTESTATION_HMAC_KEY_REF, ATTESTATION_VERIFY_KEY_REF
 from kronos_engine.indexing.service import IndexingService
-from kronos_engine.ports.executor import Executor
+from kronos_engine.ports.executor import Executor, ExecutorRequest, ExecutorResult
 from kronos_engine.ports.forge import ForgeAuthError, ForgeTarget
+from kronos_engine.ports.sandbox import Sandbox
 from kronos_engine.ports.secrets import SecretStore
 from kronos_engine.skills.catalog import SkillCatalog, bundled_skills_root
 from kronos_engine.state.event_store import SqliteEventStore
@@ -82,7 +83,7 @@ def build_goal_engine(
     goals = GoalService(store, repos, recorder, notifications=notifications)
     indexed = IndexedPlanner(indexer)
     chosen_planner = planner or LlmPlanner(registry, secrets, indexed)
-    chosen_executor = executor or _executor_from_repos(repos)
+    chosen_executor = executor or RepositoryPolicyExecutor(repos)
     chosen_gates = gates or ProcessGateRunner()
     chosen_forge = forge if forge is not None else _controller_forge(
         conn, settings, secrets, github_http, repos
@@ -140,14 +141,15 @@ def select_executor(profile: str) -> Executor:
     return ControlledOpenExecutor()
 
 
-def _executor_from_repos(repos: RepositoryService) -> Executor:
-    chosen = "controlled"
-    for record in repos.list():
-        name = record.policy.executor.profile
-        if name in {"cursor", "opencode"}:
-            chosen = name
-            break
-    return select_executor(chosen)
+class RepositoryPolicyExecutor:
+    """Route each dispatch to the executor required by that task's repository policy."""
+
+    def __init__(self, repos: RepositoryService) -> None:
+        self._repos = repos
+
+    def run(self, request: ExecutorRequest, sandbox: Sandbox) -> ExecutorResult:
+        record = self._repos.get(request.repository_id)
+        return select_executor(record.policy.executor.profile).run(request, sandbox)
 
 
 def _attestation_key(secrets: SecretStore) -> bytes:

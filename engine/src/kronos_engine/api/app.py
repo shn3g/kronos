@@ -663,6 +663,7 @@ def create_app(
                     base_url=body.base_url,
                     billed=body.billed,
                     api_key=body.api_key,
+                    model_id=body.model_id,
                 )
             )
             profiles = [

@@ -289,6 +289,7 @@ describe("ModelsPage", () => {
       baseUrl: "https://api.openai.com/v1",
       billed: true,
       apiKey: "sk-user-paste",
+      modelId: "gpt-4o-mini",
     });
     await user.click(screen.getByRole("button", { name: /^ollama$/i }));
     expect(screen.getByLabelText(/base url/i)).toHaveValue("http://127.0.0.1:11434/v1");

@@ -57,6 +57,8 @@ def _opencode(_tmp_path: Path) -> Executor:
     ) -> CliResult:
         assert "run" in argv
         assert "--dir" in argv
+        assert "--artifact" in argv
+        assert SYNTHETIC_ARTIFACT in argv
         assert env.get("GH_TOKEN") is None
         assert env.get("KRONOS_AUTH_TOKEN") is None
         _ = cwd
@@ -142,6 +144,52 @@ def test_cursor_run_fails_when_stdout_empty_and_worker_did_not_write(tmp_path: P
     result = executor.run(synthetic_request(worktree), sandbox)
     assert result.status == "failed"
     assert not (worktree / "artifacts" / "hello.txt").exists()
+
+
+def test_opencode_keeps_worker_written_artifact_when_stdout_is_chatter(tmp_path: Path) -> None:
+    def invoke(
+        argv: list[str], env: dict[str, str], cwd: Path, timeout: float
+    ) -> CliResult:
+        assert "--artifact" in argv
+        assert SYNTHETIC_ARTIFACT in argv
+        _ = env
+        _ = timeout
+        artifact = cwd / "artifacts" / "hello.txt"
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text(SYNTHETIC_CONTENT, encoding="utf-8")
+        return CliResult(returncode=0, stdout="session chatter from opencode\n", stderr="")
+
+    executor = OpencodeExecutor(
+        which=lambda name: "C:/fake/opencode" if name == "opencode" else None,
+        invoke=invoke,
+    )
+    worktree = tmp_path / "wt"
+    sandbox = ProcessJailSandbox(worktree)
+    result = executor.run(synthetic_request(worktree), sandbox)
+    assert result.status == "succeeded"
+    assert (worktree / "artifacts" / "hello.txt").read_text(encoding="utf-8") == SYNTHETIC_CONTENT
+
+
+def test_opencode_writes_stdout_when_cli_succeeds_without_file(tmp_path: Path) -> None:
+    def invoke(
+        argv: list[str], env: dict[str, str], cwd: Path, timeout: float
+    ) -> CliResult:
+        assert "--artifact" in argv
+        assert SYNTHETIC_ARTIFACT in argv
+        _ = env
+        _ = cwd
+        _ = timeout
+        return CliResult(returncode=0, stdout=SYNTHETIC_CONTENT, stderr="")
+
+    executor = OpencodeExecutor(
+        which=lambda name: "C:/fake/opencode" if name == "opencode" else None,
+        invoke=invoke,
+    )
+    worktree = tmp_path / "wt"
+    sandbox = ProcessJailSandbox(worktree)
+    result = executor.run(synthetic_request(worktree), sandbox)
+    assert result.status == "succeeded"
+    assert (worktree / "artifacts" / "hello.txt").read_text(encoding="utf-8") == SYNTHETIC_CONTENT
 
 
 def test_cursor_run_succeeds_when_worker_writes_artifact_without_stdout(tmp_path: Path) -> None:

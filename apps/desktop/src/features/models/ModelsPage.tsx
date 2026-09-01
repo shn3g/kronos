@@ -182,6 +182,7 @@ export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
         baseUrl: providerForm.baseUrl || null,
         billed: providerForm.billed,
         apiKey: providerForm.apiKey || null,
+        modelId: providerForm.modelId,
       });
       const next: ModelsSnapshot = {
         detected: snapshot?.detected ?? [],

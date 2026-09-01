@@ -30,6 +30,7 @@ class ProviderDraft:
     base_url: str | None
     billed: bool
     api_key: str | None = None
+    model_id: str | None = None
 
 
 class ModelProfileService:
@@ -52,6 +53,7 @@ class ModelProfileService:
         self._registry.save_provider(provider)
         if draft.api_key:
             self._secrets.put(secret_ref, draft.api_key)
+        model_id = draft.model_id or "default"
         for role in MODEL_ROLES:
             self._registry.save_profile(
                 ModelProfile(
@@ -59,7 +61,7 @@ class ModelProfileService:
                     display_name=f"{draft.display_name} ({role})",
                     role=role,
                     provider_id=provider_id,
-                    model_id="default",
+                    model_id=model_id,
                     billed=draft.billed,
                     approved_fallbacks=(),
                     limits=DEFAULT_LIMITS,

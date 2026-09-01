@@ -210,6 +210,7 @@ class ProviderCreateRequest(BaseModel):
     base_url: str | None = None
     billed: bool = False
     api_key: str | None = None
+    model_id: str | None = None
 
 
 class ProviderCreateResponse(BaseModel):

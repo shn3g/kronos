@@ -72,6 +72,8 @@ class OpencodeExecutor:
             "run",
             "--dir",
             str(request.worktree),
+            "--artifact",
+            request.context.expected_artifact,
             request.context.story,
         ]
         result = self._invoke(argv, env, request.worktree, request.limits.timeout_seconds)
@@ -83,10 +85,16 @@ class OpencodeExecutor:
                 error=result.stderr or "opencode CLI failed",
             )
         artifact = sandbox.resolve(request.context.expected_artifact)
-        worker_wrote = artifact.is_file()
+        worker_wrote = artifact.is_file() and artifact.stat().st_size > 0
+        if worker_wrote:
+            return ExecutorResult(
+                status="succeeded",
+                artifacts=(request.context.expected_artifact,),
+                usage=_usage(1),
+            )
         if result.stdout:
             sandbox.write_text(request.context.expected_artifact, result.stdout)
-        elif not worker_wrote:
+        else:
             return ExecutorResult(
                 status="failed",
                 artifacts=(),
