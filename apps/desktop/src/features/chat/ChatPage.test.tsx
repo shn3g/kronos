@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineClient } from "../../engine/client";
 import { ChatPage, type ChatPageClients } from "./ChatPage";
-import type { ChatStreamHandlers } from "./client";
+import type { ChatStreamHandlers, ConversationDetail } from "./client";
 
 function engine(status: "unavailable" | "starting" | "ready"): EngineClient {
   if (status === "ready") {
@@ -166,6 +166,83 @@ describe("ChatPage", () => {
     expect(await screen.findByText("Thinking")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^stop$/i }));
     expect(cancelStream).toHaveBeenCalled();
+  });
+
+  it("keeps optimistic and streamed messages when a late conversation load resolves", async () => {
+    const user = userEvent.setup();
+    let resolveLoad: (detail: ConversationDetail) => void = () => {};
+    const getConversation = vi.fn(
+      () =>
+        new Promise<ConversationDetail>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    let finishStream: () => void = () => {};
+    const streamMessage = vi.fn((_id: string, _content: string, handlers: ChatStreamHandlers) => {
+      handlers.onDelta("Streamed hello");
+      return new Promise<void>((resolve) => {
+        finishStream = () => {
+          handlers.onDone({
+            content: "Streamed hello",
+            citations: [],
+            goalRefs: [],
+          });
+          resolve();
+        };
+      });
+    });
+    render(
+      <ChatPage
+        engineClient={engine("ready")}
+        chatClient={clients({ getConversation, streamMessage })}
+      />,
+    );
+
+    await screen.findByText("Ask alpha");
+    await user.type(screen.getByLabelText(/message/i), "Hello now");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+
+    expect(await screen.findByText("Hello now")).toBeInTheDocument();
+    expect(await screen.findByText("Streamed hello")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveLoad({
+        conversation: {
+          id: "conv_1",
+          repositoryId: "repo_alpha",
+          title: "Ask alpha",
+          createdAt: "2026-09-01T12:00:00Z",
+        },
+        messages: [
+          {
+            id: "msg_user",
+            role: "user",
+            content: "What is add?",
+            citations: [],
+            goalRefs: [],
+          },
+          {
+            id: "msg_asst",
+            role: "assistant",
+            content: "add returns a+b",
+            citations: [],
+            goalRefs: [],
+          },
+        ],
+      });
+    });
+
+    expect(screen.getByText("Hello now")).toBeInTheDocument();
+    expect(screen.getByText("Streamed hello")).toBeInTheDocument();
+    expect(screen.queryByText("What is add?")).not.toBeInTheDocument();
+
+    await act(async () => {
+      finishStream();
+    });
+
+    expect(screen.getByText("Hello now")).toBeInTheDocument();
+    expect(screen.getByText("Streamed hello")).toBeInTheDocument();
+    expect(screen.queryByText("What is add?")).not.toBeInTheDocument();
   });
 
   it("shows Models guidance when the orchestrator is not configured", async () => {

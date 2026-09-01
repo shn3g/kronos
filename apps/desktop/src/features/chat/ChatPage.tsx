@@ -51,6 +51,8 @@ export function ChatPage({ engineClient, chatClient }: ChatPageProps) {
   const requestIdRef = useRef<string | null>(null);
   const selectedConvRef = useRef(selectedConvId);
   selectedConvRef.current = selectedConvId;
+  const loadGenerationRef = useRef(0);
+  const skipReloadForConvRef = useRef<string | null>(null);
 
   const goalIds = useMemo(() => {
     const ids = new Set<string>();
@@ -122,9 +124,17 @@ export function ChatPage({ engineClient, chatClient }: ChatPageProps) {
     if (!ready || !selectedConvId) {
       return;
     }
+    const generation = loadGenerationRef.current;
+    const convId = selectedConvId;
     let cancelled = false;
-    void client.getConversation(selectedConvId).then((detail) => {
-      if (cancelled || selectedConvRef.current !== selectedConvId) {
+    void client.getConversation(convId).then((detail) => {
+      if (cancelled || selectedConvRef.current !== convId) {
+        return;
+      }
+      if (loadGenerationRef.current !== generation) {
+        return;
+      }
+      if (skipReloadForConvRef.current === convId) {
         return;
       }
       setMessages(detail.messages);
@@ -174,6 +184,11 @@ export function ChatPage({ engineClient, chatClient }: ChatPageProps) {
     );
   }
 
+  function allowConversationReload() {
+    skipReloadForConvRef.current = null;
+    loadGenerationRef.current += 1;
+  }
+
   async function onNewConversation() {
     if (!selectedRepoId) {
       return;
@@ -181,6 +196,7 @@ export function ChatPage({ engineClient, chatClient }: ChatPageProps) {
     setError(null);
     try {
       const created = await client.createConversation(selectedRepoId);
+      allowConversationReload();
       setConversations((current) => [created, ...current]);
       setSelectedConvId(created.id);
       setMessages([]);
@@ -197,6 +213,7 @@ export function ChatPage({ engineClient, chatClient }: ChatPageProps) {
     setError(null);
     try {
       await client.deleteConversation(id);
+      allowConversationReload();
       const remaining = conversations.filter((item) => item.id !== id);
       setConversations(remaining);
       const nextId = remaining[0]?.id || "";
@@ -231,6 +248,8 @@ export function ChatPage({ engineClient, chatClient }: ChatPageProps) {
     }
     const requestId = crypto.randomUUID();
     requestIdRef.current = requestId;
+    skipReloadForConvRef.current = conversationId;
+    loadGenerationRef.current += 1;
     const userMessage: ChatMessage = {
       id: `local-user-${requestId}`,
       role: "user",
@@ -312,6 +331,7 @@ export function ChatPage({ engineClient, chatClient }: ChatPageProps) {
               id="chat-repo"
               value={selectedRepoId}
               onChange={(event) => {
+                allowConversationReload();
                 setSelectedRepoId(event.target.value);
                 setSelectedConvId("");
                 setMessages([]);
@@ -352,6 +372,9 @@ export function ChatPage({ engineClient, chatClient }: ChatPageProps) {
                     className="workspace-card"
                     aria-current={item.id === selectedConvId ? "true" : undefined}
                     onClick={() => {
+                      if (skipReloadForConvRef.current !== item.id) {
+                        allowConversationReload();
+                      }
                       setSelectedConvId(item.id);
                     }}
                   >

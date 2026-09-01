@@ -49,6 +49,7 @@ struct EngineInner {
     ui_state: EngineUiState,
 }
 
+#[derive(Clone)]
 pub struct EngineSupervisor {
     inner: Arc<Mutex<EngineInner>>,
 }
@@ -165,9 +166,9 @@ pub fn engine_json(
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct StreamCancels {
-    inner: Mutex<HashSet<String>>,
+    inner: Arc<Mutex<HashSet<String>>>,
 }
 
 impl StreamCancels {
@@ -228,24 +229,29 @@ enum SseDataEvent {
 }
 
 #[tauri::command]
-pub fn engine_stream(
+pub async fn engine_stream(
     app: AppHandle,
-    state: State<EngineSupervisor>,
-    cancels: State<StreamCancels>,
+    state: State<'_, EngineSupervisor>,
+    cancels: State<'_, StreamCancels>,
     method: String,
     path: String,
     body: Option<serde_json::Value>,
     request_id: String,
 ) {
-    run_engine_stream(
-        &app,
-        &state,
-        &cancels,
-        &method,
-        &path,
-        body.as_ref(),
-        &request_id,
-    );
+    let supervisor = state.inner().clone();
+    let cancels = cancels.inner().clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        run_engine_stream(
+            &app,
+            &supervisor,
+            &cancels,
+            &method,
+            &path,
+            body.as_ref(),
+            &request_id,
+        );
+    })
+    .await;
 }
 
 #[tauri::command]
@@ -1503,6 +1509,29 @@ mod tests {
         assert!(!engine_path_allowed("GET", "/conversations/conv_abc/messages"));
         assert!(!engine_path_allowed("DELETE", "/repositories/repo_alpha/conversations"));
         assert!(!engine_path_allowed("POST", "/conversations/../secret/messages"));
+    }
+
+    #[test]
+    fn stream_cancel_flag_is_visible_to_a_worker_thread() {
+        let cancels = super::StreamCancels::default();
+        let worker = cancels.clone();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while std::time::Instant::now() < deadline {
+                if worker.is_cancelled("req-1") {
+                    return true;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            false
+        });
+        started_rx.recv().unwrap();
+        cancels.cancel("req-1");
+        assert!(handle.join().unwrap());
+        cancels.finish("req-1");
+        assert!(!cancels.is_cancelled("req-1"));
     }
 
     #[test]
