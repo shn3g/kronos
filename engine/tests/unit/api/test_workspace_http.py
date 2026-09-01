@@ -188,7 +188,60 @@ async def test_workspace_terminal_run_fail_closed(
     payload = ran.json()
     assert payload["exit_code"] == 0
     assert payload["timed_out"] is False
+    assert payload["cancelled"] is False
     assert "old" in payload["output"]
+
+
+@pytest.mark.asyncio
+async def test_workspace_terminal_cancel_stops_a_running_command(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    import asyncio
+
+    http, headers, repo = client
+    enrolled = await http.post("/repositories", headers=headers, json={"path": str(repo)})
+    assert enrolled.status_code == 200
+    repo_id = enrolled.json()["repository"]["id"]
+    (repo / "sleep.py").write_text(
+        "from pathlib import Path\nimport time\nPath('started.txt').write_text('1')\ntime.sleep(8)\n",
+        encoding="utf-8",
+    )
+
+    unauth = await http.post(f"/repositories/{repo_id}/terminal/runs/cancel")
+    assert unauth.status_code == 401
+
+    missing = await http.post("/repositories/repo_missing/terminal/runs/cancel", headers=headers)
+    assert missing.status_code == 404
+
+    idle = await http.post(f"/repositories/{repo_id}/terminal/runs/cancel", headers=headers)
+    assert idle.status_code == 200
+    assert idle.json()["ok"] is False
+
+    running = asyncio.create_task(
+        http.post(
+            f"/repositories/{repo_id}/terminal/runs",
+            headers=headers,
+            json={"command": f'"{sys.executable}" sleep.py'},
+            timeout=10,
+        )
+    )
+    started = repo / "started.txt"
+    for _ in range(80):
+        if started.exists():
+            break
+        await asyncio.sleep(0.05)
+    else:
+        running.cancel()
+        raise AssertionError("command did not start")
+
+    stopped = await http.post(f"/repositories/{repo_id}/terminal/runs/cancel", headers=headers)
+    assert stopped.status_code == 200
+    assert stopped.json()["ok"] is True
+    ran = await running
+    assert ran.status_code == 200
+    payload = ran.json()
+    assert payload["cancelled"] is True
+    assert payload["timed_out"] is False
 
 
 @pytest.mark.asyncio

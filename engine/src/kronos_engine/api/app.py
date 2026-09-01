@@ -76,6 +76,7 @@ from kronos_engine.api.models import (
     TelegramAllowlistRequest,
     TelegramStatusResponse,
     TelegramTokenRequest,
+    TerminalCancelResponse,
     TerminalRunRequest,
     TerminalRunResponse,
     VersionResponse,
@@ -120,7 +121,11 @@ from kronos_engine.application.workspace_changes import (
     mark_chat_writes,
 )
 from kronos_engine.application.workspace_files import list_workspace_files, read_workspace_file
-from kronos_engine.application.workspace_terminal import run_workspace_command
+from kronos_engine.application.workspace_terminal import (
+    cancel_workspace_command,
+    run_workspace_command,
+    terminal_run_key,
+)
 from kronos_engine.config.repository import (
     EnrolmentPreview,
     github_owner,
@@ -883,13 +888,30 @@ def create_app(
             raise HTTPException(status_code=400, detail="A command is required.")
         with repository_service() as repos:
             record = _load(repos, repository_id)
-        result = run_workspace_command(Path(record.realpath), command)
+        result = run_workspace_command(
+            Path(record.realpath),
+            command,
+            run_key=terminal_run_key(repository_id),
+        )
         return TerminalRunResponse(
             command=result["command"],
             exit_code=result["exit_code"],
             timed_out=result["timed_out"],
+            cancelled=result["cancelled"],
             output=result["output"],
         )
+
+    @app.post(
+        "/repositories/{repository_id}/terminal/runs/cancel",
+        response_model=TerminalCancelResponse,
+    )
+    def cancel_repository_terminal(
+        repository_id: str,
+        _: None = Depends(require_auth),
+    ) -> TerminalCancelResponse:
+        with repository_service() as repos:
+            _load(repos, repository_id)
+        return TerminalCancelResponse(ok=cancel_workspace_command(terminal_run_key(repository_id)))
 
     @app.get("/repositories/{repository_id}/index", response_model=IndexStatusResponse)
     def index_status(repository_id: str, _: None = Depends(require_auth)) -> IndexStatusResponse:

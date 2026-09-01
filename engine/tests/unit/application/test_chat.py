@@ -513,6 +513,48 @@ def test_run_command_caps_how_many_commands_run_in_one_turn(tmp_path: Path) -> N
     assert any("3 commands" in body for body in tool_bodies)
 
 
+def test_run_command_stops_when_the_turn_is_cancelled(tmp_path: Path) -> None:
+    import threading
+    import time
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    command = _python_script(
+        repo,
+        "sleep.py",
+        "from pathlib import Path\nimport time\nPath('started.txt').write_text('1')\ntime.sleep(8)\n",
+    )
+    fence = "```tool\n" + json.dumps({"name": "run_command", "command": command}) + "\n```"
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    service = ChatService(
+        SqliteChatStore(conn),
+        ScriptedCompleter([fence, "Should not keep going."]),
+        repos=_RepoLookup(repo),
+    )
+    session = service.create_session()
+    started = repo / "started.txt"
+
+    def stop_after_start() -> None:
+        for _ in range(80):
+            if started.exists():
+                request_cancel(session.id)
+                return
+            time.sleep(0.05)
+        raise AssertionError("command did not start")
+
+    stopper = threading.Thread(target=stop_after_start)
+    stopper.start()
+    began = time.monotonic()
+    messages = service.send_message(session.id, "Run sleep", repository_id="repo_alpha")
+    stopper.join(timeout=2)
+
+    assert time.monotonic() - began < 4
+    tool = next(item for item in messages if item.tool_name == "run_command")
+    assert "Stopped." in tool.content
+    assert not any("Should not keep going." in item.content for item in messages)
+
+
 def test_send_message_attaches_workspace_instructions_to_system_prompt(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()

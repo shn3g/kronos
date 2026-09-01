@@ -76,3 +76,39 @@ def test_run_workspace_command_times_out(tmp_path: Path) -> None:
 
     assert result["timed_out"] is True
     assert result["exit_code"] is None
+    assert result["cancelled"] is False
+
+
+def test_run_workspace_command_stops_when_cancelled(tmp_path: Path) -> None:
+    import threading
+    import time
+
+    from kronos_engine.application.workspace_terminal import cancel_workspace_command
+
+    repo = init_git_repo(tmp_path / "alpha", files={"README.md": "hello\n"})
+    started = repo / "started.txt"
+    command = _python_script(
+        repo,
+        "sleep.py",
+        "from pathlib import Path\nimport time\nPath('started.txt').write_text('1')\ntime.sleep(8)\n",
+    )
+    run_key = "terminal:repo_alpha"
+
+    def stop_after_start() -> None:
+        for _ in range(80):
+            if started.exists():
+                assert cancel_workspace_command(run_key) is True
+                return
+            time.sleep(0.05)
+        raise AssertionError("command did not start")
+
+    stopper = threading.Thread(target=stop_after_start)
+    stopper.start()
+    began = time.monotonic()
+    result = run_workspace_command(repo, command, run_key=run_key, timeout_seconds=6)
+    stopper.join(timeout=2)
+
+    assert result["cancelled"] is True
+    assert result["timed_out"] is False
+    assert time.monotonic() - began < 4
+    assert cancel_workspace_command(run_key) is False

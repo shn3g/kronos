@@ -238,7 +238,7 @@ class ChatService:
                 shown = _stop_partial(reply)
                 self._record_stop(session_id, shown, streaming_id)
                 return
-            if self._finish_model_text(session_id, repository_id, reply, streaming_id):
+            if self._finish_model_text(session_id, repository_id, reply, streaming_id, cancel):
                 return
         self._append(
             session_id,
@@ -286,6 +286,7 @@ class ChatService:
         repository_id: str | None,
         reply: str,
         streaming_id: str | None,
+        cancel: Event,
     ) -> bool:
         try:
             call = parse_tool_call(reply)
@@ -299,7 +300,7 @@ class ChatService:
             return True
         if streaming_id is not None:
             self._store.delete_message(streaming_id)
-        result = self._execute_tool(call, repository_id)
+        result = self._execute_tool(call, repository_id, cancel)
         self._append(
             session_id,
             role="tool",
@@ -345,7 +346,7 @@ class ChatService:
         body = STOP_MESSAGE if partial.strip() == "" else f"{partial.rstrip()}\n\n{STOP_MESSAGE}"
         self._finalize_assistant(session_id, message_id, body, None)
 
-    def _execute_tool(self, call: ToolCall, repository_id: str | None) -> str:
+    def _execute_tool(self, call: ToolCall, repository_id: str | None, cancel: Event) -> str:
         if call.name == "list_goals":
             return self._list_goals()
         if call.name == "search_memory":
@@ -363,7 +364,7 @@ class ChatService:
                 call.arguments.get("content", ""),
             )
         if call.name == "run_command":
-            return self._run_command(repository_id, call.arguments.get("command", ""))
+            return self._run_command(repository_id, call.arguments.get("command", ""), cancel)
         if call.name == "create_goal":
             return self._create_goal(repository_id, call.arguments)
         return "unknown tool"
@@ -434,7 +435,7 @@ class ChatService:
     def write_workspace_file(self, repository_id: str, rel_path: str, content: str) -> str:
         return self._write_file(repository_id, rel_path, content)
 
-    def _run_command(self, repository_id: str, command: str) -> str:
+    def _run_command(self, repository_id: str, command: str, cancel: Event) -> str:
         if self._run_commands_this_turn >= MAX_RUN_COMMANDS_PER_TURN:
             return (
                 f"This turn already ran {MAX_RUN_COMMANDS_PER_TURN} commands. "
@@ -450,8 +451,14 @@ class ChatService:
         except (RepositoryNotFound, LookupError, ValueError):
             return "Workspace was not found."
         self._run_commands_this_turn += 1
-        result = run_workspace_command(Path(record.realpath), stripped)
-        if result["timed_out"]:
+        result = run_workspace_command(
+            Path(record.realpath),
+            stripped,
+            should_stop=cancel.is_set,
+        )
+        if result["cancelled"]:
+            header = "Stopped."
+        elif result["timed_out"]:
             header = "The command timed out."
         elif result["exit_code"] is None:
             header = "Finished."

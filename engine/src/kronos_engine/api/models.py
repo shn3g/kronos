@@ -48,7 +48,12 @@ class TerminalRunResponse(BaseModel):
     command: str
     exit_code: int | None
     timed_out: bool
+    cancelled: bool = False
     output: str
+
+
+class TerminalCancelResponse(BaseModel):
+    ok: bool
 
 
 class WorkspaceFileItem(BaseModel):

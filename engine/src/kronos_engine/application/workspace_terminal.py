@@ -4,12 +4,18 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
+import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict
+from threading import Lock
+from typing import Callable, TypedDict
 
 COMMAND_TIMEOUT_SECONDS = 60
 MAX_OUTPUT_CHARS = 200_000
+POLL_INTERVAL_SECONDS = 0.15
+DRAIN_TIMEOUT_SECONDS = 2.0
 _SECRET_ENV_SUFFIXES = ("_TOKEN", "_API_KEY", "_SECRET", "_PASSWORD")
 
 
@@ -17,7 +23,33 @@ class TerminalRun(TypedDict):
     command: str
     exit_code: int | None
     timed_out: bool
+    cancelled: bool
     output: str
+
+
+@dataclass
+class _ActiveRun:
+    process: subprocess.Popen[str]
+    cancelled: bool = False
+
+
+_ACTIVE: dict[str, _ActiveRun] = {}
+_ACTIVE_LOCK = Lock()
+
+
+def terminal_run_key(repository_id: str) -> str:
+    return f"terminal:{repository_id}"
+
+
+def cancel_workspace_command(run_key: str) -> bool:
+    with _ACTIVE_LOCK:
+        active = _ACTIVE.get(run_key)
+        if active is None:
+            return False
+        active.cancelled = True
+        process = active.process
+    _kill_process_tree(process)
+    return True
 
 
 def run_workspace_command(
@@ -25,45 +57,131 @@ def run_workspace_command(
     command: str,
     *,
     timeout_seconds: float = COMMAND_TIMEOUT_SECONDS,
+    run_key: str | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> TerminalRun:
     stripped = command.strip()
     if stripped == "":
         raise ValueError("A command is required.")
     cwd = root.resolve()
+    process = _spawn_shell(stripped, cwd=cwd)
+    active = _ActiveRun(process=process)
+    if run_key:
+        with _ACTIVE_LOCK:
+            previous = _ACTIVE.get(run_key)
+            _ACTIVE[run_key] = active
+        if previous is not None:
+            _kill_process_tree(previous.process)
     try:
-        completed = _invoke_shell(stripped, cwd=cwd, timeout_seconds=timeout_seconds)
-    except subprocess.TimeoutExpired as error:
-        return {
-            "command": stripped,
-            "exit_code": None,
-            "timed_out": True,
-            "output": _clip_output(_combined_output(error.stdout, error.stderr)),
-        }
-    return {
-        "command": stripped,
-        "exit_code": completed.returncode,
-        "timed_out": False,
-        "output": _clip_output(_combined_output(completed.stdout, completed.stderr)),
-    }
+        return _wait_for_run(
+            active,
+            command=stripped,
+            timeout_seconds=timeout_seconds,
+            should_stop=should_stop,
+            run_key=run_key,
+        )
+    finally:
+        if run_key:
+            with _ACTIVE_LOCK:
+                if _ACTIVE.get(run_key) is active:
+                    _ACTIVE.pop(run_key, None)
 
 
-def _invoke_shell(
-    command: str, *, cwd: Path, timeout_seconds: float
-) -> subprocess.CompletedProcess[str]:
-    shared = {
+def _wait_for_run(
+    active: _ActiveRun,
+    *,
+    command: str,
+    timeout_seconds: float,
+    should_stop: Callable[[], bool] | None,
+    run_key: str | None,
+) -> TerminalRun:
+    process = active.process
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if should_stop is not None and should_stop():
+            if run_key:
+                cancel_workspace_command(run_key)
+            else:
+                active.cancelled = True
+                _kill_process_tree(process)
+        if active.cancelled:
+            output = _drain(process)
+            return {
+                "command": command,
+                "exit_code": process.returncode,
+                "timed_out": False,
+                "cancelled": True,
+                "output": _clip_output(output),
+            }
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            active.cancelled = False
+            _kill_process_tree(process)
+            output = _drain(process)
+            return {
+                "command": command,
+                "exit_code": None,
+                "timed_out": True,
+                "cancelled": False,
+                "output": _clip_output(output),
+            }
+        try:
+            stdout, _stderr = process.communicate(timeout=min(POLL_INTERVAL_SECONDS, remaining))
+            return {
+                "command": command,
+                "exit_code": process.returncode,
+                "timed_out": False,
+                "cancelled": False,
+                "output": _clip_output(_as_text(stdout)),
+            }
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def _spawn_shell(command: str, *, cwd: Path) -> subprocess.Popen[str]:
+    shared: dict[str, object] = {
         "cwd": cwd,
-        "check": False,
-        "capture_output": True,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.STDOUT,
         "text": True,
         "encoding": "utf-8",
         "errors": "replace",
-        "timeout": timeout_seconds,
         "env": _child_env(),
         **_windows_process_flags(),
     }
     if os.name == "nt":
-        return subprocess.run(command, shell=True, **shared)  # noqa: S602
-    return subprocess.run(["/bin/sh", "-c", command], **shared)  # noqa: S603
+        return subprocess.Popen(command, shell=True, **shared)  # noqa: S602
+    return subprocess.Popen(["/bin/sh", "-c", command], start_new_session=True, **shared)  # noqa: S603
+
+
+def _drain(process: subprocess.Popen[str]) -> str:
+    try:
+        stdout, _stderr = process.communicate(timeout=DRAIN_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        _kill_process_tree(process)
+        stdout, _stderr = process.communicate(timeout=DRAIN_TIMEOUT_SECONDS)
+    return _as_text(stdout)
+
+
+def _kill_process_tree(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        subprocess.run(  # noqa: S603
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+            check=False,
+            creationflags=flags,
+        )
+        return
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            process.kill()
+        except OSError:
+            return
 
 
 def _child_env() -> dict[str, str]:
@@ -80,10 +198,6 @@ def _windows_process_flags() -> dict[str, int]:
         return {}
     no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     return {"creationflags": no_window} if no_window else {}
-
-
-def _combined_output(stdout: str | bytes | None, stderr: str | bytes | None) -> str:
-    return f"{_as_text(stdout)}{_as_text(stderr)}"
 
 
 def _as_text(chunk: str | bytes | None) -> str:
