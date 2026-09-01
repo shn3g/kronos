@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from tests.retrieval.support import indexing_policy, kronos_paths, write_and_commit
+from tests.retrieval.support import commit_tree, indexing_policy, kronos_paths, write_and_commit
 from tests.support.git_fixtures import init_git_repo
 
 from kronos_engine.indexing.scanner import list_dirty_paths
@@ -180,6 +180,55 @@ def test_identity_swap_on_partial_incremental_keeps_vectors_for_unchanged_paths(
 
     joined = "\n".join(second.texts)
     assert "ALPHA_CHANGED" in joined
+    assert "BETA_STABLE" in joined
+
+
+def test_identity_swap_with_no_path_changes_reembeds_existing_chunks(tmp_path: Path) -> None:
+    paths = kronos_paths(tmp_path)
+    root = init_git_repo(
+        tmp_path / "identity-empty",
+        files={
+            "src/alpha.py": "ALPHA_STABLE = 1\n",
+            "src/beta.py": "BETA_STABLE = 1\n",
+        },
+    )
+    policy = indexing_policy()
+    first = _CountingEmbedder()
+    service = IndexingService(
+        paths,
+        embeddings=first,
+        embedding_identity=EmbeddingIdentity(kind="openai_compatible", model_id="small"),
+    )
+    service.rebuild("repo_empty", root, policy)
+    assert first.calls >= 1
+    commit_tree(root, "empty")
+
+    second = _CountingEmbedder()
+    swapped = IndexingService(
+        paths,
+        embeddings=second,
+        embedding_identity=EmbeddingIdentity(kind="openai_compatible", model_id="large"),
+    )
+    swapped.incremental("repo_empty", root, policy)
+
+    store = SqliteIndexStore(paths.cache / "indexes" / "repo_empty" / "index.sqlite3")
+    try:
+        chunks = list(store.list_chunks())
+        vector_ids = {
+            str(row["chunk_id"])
+            for row in store.connection().execute("SELECT chunk_id FROM vectors")
+        }
+        paths_with_vectors = {chunk.path for chunk in chunks if chunk.chunk_id in vector_ids}
+        assert "src/alpha.py" in paths_with_vectors
+        assert "src/beta.py" in paths_with_vectors
+        assert {chunk.chunk_id for chunk in chunks} <= vector_ids
+        assert store.meta("embedding_model_id") == "large"
+    finally:
+        store.close()
+
+    joined = "\n".join(second.texts)
+    assert second.calls >= 1
+    assert "ALPHA_STABLE" in joined
     assert "BETA_STABLE" in joined
 
 

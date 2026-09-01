@@ -341,7 +341,7 @@ class IndexingService:
                 if not targeted:
                     refresh.update(current_dirty)
                     refresh.update(stored_dirty)
-                if not refresh:
+                if not refresh and not self._backend_changed(store):
                     store.set_indexed_commit(new)
                     store.set_dirty_paths(current_dirty)
                     return self._status(repo_id, store, policy=policy)
