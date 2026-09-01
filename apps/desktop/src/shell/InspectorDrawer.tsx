@@ -21,6 +21,9 @@ interface InspectorDrawerProps {
   onRevert?: (path: string) => void;
   revertError?: string | null;
   revertingPath?: string | null;
+  onCommit?: (message: string) => void;
+  commitError?: string | null;
+  committing?: boolean;
 }
 
 export function InspectorDrawer({
@@ -32,6 +35,9 @@ export function InspectorDrawer({
   onRevert,
   revertError = null,
   revertingPath = null,
+  onCommit,
+  commitError = null,
+  committing = false,
 }: InspectorDrawerProps) {
   return (
     <aside className="inspector" aria-label="Session details">
@@ -52,10 +58,16 @@ export function InspectorDrawer({
             <p className="inspector__empty">No file changes in this workspace yet.</p>
           ) : (
             <>
-              {revertError ? (
+              {revertError || commitError ? (
                 <p className="inspector__error" role="alert">
-                  {revertError}
+                  {commitError ?? revertError}
                 </p>
+              ) : null}
+              {onCommit ? (
+                <CommitForm
+                  committing={committing}
+                  onCommit={onCommit}
+                />
               ) : null}
               <ul className="inspector__list">
                 {changes.map((item) => (
@@ -89,6 +101,51 @@ export function InspectorDrawer({
         {tab === "health" ? <HealthList checks={checks} /> : null}
       </div>
     </aside>
+  );
+}
+
+function CommitForm({
+  committing,
+  onCommit,
+}: {
+  committing: boolean;
+  onCommit: (message: string) => void;
+}) {
+  const [message, setMessage] = useState("");
+  return (
+    <form
+      className="inspector__commit"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const next = message.trim();
+        if (next === "" || committing) {
+          return;
+        }
+        onCommit(next);
+      }}
+    >
+      <label>
+        <span className="visually-hidden">Commit message</span>
+        <textarea
+          className="inspector__commit-input"
+          value={message}
+          rows={3}
+          placeholder="Describe the change"
+          aria-label="Commit message"
+          onChange={(event) => {
+            setMessage(event.target.value);
+          }}
+        />
+      </label>
+      <p className="inspector__hint">Records a local git commit. Kronos does not push.</p>
+      <button
+        type="submit"
+        className="btn-primary"
+        disabled={committing || message.trim() === ""}
+      >
+        {committing ? "Committing" : "Commit"}
+      </button>
+    </form>
   );
 }
 

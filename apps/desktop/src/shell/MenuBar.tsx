@@ -163,7 +163,8 @@ export function MenuBar({
           Kronos is a locally installed desktop app for coding agents on your git folders. Ctrl+N
           or Cmd+N starts a new chat. Ctrl+B or Cmd+B hides the activity bar. Ctrl+Shift+J or
           Cmd+Shift+J hides Changes. Escape stops the current turn. Revert in Changes restores
-          the last chat write for that file.
+          the last chat write for that file, or the last committed version if chat did not write
+          it. Commit records a local git commit. Kronos does not push.
         </p>
       </Menu>
     </div>

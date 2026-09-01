@@ -99,6 +99,8 @@ function quietRepos(): RepositoriesClient {
     disable: unused,
     resume: unused,
     revertWrite: unused,
+    listChanges: async () => [],
+    commitFiles: unused,
   };
 }
 
@@ -148,6 +150,14 @@ function liveSession() {
           realpath: "C:/tmp/alpha",
           origin: null,
           status: "active" as const,
+        },
+      ],
+      listChanges: async () => [
+        {
+          path: "src/App.tsx",
+          summary: "guard staff before calendar",
+          patch: "",
+          status: "M",
         },
       ],
     },
@@ -455,15 +465,16 @@ describe("App shell", () => {
 
   it("reverts a chat write from the Changes list", async () => {
     const user = userEvent.setup();
-    let diffs = [
+    let changes = [
       {
         path: "src/App.tsx",
         summary: "guard staff before calendar",
-        repositoryId: "repo_alpha",
+        patch: "",
+        status: "M",
       },
     ];
     const revertWrite = vi.fn(async () => {
-      diffs = [];
+      changes = [];
     });
     const session = liveSession();
     render(
@@ -471,13 +482,12 @@ describe("App shell", () => {
         engineClient={clientOf({ status: "ready", version: "0.1.0" })}
         modelsClient={assignedModels()}
         chatClient={quietChat()}
-        repositoriesClient={{ ...session.repositoriesClient, revertWrite }}
-        homeClient={{
-          dashboard: async () => {
-            const snapshot = await session.homeClient.dashboard();
-            return { ...snapshot, diffs };
-          },
+        repositoriesClient={{
+          ...session.repositoriesClient,
+          revertWrite,
+          listChanges: async () => changes,
         }}
+        homeClient={session.homeClient}
         goalsClient={session.goalsClient}
         settingsClient={session.settingsClient}
       />,
@@ -516,6 +526,74 @@ describe("App shell", () => {
     expect(
       await screen.findByRole("alert"),
     ).toHaveTextContent("Could not revert that file. Check the workspace and try again.");
+    expect(screen.getByText("src/App.tsx")).toBeInTheDocument();
+  });
+
+  it("commits listed working-tree files from Changes", async () => {
+    const user = userEvent.setup();
+    let changes = [
+      {
+        path: "src/App.tsx",
+        summary: "guard staff before calendar",
+        patch: "",
+        status: "M",
+      },
+    ];
+    const commitFiles = vi.fn(async () => {
+      changes = [];
+    });
+    const session = liveSession();
+    render(
+      <App
+        engineClient={clientOf({ status: "ready", version: "0.1.0" })}
+        modelsClient={assignedModels()}
+        chatClient={quietChat()}
+        repositoriesClient={{
+          ...session.repositoriesClient,
+          listChanges: async () => changes,
+          commitFiles,
+        }}
+        homeClient={session.homeClient}
+        goalsClient={session.goalsClient}
+        settingsClient={session.settingsClient}
+      />,
+    );
+
+    expect(await screen.findByText("src/App.tsx")).toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: /commit message/i }), "Fix App");
+    await user.click(screen.getByRole("button", { name: /^commit$/i }));
+    expect(commitFiles).toHaveBeenCalledWith("repo_alpha", "Fix App", ["src/App.tsx"]);
+    expect(
+      await screen.findByText(/no file changes in this workspace yet/i),
+    ).toBeInTheDocument();
+  });
+
+  it("explains when a local commit cannot be recorded", async () => {
+    const user = userEvent.setup();
+    const session = liveSession();
+    render(
+      <App
+        engineClient={clientOf({ status: "ready", version: "0.1.0" })}
+        modelsClient={assignedModels()}
+        chatClient={quietChat()}
+        repositoriesClient={{
+          ...session.repositoriesClient,
+          commitFiles: async () => {
+            throw new Error("engine request failed: 409");
+          },
+        }}
+        homeClient={session.homeClient}
+        goalsClient={session.goalsClient}
+        settingsClient={session.settingsClient}
+      />,
+    );
+
+    expect(await screen.findByText("src/App.tsx")).toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: /commit message/i }), "Fix App");
+    await user.click(screen.getByRole("button", { name: /^commit$/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not commit those files. Check the message and try again.",
+    );
     expect(screen.getByText("src/App.tsx")).toBeInTheDocument();
   });
 });

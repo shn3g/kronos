@@ -65,6 +65,34 @@ describe("InspectorDrawer", () => {
     expect(onRevert).toHaveBeenCalledWith("src/App.tsx");
   });
 
+  it("commits listed files from a local message", async () => {
+    const user = userEvent.setup();
+    const onCommit = vi.fn();
+    render(
+      <InspectorDrawer
+        tab="changes"
+        onTab={() => undefined}
+        changes={[
+          {
+            path: "src/App.tsx",
+            summary: "Modified src/App.tsx",
+            patch: "--- a/src/App.tsx\n+++ b/src/App.tsx\n-old\n+new\n",
+          },
+        ]}
+        goals={[]}
+        checks={[]}
+        onCommit={onCommit}
+      />,
+    );
+
+    const commit = screen.getByRole("button", { name: /^commit$/i });
+    expect(commit).toBeDisabled();
+    await user.type(screen.getByRole("textbox", { name: /commit message/i }), "Fix App");
+    expect(commit).toBeEnabled();
+    await user.click(commit);
+    expect(onCommit).toHaveBeenCalledWith("Fix App");
+  });
+
   it("lists workspace diffs and goal titles with text status", async () => {
     const user = userEvent.setup();
     render(<Harness />);

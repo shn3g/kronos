@@ -110,6 +110,9 @@ export function App({
   const [revertError, setRevertError] = useState<string | null>(null);
   const [revertingPath, setRevertingPath] = useState<string | null>(null);
   const revertingRef = useRef(false);
+  const [commitError, setCommitError] = useState<string | null>(null);
+  const [committing, setCommitting] = useState(false);
+  const committingRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -194,6 +197,7 @@ export function App({
     }
     revertingRef.current = true;
     setRevertError(null);
+    setCommitError(null);
     setRevertingPath(path);
     try {
       await repos.revertWrite(session.workspaceId, path);
@@ -203,6 +207,29 @@ export function App({
     } finally {
       revertingRef.current = false;
       setRevertingPath(null);
+    }
+  }
+
+  async function commitChanges(message: string): Promise<void> {
+    if (!session.workspaceId || committingRef.current || session.changes.length === 0) {
+      return;
+    }
+    committingRef.current = true;
+    setCommitting(true);
+    setCommitError(null);
+    setRevertError(null);
+    try {
+      await repos.commitFiles(
+        session.workspaceId,
+        message,
+        session.changes.map((item) => item.path),
+      );
+      await session.refresh();
+    } catch {
+      setCommitError("Could not commit those files. Check the message and try again.");
+    } finally {
+      committingRef.current = false;
+      setCommitting(false);
     }
   }
 
@@ -374,6 +401,11 @@ export function App({
                 }}
                 revertError={revertError}
                 revertingPath={revertingPath}
+                onCommit={(message) => {
+                  void commitChanges(message);
+                }}
+                commitError={commitError}
+                committing={committing}
               />
             )}
           </div>

@@ -141,6 +141,18 @@ export function useSessionContext({
         return;
       }
       applyWorkspace(resolveActiveWorkspaceId(listedRepos, readStoredWorkspaceId()));
+      const nextId = resolveActiveWorkspaceId(listedRepos, readStoredWorkspaceId());
+      if (!nextId) {
+        return;
+      }
+      try {
+        const live = await repositoriesClient.listChanges(nextId);
+        if (!cancelled) {
+          setChanges(live);
+        }
+      } catch {
+        return;
+      }
     };
     refreshRef.current = refresh;
     void refresh();

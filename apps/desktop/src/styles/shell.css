@@ -312,6 +312,38 @@
   font-size: 12px;
 }
 
+.inspector__commit {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.inspector__commit-input {
+  width: 100%;
+  min-height: 56px;
+  resize: vertical;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--void);
+  color: var(--ink);
+  font: inherit;
+}
+
+.inspector__commit-input:focus {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.inspector__hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .inspector__change-row {
   display: flex;
   align-items: flex-start;

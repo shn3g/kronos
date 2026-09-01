@@ -33,6 +33,13 @@ export interface InspectResult {
   pushed: boolean;
 }
 
+export interface WorkspaceFileChange {
+  path: string;
+  summary: string;
+  patch: string;
+  status: string;
+}
+
 export interface RepositoriesClient {
   list(): Promise<EnrolledRepository[]>;
   inspect(path: string): Promise<InspectResult>;
@@ -41,6 +48,8 @@ export interface RepositoriesClient {
   disable(id: string): Promise<EnrolledRepository>;
   resume(id: string): Promise<EnrolledRepository>;
   revertWrite(id: string, path: string): Promise<void>;
+  listChanges(id: string): Promise<WorkspaceFileChange[]>;
+  commitFiles(id: string, message: string, paths: string[]): Promise<void>;
 }
 
 export async function pickRepositoryFolder(): Promise<string | null> {
@@ -88,6 +97,14 @@ export function createProductionRepositoriesClient(
     },
     async revertWrite(id: string, path: string) {
       await jsonRequest(request, "POST", `/repositories/${id}/writes/revert`, { path });
+    },
+    async listChanges(id: string) {
+      const payload = await jsonRequest(request, "GET", `/repositories/${id}/changes`);
+      const changes = Array.isArray(payload.changes) ? payload.changes : [];
+      return changes.map(mapChange);
+    },
+    async commitFiles(id: string, message: string, paths: string[]) {
+      await jsonRequest(request, "POST", `/repositories/${id}/commits`, { message, paths });
     },
   };
 }
@@ -141,6 +158,16 @@ function mapInspect(payload: Record<string, unknown>): InspectResult {
     wroteFiles: payload.wrote_files === true,
     committed: payload.committed === true,
     pushed: payload.pushed === true,
+  };
+}
+
+function mapChange(raw: unknown): WorkspaceFileChange {
+  const item = asRecord(raw);
+  return {
+    path: stringField(item, "path"),
+    summary: stringField(item, "summary"),
+    patch: stringField(item, "patch"),
+    status: stringField(item, "status"),
   };
 }
 

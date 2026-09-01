@@ -34,6 +34,10 @@ function repos(listImpl?: RepositoriesClient["list"]): RepositoriesClient {
     revertWrite: async () => {
       throw new Error("revert should not run");
     },
+    listChanges: async () => [],
+    commitFiles: async () => {
+      throw new Error("commit should not run");
+    },
   };
 }
 
@@ -91,6 +95,8 @@ describe("WorkspacesPage", () => {
       disable: async () => ({ ...enrolled, status: "disabled" }),
       resume: async () => ({ ...enrolled, status: "active" }),
       revertWrite: async () => undefined,
+      listChanges: async () => [],
+      commitFiles: async () => undefined,
     };
 
     render(
@@ -181,6 +187,10 @@ describe("WorkspacesPage", () => {
       },
       revertWrite: async () => {
         throw new Error("revert should not run");
+      },
+      listChanges: async () => [],
+      commitFiles: async () => {
+        throw new Error("commit should not run");
       },
     };
 
