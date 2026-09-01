@@ -25,6 +25,7 @@ from kronos_engine.adapters.tools import DefaultToolDetector
 from kronos_engine.api.models import (
     AssignmentsRequest,
     AssignmentsResponse,
+    AutonomyRequest,
     BackupRequest,
     ChatMessageRequest,
     ConversationCreateRequest,
@@ -73,6 +74,8 @@ from kronos_engine.api.models import (
     ResourceLimitsModel,
     RunListResponse,
     RunModel,
+    SafetyCheckModel,
+    SafetyResponse,
     SkillApproveRequest,
     SkillImportRequest,
     SkillRouteRequest,
@@ -107,6 +110,7 @@ from kronos_engine.application.repositories import (
     RepositoryNotFound,
     RepositoryService,
 )
+from kronos_engine.application.safety import SafetyElevationRefused
 from kronos_engine.application.verification import GateRunner
 from kronos_engine.config.repository import (
     EnrolmentPreview,
@@ -282,14 +286,7 @@ def create_app(
     def repository_service() -> Iterator[RepositoryService]:
         conn = database.connect()
         try:
-            yield RepositoryService(
-                SqliteRepositoryRegistry(conn),
-                settings.paths,
-                FilesystemGitInspector(),
-                ManifestStackDetector(),
-                CacheRuntimeLayout(),
-                indexer=_indexing_service(conn),
-            )
+            yield _wired_repository_service(conn)
         finally:
             conn.close()
 
@@ -319,6 +316,38 @@ def create_app(
             settings.paths,
             embeddings=_resolve_embedder(conn).adapter,
             emit_event=_emit_index_event,
+        )
+
+    def _wired_repository_service(conn: object) -> RepositoryService:
+        apps = SqliteGithubAppStore(conn)  # type: ignore[arg-type]
+
+        def forge_for(record: EnrolledRepository) -> object | None:
+            parsed = github_owner_repo(record.origin)
+            if parsed is None:
+                return None
+            owner, name = parsed
+            try:
+                return GitHubSetupService(apps, store, github_http).forge(
+                    "controller",
+                    ForgeTarget(
+                        owner=owner,
+                        repo=name,
+                        integration_branch=record.policy.branches.integration,
+                        protected_branch=record.policy.branches.protected,
+                    ),
+                )
+            except ForgeAuthError:
+                return None
+
+        return RepositoryService(
+            SqliteRepositoryRegistry(conn),  # type: ignore[arg-type]
+            settings.paths,
+            FilesystemGitInspector(),
+            ManifestStackDetector(),
+            CacheRuntimeLayout(),
+            indexer=_indexing_service(conn),
+            apps=apps,
+            forge_for=forge_for,
         )
 
     def _current_embedder() -> ResolvedEmbedder:
@@ -686,6 +715,38 @@ def create_app(
                 status = 404 if isinstance(error, (RepositoryNotFound, IdentifierError)) else 400
                 raise HTTPException(status_code=status, detail=str(error)) from error
             return _detail_response(service, record, include_preview=True)
+
+    @app.get("/repositories/{repository_id}/safety", response_model=SafetyResponse)
+    def repository_safety(repository_id: str, _: None = Depends(require_auth)) -> SafetyResponse:
+        with repository_service() as service:
+            record = _load(service, repository_id)
+            report = service.safety(record.id)
+            return SafetyResponse(
+                ok=report.ok,
+                checks=[
+                    SafetyCheckModel(id=item.id, ok=item.ok, detail=item.detail)
+                    for item in report.checks
+                ],
+            )
+
+    @app.post("/repositories/{repository_id}/autonomy", response_model=RepositoryDetailResponse)
+    def set_repository_autonomy(
+        repository_id: str,
+        body: AutonomyRequest,
+        _: None = Depends(require_auth),
+    ) -> RepositoryDetailResponse:
+        with repository_service() as service:
+            try:
+                record = service.set_operation_mode(
+                    _parse_id(repository_id), body.mode, freeze=body.freeze
+                )
+            except SafetyElevationRefused as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            except PolicyError as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            except (RepositoryNotFound, IdentifierError) as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return _detail_response(service, record)
 
     @app.get("/models", response_model=ModelsSnapshotResponse)
     def models_snapshot(_: None = Depends(require_auth)) -> ModelsSnapshotResponse:
@@ -1601,6 +1662,7 @@ def _enrolled_github(repos: RepositoryService) -> GithubEnrolledModel | None:
             repo=name,
             integration_branch=record.policy.branches.integration,
             protected_branch=record.policy.branches.protected,
+            repository_id=record.id.value,
         )
     return None
 

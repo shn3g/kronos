@@ -66,6 +66,22 @@ class RepositoryDetailResponse(BaseModel):
     pushed: bool = False
 
 
+class SafetyCheckModel(BaseModel):
+    id: str
+    ok: bool
+    detail: str
+
+
+class SafetyResponse(BaseModel):
+    ok: bool
+    checks: list[SafetyCheckModel]
+
+
+class AutonomyRequest(BaseModel):
+    mode: str
+    freeze: bool | None = None
+
+
 class GoalModel(BaseModel):
     id: str
     repository_id: str
@@ -292,6 +308,7 @@ class GithubEnrolledModel(BaseModel):
     repo: str
     integration_branch: str
     protected_branch: str
+    repository_id: str | None = None
 
 
 class GithubStatusResponse(BaseModel):
@@ -419,4 +436,3 @@ class ConversationDetailResponse(BaseModel):
 
 class ChatMessageRequest(BaseModel):
     content: str
-

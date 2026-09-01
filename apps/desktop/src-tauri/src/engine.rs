@@ -943,7 +943,9 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
                     | ("GET", Some("index/search"))
                     | ("GET", Some("index/map"))
                     | ("GET", Some("conversations"))
+                    | ("GET", Some("safety"))
                     | ("POST", Some("conversations"))
+                    | ("POST", Some("autonomy"))
                     | ("POST", Some("index/rebuild"))
                     | ("POST", Some("index/refresh"))
                     | ("POST", Some("index/watch"))
@@ -1501,6 +1503,9 @@ mod tests {
         assert!(engine_path_allowed("POST", "/ops/rollback"));
         assert!(!engine_path_allowed("POST", "/ops/token"));
         assert!(!engine_path_allowed("POST", "/ops/pem"));
+        assert!(engine_path_allowed("GET", "/repositories/repo_alpha/safety"));
+        assert!(engine_path_allowed("POST", "/repositories/repo_alpha/autonomy"));
+        assert!(!engine_path_allowed("DELETE", "/repositories/repo_alpha/safety"));
         assert!(engine_path_allowed("GET", "/repositories/repo_alpha/conversations"));
         assert!(engine_path_allowed("POST", "/repositories/repo_alpha/conversations"));
         assert!(engine_path_allowed("GET", "/conversations/conv_abc"));

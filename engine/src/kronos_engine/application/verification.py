@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
+from kronos_engine.application.issue_hygiene import render_pull_request_body
 from kronos_engine.application.merge import MergeRefused, MergeService
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import RepositoryService
@@ -184,7 +185,7 @@ class VerificationService:
         open_draft = getattr(self._forge, "open_draft_pr")
         pull = open_draft(
             task.title,
-            goal.success_criteria,
+            render_pull_request_body(goal, task),
             branch,
             IdempotencyKey(f"pr:{task.id.value}"),
         )

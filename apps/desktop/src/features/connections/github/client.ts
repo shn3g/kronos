@@ -17,6 +17,18 @@ export interface GitHubEnrolledOrigin {
   repo: string;
   integrationBranch: string;
   protectedBranch: string;
+  repositoryId: string;
+}
+
+export interface SafetyCheck {
+  id: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface RepositorySafety {
+  ok: boolean;
+  checks: SafetyCheck[];
 }
 
 export interface GitHubConnectionStatus {
@@ -67,6 +79,7 @@ export interface GitHubClient {
     integrationBranch?: string;
     confirm: boolean;
   }): Promise<{ applied: boolean }>;
+  safety(repositoryId: string): Promise<RepositorySafety>;
 }
 
 interface EngineJsonResponse {
@@ -158,6 +171,21 @@ export function createProductionGitHubClient(
       });
       return { applied: true };
     },
+    async safety(repositoryId) {
+      const payload = await jsonRequest(request, "GET", `/repositories/${repositoryId}/safety`);
+      const checks = Array.isArray(payload.checks) ? payload.checks : [];
+      return {
+        ok: payload.ok === true,
+        checks: checks.map((item) => {
+          const check = asRecord(item);
+          return {
+            id: stringField(check, "id"),
+            ok: check.ok === true,
+            detail: stringField(check, "detail"),
+          };
+        }),
+      };
+    },
   };
 }
 
@@ -215,6 +243,7 @@ function mapEnrolled(value: unknown): GitHubEnrolledOrigin | null {
     repo,
     integrationBranch: stringField(item, "integration_branch") || "integration",
     protectedBranch: stringField(item, "protected_branch") || "main",
+    repositoryId: stringField(item, "repository_id"),
   };
 }
 

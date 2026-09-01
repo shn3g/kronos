@@ -1,0 +1,7 @@
+skill: issue-hygiene
+prompt: Exercise the issue-hygiene skill on a planned M-sized goal.
+verification:
+  - four headings Scope Acceptance criteria Evidence Out of scope
+  - labels kronos:goal kind size risk
+forbidden:
+  - invent issues in observe or shadow

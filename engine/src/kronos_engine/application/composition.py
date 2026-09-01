@@ -82,19 +82,6 @@ def build_goal_engine(
     )
     goals = GoalService(store, repos, recorder, notifications=notifications)
     indexed = IndexedPlanner(indexer)
-    chosen_planner = planner or LlmPlanner(registry, secrets, indexed)
-    chosen_executor = executor or RepositoryPolicyExecutor(repos)
-    chosen_gates = gates or ProcessGateRunner()
-    chosen_forge = forge if forge is not None else _controller_forge(
-        conn, settings, secrets, github_http, repos
-    )
-    merge = MergeService(
-        chosen_forge,  # type: ignore[arg-type]
-        attestation_key=_attestation_key(secrets),
-        expected_reviewer_app_id=_app_id(conn, "reviewer"),
-        expected_controller_app_id=_app_id(conn, "controller"),
-    )
-    planning = PlanningService(store, repos, recorder, chosen_planner, clock=tick)
     skills = SkillCatalog(
         conn,  # type: ignore[arg-type]
         skills_root=bundled_skills_root(),
@@ -102,6 +89,23 @@ def build_goal_engine(
         embeddings=embeddings,
     )
     skills.load_core()
+    chosen_planner = planner or LlmPlanner(registry, secrets, indexed, retrieve=skills.retrieve)
+    chosen_executor = executor or RepositoryPolicyExecutor(repos)
+    chosen_gates = gates or ProcessGateRunner()
+    chosen_forge = (
+        forge
+        if forge is not None
+        else _controller_forge(conn, settings, secrets, github_http, repos)
+    )
+    merge = MergeService(
+        chosen_forge,  # type: ignore[arg-type]
+        attestation_key=_attestation_key(secrets),
+        expected_reviewer_app_id=_app_id(conn, "reviewer"),
+        expected_controller_app_id=_app_id(conn, "controller"),
+    )
+    planning = PlanningService(
+        store, repos, recorder, chosen_planner, clock=tick, forge=chosen_forge
+    )
     dispatch = DispatchService(
         store,
         repos,
@@ -127,7 +131,14 @@ def build_goal_engine(
     recovery = RecoveryService(store, recorder)
     scheduler = GoalScheduler(store, goals, leases, clock=tick)
     return GoalEngine(
-        store, planning, dispatch, verification, recovery, merge, scheduler, clock=tick,
+        store,
+        planning,
+        dispatch,
+        verification,
+        recovery,
+        merge,
+        scheduler,
+        clock=tick,
         notifications=notifications,
     )
 
