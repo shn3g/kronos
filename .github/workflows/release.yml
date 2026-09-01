@@ -107,3 +107,53 @@ jobs:
             apps/desktop/src-tauri/target/release/bundle/**
           if-no-files-found: error
           retention-days: 14
+
+  publish:
+    name: GitHub Release
+    needs: desktop
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download installers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: kronos-desktop-*
+          path: dist
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          while IFS= read -r -d '' app; do
+            zip -r "upload/$(basename "$app").zip" "$app"
+          done < <(find dist -name '*.app' -type d -print0)
+          while IFS= read -r -d '' file; do
+            rel="${file#dist/}"
+            dest="upload/$(echo "$rel" | tr '/\\' '__')"
+            cp "$file" "$dest"
+          done < <(find dist -type f \( -name '*.exe' -o -name '*.deb' -o -name 'SHA256SUMS' -o -name 'sbom.cdx.json' -o -name 'provenance.json' -o -name 'release.sig' \) -print0)
+          mapfile -t assets < <(find upload -type f)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "no installer assets to publish"
+            exit 1
+          fi
+          extra=(--verify-tag)
+          case "$TAG" in
+            v0.*) extra+=(--prerelease) ;;
+          esac
+          cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
+Preview build. The product is not 1.0.
+
+Installers are unsigned. Windows SmartScreen and macOS Gatekeeper will warn. Use Run anyway or right-click Open.
+
+The app still starts the engine with Python 3.11+ on PATH (`python -m kronos_engine` on Windows, `python3 -m kronos_engine` elsewhere). Node and Rust are not required to run a downloaded installer.
+NOTES
+          gh release create "$TAG" "${assets[@]}" "${extra[@]}" \
+            --repo "${{ github.repository }}" \
+            --title "Kronos ${TAG}" \
+            --notes-file "$RUNNER_TEMP/notes.md"

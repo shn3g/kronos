@@ -6,7 +6,7 @@ Windows, macOS, and Linux. Licensed under the [GNU Affero General Public License
 
 ## Install
 
-Download a Windows NSIS installer, Linux `.deb`, or macOS `.app` from a [GitHub Release](https://github.com/shn3g/kronos/releases), or build with `pnpm tauri build`.
+Download a Windows NSIS installer, Linux `.deb`, or macOS `.app` from a [GitHub Release](https://github.com/shn3g/kronos/releases) (`v0.1.0` is the current preview). Or build with `pnpm tauri build`.
 
 Signing is not present. Windows SmartScreen and macOS Gatekeeper will warn. That is the OS. Use "Run anyway" or right-click Open for the unsigned path.
 

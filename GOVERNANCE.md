@@ -23,7 +23,11 @@ Security reports follow [SECURITY.md](SECURITY.md). They bypass the public issue
 
 ## Releases
 
-Releases are git tags on `main`. Unsigned NSIS / `.deb` / `.app` installers, checksums, and SBOMs may attach to GitHub Releases. Signing is optional and fail-closed without a key.
+Releases are git tags on `main` (`v0.1.0`, then `v0.1.1`, `v0.2.0`, and so on). Kronos uses [Semantic Versioning](https://semver.org/). `0.x` is preview: public installers may exist, the product is not 1.0, and APIs may change. `1.0.0` is the first stable line.
+
+The version Cursor and the desktop app read is `0.1.0` in `apps/desktop/src-tauri/tauri.conf.json`, kept in lockstep with `package.json`, `apps/desktop/src-tauri/Cargo.toml`, `engine/pyproject.toml`, and `services/reviewer/pyproject.toml`.
+
+Unsigned NSIS / `.deb` / `.app` installers, checksums, and SBOMs attach to GitHub Releases. `0.x` tags publish as GitHub pre-releases. Signing is optional and fail-closed without a key.
 
 ## Code of collaboration
 
