@@ -7,6 +7,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from kronos_engine.adapters.executors.controlled import ControlledOpenExecutor
+from kronos_engine.adapters.executors.cursor import CursorExecutor, detect_cursor_cli
+from kronos_engine.adapters.executors.opencode import OpencodeExecutor, detect_opencode_cli
 from kronos_engine.adapters.git.detection import ManifestStackDetector
 from kronos_engine.adapters.git.repository import FilesystemGitInspector
 from kronos_engine.adapters.git.worktrees import CacheRuntimeLayout
@@ -19,7 +21,7 @@ from kronos_engine.application.goal_engine import GoalEngine
 from kronos_engine.application.goals import GoalService
 from kronos_engine.application.merge import MergeService
 from kronos_engine.application.notifications import NotificationService
-from kronos_engine.application.planning import IndexedPlanner, Planner, PlanningService
+from kronos_engine.application.planning import IndexedPlanner, LlmPlanner, Planner, PlanningService
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.recovery import RecoveryService
 from kronos_engine.application.repositories import RepositoryService
@@ -62,8 +64,9 @@ def build_goal_engine(
     outbox = SqliteOutbox(conn)  # type: ignore[arg-type]
     recorder = Recorder(conn, events, outbox)  # type: ignore[arg-type]
     leases = SqliteLeases(conn)  # type: ignore[arg-type]
+    registry = SqliteModelRegistry(conn)  # type: ignore[arg-type]
     embeddings = resolve_embedder(
-        SqliteModelRegistry(conn),  # type: ignore[arg-type]
+        registry,
         secrets,
         settings.paths.cache / "models",
     ).adapter
@@ -77,8 +80,9 @@ def build_goal_engine(
         indexer=indexer,
     )
     goals = GoalService(store, repos, recorder, notifications=notifications)
-    chosen_planner = planner or IndexedPlanner(indexer)
-    chosen_executor = executor or ControlledOpenExecutor()
+    indexed = IndexedPlanner(indexer)
+    chosen_planner = planner or LlmPlanner(registry, secrets, indexed)
+    chosen_executor = executor or _executor_from_repos(repos)
     chosen_gates = gates or ProcessGateRunner()
     chosen_forge = forge if forge is not None else _controller_forge(
         conn, settings, secrets, github_http, repos
@@ -125,6 +129,25 @@ def build_goal_engine(
         store, planning, dispatch, verification, recovery, merge, scheduler, clock=tick,
         notifications=notifications,
     )
+
+
+def select_executor(profile: str) -> Executor:
+    name = "controlled" if profile in {"standard", "controlled", ""} else profile
+    if name == "cursor" and detect_cursor_cli() is not None:
+        return CursorExecutor()
+    if name == "opencode" and detect_opencode_cli() is not None:
+        return OpencodeExecutor()
+    return ControlledOpenExecutor()
+
+
+def _executor_from_repos(repos: RepositoryService) -> Executor:
+    chosen = "controlled"
+    for record in repos.list():
+        name = record.policy.executor.profile
+        if name in {"cursor", "opencode"}:
+            chosen = name
+            break
+    return select_executor(chosen)
 
 
 def _attestation_key(secrets: SecretStore) -> bytes:

@@ -131,10 +131,13 @@ async def test_models_endpoints_fail_closed_and_hide_secrets(
     )
     assert assigned.status_code == 200
     snapshot = (await http.get("/models", headers=headers)).json()
+    assert snapshot["assignments"]["orchestrator"] == profiles["orchestrator"]
     assert snapshot["assignments"]["planner"] == profiles["planner"]
     assert snapshot["assignments"]["coder"] == profiles["coder"]
     assert snapshot["assignments"]["reviewer"] == profiles["reviewer"]
     assert snapshot["assignments"]["embedding"] == profiles["embedding"]
+    assert "cost_ceiling" in snapshot["profiles"][0]["limits"]
+    assert "max_tokens" in snapshot["profiles"][0]["limits"]
     assert snapshot["embedding_backend"]["kind"] == "openai_compatible"
     assert snapshot["embedding_backend"]["model_id"] == "default"
     assert snapshot["providers"][0]["id"] == provider_id
@@ -193,3 +196,56 @@ async def test_models_snapshot_reports_onnx_embedding_backend(
     assert snapshot["embedding_backend"]["kind"] == "onnx"
     assert snapshot["embedding_backend"]["model_id"]
     assert snapshot["embedding_backend"]["display_name"]
+
+
+@pytest.mark.asyncio
+async def test_update_profile_model_id_and_limits(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    http, headers, _tmp_path = client
+    created = await http.post(
+        "/models/providers",
+        headers=headers,
+        json={
+            "kind": "openai_compatible",
+            "display_name": "Ollama",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "billed": False,
+        },
+    )
+    assert created.status_code == 200
+    coder = next(item for item in created.json()["profiles"] if item["role"] == "coder")
+    updated = await http.put(
+        f"/models/profiles/{coder['id']}",
+        headers=headers,
+        json={
+            "model_id": "llama3.1",
+            "limits": {
+                "max_tokens": 2048,
+                "max_attempts": 3,
+                "timeout_seconds": 60.0,
+                "cost_ceiling": 1.25,
+            },
+        },
+    )
+    assert updated.status_code == 200
+    body = updated.json()
+    assert body["id"] == coder["id"]
+    assert body["model_id"] == "llama3.1"
+    assert body["limits"]["cost_ceiling"] == 1.25
+    assert body["limits"]["max_tokens"] == 2048
+    assert "api_key" not in str(body)
+    missing = await http.put(
+        "/models/profiles/prof_missing",
+        headers=headers,
+        json={
+            "model_id": "x",
+            "limits": {
+                "max_tokens": 1,
+                "max_attempts": 1,
+                "timeout_seconds": 1.0,
+                "cost_ceiling": 0.0,
+            },
+        },
+    )
+    assert missing.status_code == 404

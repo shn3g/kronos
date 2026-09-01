@@ -15,6 +15,7 @@ from tests.support.executor_fixtures import (
 
 from kronos_engine.adapters.executors.controlled import ControlledOpenExecutor
 from kronos_engine.adapters.executors.cursor import CliResult, CursorExecutor
+from kronos_engine.adapters.executors.opencode import OpencodeExecutor
 from kronos_engine.adapters.sandboxes.process_jail import ProcessJailSandbox
 from kronos_engine.ports.executor import Executor
 
@@ -47,7 +48,32 @@ def _cursor(_tmp_path: Path) -> Executor:
     )
 
 
-@pytest.mark.parametrize("factory", [_controlled, _cursor], ids=["controlled", "cursor"])
+def _opencode(_tmp_path: Path) -> Executor:
+    def invoke(
+        argv: list[str],
+        env: dict[str, str],
+        cwd: Path,
+        timeout: float,
+    ) -> CliResult:
+        assert "run" in argv
+        assert "--dir" in argv
+        assert env.get("GH_TOKEN") is None
+        assert env.get("KRONOS_AUTH_TOKEN") is None
+        _ = cwd
+        _ = timeout
+        return CliResult(returncode=0, stdout=SYNTHETIC_CONTENT, stderr="")
+
+    return OpencodeExecutor(
+        which=lambda name: "C:/fake/opencode" if name == "opencode" else None,
+        invoke=invoke,
+    )
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [_controlled, _cursor, _opencode],
+    ids=["controlled", "cursor", "opencode"],
+)
 def test_synthetic_fixture_passes_on_both_executors(
     factory: ExecutorFactory, tmp_path: Path
 ) -> None:
@@ -60,11 +86,25 @@ def test_synthetic_fixture_passes_on_both_executors(
     assert written.read_text(encoding="utf-8") == SYNTHETIC_CONTENT
     assert result.artifacts == (SYNTHETIC_ARTIFACT,)
     assert result.usage.attempts == 1
-    assert result.usage.executor_id in {"controlled", "cursor"}
+    assert result.usage.executor_id in {"controlled", "cursor", "opencode"}
     assert request.repository_id.value == "repo_alpha"
     assert request.task_id.value == "task_synthetic"
     expected = tmp_path / "cache" / "worktrees" / "repo_alpha" / "task_synthetic"
     assert worktree.resolve() == expected.resolve()
+
+
+def test_opencode_detection_does_not_run_repository_scripts(tmp_path: Path) -> None:
+    repo = tmp_path / "enrolled"
+    repo.mkdir()
+    pwn = repo / "opencode"
+    pwn.write_text("import pathlib\npathlib.Path('PWNED').write_text('yes')\n", encoding="utf-8")
+    detected = OpencodeExecutor(
+        which=lambda name: (str(tmp_path / "bin" / "opencode") if name == "opencode" else None),
+    ).detect()
+    assert detected is not None
+    assert detected.name == "opencode"
+    assert not (repo / "PWNED").exists()
+    assert not (tmp_path / "PWNED").exists()
 
 
 def test_cursor_detection_does_not_run_repository_scripts(tmp_path: Path) -> None:

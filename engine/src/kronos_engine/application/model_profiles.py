@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Assign planner/coder/reviewer/embedding profiles. Secrets stay in the store."""
+"""Assign orchestrator/planner/coder/reviewer/embedding profiles. Secrets stay in the store."""
 
 from __future__ import annotations
 
@@ -72,10 +72,31 @@ class ModelProfileService:
         return profile
 
     def list_providers(self) -> tuple[ProviderConfig, ...]:
+        self._backfill_orchestrator()
         return tuple(self._registry.list_providers())
 
     def list_profiles(self) -> tuple[ModelProfile, ...]:
+        self._backfill_orchestrator()
         return tuple(self._registry.list_profiles())
+
+    def update_profile(
+        self, profile_id: str, *, model_id: str, limits: ResourceLimits
+    ) -> ModelProfile:
+        known = {item.id: item for item in self.list_profiles()}
+        current = known.get(profile_id)
+        if current is None:
+            raise LookupError(profile_id)
+        updated = ModelProfile(
+            id=current.id,
+            display_name=current.display_name,
+            role=current.role,
+            provider_id=current.provider_id,
+            model_id=model_id,
+            billed=current.billed,
+            approved_fallbacks=current.approved_fallbacks,
+            limits=limits,
+        )
+        return self.save_profile(updated)
 
     def assign(
         self, assignments: Mapping[str, str], *, confirm_shared_roles: bool = False
@@ -83,7 +104,7 @@ class ModelProfileService:
         missing = [role for role in MODEL_ROLES if role not in assignments or not assignments[role]]
         if missing:
             raise RoleAssignmentError(f"missing role assignments: {missing}")
-        known = {profile.id: profile for profile in self._registry.list_profiles()}
+        known = {profile.id: profile for profile in self.list_profiles()}
         unknown = [role for role, profile_id in assignments.items() if profile_id not in known]
         if unknown:
             raise RoleAssignmentError(f"unknown profiles for roles: {unknown}")
@@ -97,6 +118,7 @@ class ModelProfileService:
                 "profile role does not match slot; confirm shared local model"
             )
         result = RoleAssignments(
+            orchestrator=assignments["orchestrator"],
             planner=assignments["planner"],
             coder=assignments["coder"],
             reviewer=assignments["reviewer"],
@@ -106,6 +128,7 @@ class ModelProfileService:
         return result
 
     def assignments(self) -> RoleAssignments:
+        self._backfill_orchestrator()
         return self._registry.load_assignments()
 
     def scoped_secret(self, provider_id: str, ttl_seconds: int) -> ScopedSecret | None:
@@ -116,3 +139,22 @@ class ModelProfileService:
         if value is None:
             return None
         return ScopedSecret(value=value, ttl_seconds=ttl_seconds)
+
+    def _backfill_orchestrator(self) -> None:
+        providers = list(self._registry.list_providers())
+        have = {(item.provider_id, item.role) for item in self._registry.list_profiles()}
+        for provider in providers:
+            if (provider.id, "orchestrator") in have:
+                continue
+            self._registry.save_profile(
+                ModelProfile(
+                    id=f"prof_{provider.id}_orchestrator",
+                    display_name=f"{provider.display_name} (orchestrator)",
+                    role="orchestrator",
+                    provider_id=provider.id,
+                    model_id="default",
+                    billed=provider.billed,
+                    approved_fallbacks=(),
+                    limits=DEFAULT_LIMITS,
+                )
+            )

@@ -30,6 +30,7 @@ function modelsClient(overrides: Partial<ModelsClient> = {}): ModelsClient {
         { id: "prof_embed", displayName: "Local embed", role: "embedding", billed: false },
       ],
       assignments: {
+        orchestrator: "prof_local",
         planner: "prof_local",
         coder: "prof_local",
         reviewer: "prof_local",
@@ -42,6 +43,7 @@ function modelsClient(overrides: Partial<ModelsClient> = {}): ModelsClient {
       },
     }),
     assign: async () => ({
+      orchestrator: "prof_local",
       planner: "prof_local",
       coder: "prof_local",
       reviewer: "prof_local",
@@ -55,6 +57,14 @@ function modelsClient(overrides: Partial<ModelsClient> = {}): ModelsClient {
         billed: false,
       },
       profiles: [],
+    }),
+    updateProfile: async (id, patch) => ({
+      id,
+      displayName: "Local llama3",
+      role: "coder",
+      billed: false,
+      modelId: patch.modelId,
+      limits: patch.limits,
     }),
     ...overrides,
   };
@@ -78,7 +88,7 @@ describe("ModelsPage", () => {
     expect(snapshot).not.toHaveBeenCalled();
   });
 
-  it("assigns planner coder reviewer and embedding profiles", async () => {
+  it("assigns orchestrator planner coder reviewer and embedding profiles", async () => {
     const user = userEvent.setup();
     const assign = vi.fn(async (assignments: Record<ModelRole, string>) => assignments);
     render(
@@ -88,13 +98,15 @@ describe("ModelsPage", () => {
       />,
     );
 
-    expect(await screen.findByLabelText(/^planner$/i)).toBeInTheDocument();
+    expect(await screen.findByLabelText(/^orchestrator$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^planner$/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/^coder$/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/^reviewer$/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/^embedding$/i)).toBeInTheDocument();
     expect(await screen.findByText(/cursor-agent/i)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /save assignments/i }));
     expect(assign).toHaveBeenCalledWith({
+      orchestrator: "prof_local",
       planner: "prof_local",
       coder: "prof_local",
       reviewer: "prof_local",
@@ -105,6 +117,12 @@ describe("ModelsPage", () => {
   it("registers a detected local endpoint on an empty ready engine then assigns", async () => {
     const user = userEvent.setup();
     const profiles = [
+      {
+        id: "prof_orchestrator",
+        displayName: "Local (orchestrator)",
+        role: "orchestrator",
+        billed: false,
+      },
       { id: "prof_planner", displayName: "Local (planner)", role: "planner", billed: false },
       { id: "prof_coder", displayName: "Local (coder)", role: "coder", billed: false },
       { id: "prof_reviewer", displayName: "Local (reviewer)", role: "reviewer", billed: false },
@@ -138,6 +156,7 @@ describe("ModelsPage", () => {
             ],
             profiles: registered ? profiles : [],
             assignments: {
+              orchestrator: null,
               planner: null,
               coder: null,
               reviewer: null,
@@ -164,6 +183,7 @@ describe("ModelsPage", () => {
     expect(await screen.findByLabelText(/^planner$/i)).toHaveValue("prof_planner");
     await user.click(screen.getByRole("button", { name: /save assignments/i }));
     expect(assign).toHaveBeenCalledWith({
+      orchestrator: "prof_orchestrator",
       planner: "prof_planner",
       coder: "prof_coder",
       reviewer: "prof_reviewer",
@@ -190,6 +210,7 @@ describe("ModelsPage", () => {
         { id: "prof_embed", displayName: "Remote embed", role: "embedding", billed: false },
       ],
       assignments: {
+        orchestrator: "prof_local",
         planner: "prof_local",
         coder: "prof_local",
         reviewer: "prof_local",
@@ -210,6 +231,7 @@ describe("ModelsPage", () => {
     const assign = vi.fn(async (assignments: Record<ModelRole, string>) => {
       assigned = true;
       return {
+        orchestrator: assignments.orchestrator,
         planner: assignments.planner,
         coder: assignments.coder,
         reviewer: assignments.reviewer,
@@ -228,5 +250,116 @@ describe("ModelsPage", () => {
     expect(assign).toHaveBeenCalled();
     expect(await screen.findByText(/openai-compatible/i)).toBeInTheDocument();
     expect(snapshot.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it("pre-fills OpenAI and Ollama presets without bundling a key", async () => {
+    const user = userEvent.setup();
+    const createProvider = vi.fn(async () => ({
+      provider: {
+        id: "prov_openai",
+        kind: "openai_compatible",
+        displayName: "OpenAI",
+        billed: true,
+      },
+      profiles: [],
+    }));
+    render(
+      <ModelsPage
+        engineClient={engine("ready")}
+        modelsClient={modelsClient({ createProvider })}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: /^openai$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^openrouter$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /opencode zen/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^ollama$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /lm studio/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^openai$/i }));
+    expect(screen.getByLabelText(/base url/i)).toHaveValue("https://api.openai.com/v1");
+    expect(screen.getByLabelText(/display name/i)).toHaveValue("OpenAI");
+    expect(screen.getByLabelText(/suggested model/i)).toHaveValue("gpt-4o-mini");
+    const billed = screen.getByLabelText(/billed/i);
+    expect(billed).toBeChecked();
+    await user.type(screen.getByLabelText(/api key/i), "sk-user-paste");
+    await user.click(screen.getByRole("button", { name: /create provider/i }));
+    expect(createProvider).toHaveBeenCalledWith({
+      kind: "openai_compatible",
+      displayName: "OpenAI",
+      baseUrl: "https://api.openai.com/v1",
+      billed: true,
+      apiKey: "sk-user-paste",
+    });
+    await user.click(screen.getByRole("button", { name: /^ollama$/i }));
+    expect(screen.getByLabelText(/base url/i)).toHaveValue("http://127.0.0.1:11434/v1");
+    expect(screen.getByLabelText(/billed/i)).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: /^openrouter$/i }));
+    expect(screen.getByLabelText(/base url/i)).toHaveValue("https://openrouter.ai/api/v1");
+    expect(screen.getByLabelText(/billed/i)).toBeChecked();
+    await user.click(screen.getByRole("button", { name: /opencode zen/i }));
+    expect(screen.getByLabelText(/base url/i)).toHaveValue("https://opencode.ai/zen/v1");
+    expect(screen.getByLabelText(/billed/i)).toBeChecked();
+    await user.click(screen.getByRole("button", { name: /lm studio/i }));
+    expect(screen.getByLabelText(/base url/i)).toHaveValue("http://127.0.0.1:1234/v1");
+    expect(screen.getByLabelText(/billed/i)).not.toBeChecked();
+  });
+
+  it("shows editable cost ceiling and max tokens for a profile", async () => {
+    const user = userEvent.setup();
+    const updateProfile = vi.fn(async (id: string, patch: { modelId: string; limits: object }) => ({
+      id,
+      displayName: "Local llama3",
+      role: "coder",
+      billed: false,
+      modelId: patch.modelId,
+      limits: patch.limits,
+    }));
+    render(
+      <ModelsPage
+        engineClient={engine("ready")}
+        modelsClient={modelsClient({
+          snapshot: async () => ({
+            detected: [],
+            profiles: [
+              {
+                id: "prof_local",
+                displayName: "Local llama3",
+                role: "coder",
+                billed: true,
+                modelId: "gpt-4o-mini",
+                limits: {
+                  maxTokens: 4096,
+                  maxAttempts: 3,
+                  timeoutSeconds: 120,
+                  costCeiling: 0,
+                },
+              },
+            ],
+            assignments: {
+              orchestrator: "prof_local",
+              planner: "prof_local",
+              coder: "prof_local",
+              reviewer: "prof_local",
+              embedding: "prof_local",
+            },
+            embeddingBackend: { kind: "none", modelId: "", displayName: "Sparse only" },
+          }),
+          updateProfile,
+        })}
+      />,
+    );
+
+    expect(await screen.findByLabelText(/cost ceiling/i)).toHaveValue(0);
+    expect(screen.getByLabelText(/max tokens/i)).toHaveValue(4096);
+    await user.clear(screen.getByLabelText(/cost ceiling/i));
+    await user.type(screen.getByLabelText(/cost ceiling/i), "5");
+    await user.click(screen.getByRole("button", { name: /save profile/i }));
+    expect(updateProfile).toHaveBeenCalledWith(
+      "prof_local",
+      expect.objectContaining({
+        modelId: "gpt-4o-mini",
+        limits: expect.objectContaining({ costCeiling: 5, maxTokens: 4096 }),
+      }),
+    );
   });
 });

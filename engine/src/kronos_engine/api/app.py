@@ -56,12 +56,14 @@ from kronos_engine.api.models import (
     PathRequest,
     PreviewFileModel,
     ProfileModel,
+    ProfileUpdateRequest,
     ProviderCreateRequest,
     ProviderCreateResponse,
     ProviderModel,
     RepositoryDetailResponse,
     RepositoryListResponse,
     RepositoryRecord,
+    ResourceLimitsModel,
     RunListResponse,
     RunModel,
     SkillApproveRequest,
@@ -111,7 +113,7 @@ from kronos_engine.domain.goals import (
     GoalValidationError,
     InvalidTransition,
 )
-from kronos_engine.domain.models import ModelProfile
+from kronos_engine.domain.models import ModelProfile, ResourceLimits
 from kronos_engine.domain.policy import PolicyError, policy_to_dict
 from kronos_engine.domain.tasks import SchemaError, WipExceeded
 from kronos_engine.domain.version import client_is_compatible
@@ -683,6 +685,7 @@ def create_app(
             try:
                 assigned = service.assign(
                     {
+                        "orchestrator": body.orchestrator,
                         "planner": body.planner,
                         "coder": body.coder,
                         "reviewer": body.reviewer,
@@ -693,6 +696,26 @@ def create_app(
             except RoleAssignmentError as error:
                 raise HTTPException(status_code=400, detail=str(error)) from error
             return AssignmentsResponse(assignments=assigned.as_dict())
+
+    @app.put("/models/profiles/{profile_id}", response_model=ProfileModel)
+    def update_profile(
+        profile_id: str, body: ProfileUpdateRequest, _: None = Depends(require_auth)
+    ) -> ProfileModel:
+        with model_service() as service:
+            try:
+                updated = service.update_profile(
+                    profile_id,
+                    model_id=body.model_id,
+                    limits=ResourceLimits(
+                        max_tokens=body.limits.max_tokens,
+                        max_attempts=body.limits.max_attempts,
+                        timeout_seconds=body.limits.timeout_seconds,
+                        cost_ceiling=body.limits.cost_ceiling,
+                    ),
+                )
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return _profile_model(updated)
 
     @app.get("/repositories/{repository_id}/index", response_model=IndexStatusResponse)
     def index_status(repository_id: str, _: None = Depends(require_auth)) -> IndexStatusResponse:
@@ -1562,6 +1585,12 @@ def _profile_model(profile: ModelProfile) -> ProfileModel:
         model_id=profile.model_id,
         billed=profile.billed,
         approved_fallbacks=list(profile.approved_fallbacks),
+        limits=ResourceLimitsModel(
+            max_tokens=profile.limits.max_tokens,
+            max_attempts=profile.limits.max_attempts,
+            timeout_seconds=profile.limits.timeout_seconds,
+            cost_ceiling=profile.limits.cost_ceiling,
+        ),
     )
 
 

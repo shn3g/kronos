@@ -293,6 +293,13 @@
   list-style: none;
 }
 
+.models__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 20px 0 0;
+}
+
 .models__detected li {
   display: flex;
   flex-wrap: wrap;
@@ -331,7 +338,8 @@
   font-weight: 500;
 }
 
-.models__field select {
+.models__field select,
+.models__field input {
   padding: 8px 10px;
   border: 1px solid var(--hairline);
   border-radius: 8px;

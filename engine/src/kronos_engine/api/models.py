@@ -166,6 +166,13 @@ class ProviderModel(BaseModel):
     billed: bool
 
 
+class ResourceLimitsModel(BaseModel):
+    max_tokens: int
+    max_attempts: int
+    timeout_seconds: float
+    cost_ceiling: float
+
+
 class ProfileModel(BaseModel):
     id: str
     display_name: str
@@ -174,6 +181,7 @@ class ProfileModel(BaseModel):
     model_id: str
     billed: bool
     approved_fallbacks: list[str]
+    limits: ResourceLimitsModel
 
 
 class DetectedToolModel(BaseModel):
@@ -211,6 +219,7 @@ class ProviderCreateResponse(BaseModel):
 
 
 class AssignmentsRequest(BaseModel):
+    orchestrator: str = ""
     planner: str = ""
     coder: str = ""
     reviewer: str = ""
@@ -220,6 +229,11 @@ class AssignmentsRequest(BaseModel):
 
 class AssignmentsResponse(BaseModel):
     assignments: dict[str, str | None]
+
+
+class ProfileUpdateRequest(BaseModel):
+    model_id: str
+    limits: ResourceLimitsModel
 
 
 class IndexStatusResponse(BaseModel):

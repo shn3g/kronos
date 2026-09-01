@@ -3,16 +3,19 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Protocol
 
+from kronos_engine.adapters.models.openai_compatible import HttpTransport, OpenAICompatibleProvider
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import RepositoryService
 from kronos_engine.domain.budgets import check_budget
 from kronos_engine.domain.entities import GoalId
 from kronos_engine.domain.goals import GoalRecord, GoalState, InvalidTransition, transition_goal
+from kronos_engine.domain.models import CostCeilingExceeded, assert_cost_allowed
 from kronos_engine.domain.policy import RISK_STEPS, refuse_mode_write
 from kronos_engine.domain.risk import apply_planner_risk
 from kronos_engine.domain.tasks import (
@@ -27,6 +30,9 @@ from kronos_engine.domain.tasks import (
     parse_task_graph,
 )
 from kronos_engine.domain.workflow import require_evidence
+from kronos_engine.ports.model_provider import CompletionRequest
+from kronos_engine.ports.model_registry import ModelRegistry
+from kronos_engine.ports.secrets import ScopedSecret, SecretExpiredError, SecretStore
 from kronos_engine.state.goals import SqliteGoalStore
 
 
@@ -180,6 +186,105 @@ class IndexedPlanner:
                 }
             ]
         }
+
+
+_PLANNER_SYSTEM = (
+    "Return only a JSON object with this shape: "
+    '{"tasks":[{"id":"","title":"","kind":"implementation","depends_on":[],'
+    '"evidence":[{"path":"","line":1}],"size":"S","baseline_size":"S",'
+    '"risk":"low","scope_paths":[""]}]}. No markdown.'
+)
+_SECRET_TTL_SECONDS = 60
+
+
+class LlmPlanner:
+    """Planner-role completion with IndexedPlanner as the deterministic fallback."""
+
+    def __init__(
+        self,
+        registry: ModelRegistry,
+        secrets: SecretStore,
+        fallback: Planner,
+        *,
+        complete: Callable[..., object] | None = None,
+        transport: HttpTransport | None = None,
+    ) -> None:
+        self._registry = registry
+        self._secrets = secrets
+        self._fallback = fallback
+        self._complete = complete
+        self._transport = transport
+
+    def plan(self, goal: object) -> Mapping[str, object]:
+        planned = self._llm_plan(goal)
+        if planned is None:
+            result = self._fallback.plan(goal)
+            return dict(result) if not isinstance(result, dict) else result
+        return planned
+
+    def _llm_plan(self, goal: object) -> dict[str, object] | None:
+        if not isinstance(goal, GoalRecord):
+            return None
+        assignments = self._registry.load_assignments()
+        profile_id = assignments.planner
+        if not profile_id:
+            return None
+        profiles = {item.id: item for item in self._registry.list_profiles()}
+        profile = profiles.get(profile_id)
+        if profile is None:
+            return None
+        providers = {item.id: item for item in self._registry.list_providers()}
+        provider = providers.get(profile.provider_id)
+        if provider is None or not provider.base_url:
+            return None
+        raw = self._secrets.get(provider.secret_ref)
+        secret = ScopedSecret(value=raw, ttl_seconds=_SECRET_TTL_SECONDS) if raw else None
+        prompt = (
+            f"Goal: {goal.title}\n"
+            f"Success criteria: {goal.success_criteria}\n"
+            f"Non-goals: {goal.non_goals}\n"
+            f"Risk ceiling: {goal.risk_ceiling}\n"
+            "Emit a single-task JSON plan with evidence and scope_paths."
+        )
+        request = CompletionRequest(
+            profile=profile,
+            prompt=prompt,
+            messages=(
+                {"role": "system", "content": _PLANNER_SYSTEM},
+                {"role": "user", "content": prompt},
+            ),
+        )
+        try:
+            billed = provider.billed or profile.billed
+            assert_cost_allowed(profile.limits, estimated_cost=0.0, billed=billed)
+            if self._complete is not None:
+                result = self._complete(request, secret)
+            else:
+                adapter = OpenAICompatibleProvider(
+                    base_url=provider.base_url,
+                    billed=provider.billed,
+                    transport=self._transport,
+                )
+                result = adapter.complete(request, secret)
+            text = getattr(result, "text", "")
+            if not isinstance(text, str):
+                return None
+            parsed: object = json.loads(text)
+            parse_task_graph(parsed)
+            if not isinstance(parsed, dict):
+                return None
+            return parsed
+        except (
+            CostCeilingExceeded,
+            SchemaError,
+            json.JSONDecodeError,
+            RuntimeError,
+            ValueError,
+            TypeError,
+            SecretExpiredError,
+            OSError,
+        ):
+            return None
 
 
 def _step(value: str) -> int:

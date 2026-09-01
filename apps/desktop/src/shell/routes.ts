@@ -42,7 +42,7 @@ export const ROUTES = [
     path: "/models",
     name: "Models",
     heading: "Models",
-    summary: "Assign planner, coder, reviewer, and embedding profiles. Fail closed without an engine.",
+    summary: "Assign orchestrator, planner, coder, reviewer, and embedding profiles. Fail closed without an engine.",
   },
   {
     path: "/index",

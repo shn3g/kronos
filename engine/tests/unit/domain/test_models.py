@@ -43,8 +43,8 @@ def _profile(**overrides: object) -> ModelProfile:
     return ModelProfile(**values)  # type: ignore[arg-type]
 
 
-def test_four_engineering_roles_are_explicit() -> None:
-    assert MODEL_ROLES == ("planner", "coder", "reviewer", "embedding")
+def test_engineering_roles_include_orchestrator() -> None:
+    assert MODEL_ROLES == ("orchestrator", "planner", "coder", "reviewer", "embedding")
 
 
 def test_unapproved_fallback_fails_deterministically() -> None:

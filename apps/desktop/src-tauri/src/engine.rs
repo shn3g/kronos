@@ -262,6 +262,9 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
     if path == "/models/assignments" {
         return method == "PUT";
     }
+    if let Some(rest) = path.strip_prefix("/models/profiles/") {
+        return method == "PUT" && skill_memory_id_ok(rest);
+    }
     if path == "/goals" || path == "/goals/" {
         return method == "GET" || method == "POST";
     }
@@ -869,6 +872,10 @@ mod tests {
         assert!(engine_path_allowed("GET", "/models"));
         assert!(engine_path_allowed("POST", "/models/providers"));
         assert!(engine_path_allowed("PUT", "/models/assignments"));
+        assert!(engine_path_allowed("PUT", "/models/profiles/prof_prov_abc_coder"));
+        assert!(!engine_path_allowed("GET", "/models/profiles/prof_prov_abc_coder"));
+        assert!(!engine_path_allowed("PUT", "/models/profiles/../secret"));
+        assert!(!engine_path_allowed("GET", "/models/assignments"));
         assert!(!engine_path_allowed("GET", "/models/assignments"));
         assert!(!engine_path_allowed("POST", "/secrets"));
         assert!(engine_path_allowed("GET", "/github/status"));

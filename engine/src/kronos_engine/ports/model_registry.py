@@ -23,6 +23,7 @@ class ProviderConfig:
 
 @dataclass(frozen=True, slots=True)
 class RoleAssignments:
+    orchestrator: str | None
     planner: str | None
     coder: str | None
     reviewer: str | None
@@ -30,6 +31,7 @@ class RoleAssignments:
 
     def as_dict(self) -> dict[str, str | None]:
         return {
+            "orchestrator": self.orchestrator,
             "planner": self.planner,
             "coder": self.coder,
             "reviewer": self.reviewer,
