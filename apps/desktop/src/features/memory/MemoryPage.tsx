@@ -50,6 +50,10 @@ export function MemoryPage({ engineClient, memoryClient }: MemoryPageProps) {
       if (!cancelled) {
         setRecords(items);
       }
+    }).catch(() => {
+      if (!cancelled) {
+        setRecords([]);
+      }
     });
     return () => {
       cancelled = true;

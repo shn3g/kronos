@@ -16,7 +16,7 @@ function clients(overrides: Partial<SettingsPageClients> = {}): SettingsPageClie
   return {
     load: async () => ({ otelExport: false, langfuseExport: false }),
     save: async (next) => next,
-    doctor: async () => ({ ready: true, findings: ["engine ok"] }),
+    doctor: async () => ({ ready: true, findings: ["engine ok"], checks: [] }),
     backup: async () => ({ path: "C:/tmp/backup", includesSecretStore: false }),
     ...overrides,
   };

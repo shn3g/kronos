@@ -6,7 +6,7 @@ export const ROUTES = [
     name: "Home",
     heading: "Home",
     summary:
-      "Kronos is a local software-engineering operating system. Goals, runs, and repository work appear here once an engine is connected.",
+      "Kronos is a locally installed desktop app for coding agents. Chat, goals, and repository work appear here once an engine is connected.",
   },
   {
     path: "/workspaces",

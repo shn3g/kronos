@@ -1,6 +1,6 @@
 # Contributing to Kronos
 
-Kronos is a local software-engineering operating system licensed under the [GNU Affero General Public License v3.0](LICENSE). By contributing, you license your work under the same AGPL-3.0 terms.
+Kronos is a locally installed desktop app for coding agents, licensed under the [GNU Affero General Public License v3.0](LICENSE). By contributing, you license your work under the same AGPL-3.0 terms.
 
 Hermes is not a dependency. Do not add Hermes packages, submodules, or runtime imports.
 

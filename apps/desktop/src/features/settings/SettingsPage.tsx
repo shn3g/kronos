@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import type { EngineClient } from "../../engine/client";
+import { HealthList } from "../health/HealthList";
+import type { HealthCheck } from "../health/checks";
 import {
   createProductionSettingsClient,
   type OpsSettingsView,
@@ -25,6 +27,7 @@ export function SettingsPage({ engineClient, settingsClient }: SettingsPageProps
     langfuseExport: false,
   });
   const [findings, setFindings] = useState<string[]>([]);
+  const [checks, setChecks] = useState<HealthCheck[]>([]);
   const [backupPath, setBackupPath] = useState<string | null>(null);
 
   useEffect(() => {
@@ -49,9 +52,11 @@ export function SettingsPage({ engineClient, settingsClient }: SettingsPageProps
       return;
     }
     let cancelled = false;
-    void client.load().then((next) => {
+    void Promise.all([client.load(), client.doctor()]).then(([next, report]) => {
       if (!cancelled) {
         setSettings(next);
+        setChecks(report.checks);
+        setFindings(report.findings);
       }
     });
     return () => {
@@ -87,6 +92,7 @@ export function SettingsPage({ engineClient, settingsClient }: SettingsPageProps
   async function onDoctor() {
     const report = await client.doctor();
     setFindings(report.findings);
+    setChecks(report.checks);
   }
 
   async function onBackup() {
@@ -102,6 +108,7 @@ export function SettingsPage({ engineClient, settingsClient }: SettingsPageProps
         Export is off by default. GitHub PEMs and Telegram bot tokens stay in the OS secret store
         and the Connections native import flow.
       </p>
+      {checks.length > 0 ? <HealthList checks={checks} /> : null}
       <label className="models__confirm">
         <input
           type="checkbox"

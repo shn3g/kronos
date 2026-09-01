@@ -13,3 +13,4 @@ File-level notes that accumulate as subsystems land.
 - [Retrieval metrics](../retrieval-metrics.md)
 - [Operations and rollback](../operations.md)
 - [Threat model](../security/threat-model.md)
+- [Agent desktop](agent-desktop.md)

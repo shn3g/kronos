@@ -318,6 +318,20 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
     if let Some(rest) = path.strip_prefix("/memory/") {
         return method == "GET" && skill_memory_id_ok(rest);
     }
+    if path == "/chat/sessions" || path == "/chat/sessions/" {
+        return method == "GET" || method == "POST";
+    }
+    if let Some(rest) = path.strip_prefix("/chat/sessions/") {
+        if rest.is_empty() {
+            return false;
+        }
+        if let Some((id, action)) = rest.split_once('/') {
+            return method == "POST"
+                && skill_memory_id_ok(id)
+                && matches!(action, "messages" | "cancel");
+        }
+        return method == "GET" && skill_memory_id_ok(rest);
+    }
     if path == "/telegram/status" || path == "/telegram/status/" {
         return method == "GET";
     }
@@ -927,5 +941,11 @@ mod tests {
         assert!(engine_path_allowed("POST", "/ops/rollback"));
         assert!(!engine_path_allowed("POST", "/ops/token"));
         assert!(!engine_path_allowed("POST", "/ops/pem"));
+        assert!(engine_path_allowed("GET", "/chat/sessions"));
+        assert!(engine_path_allowed("POST", "/chat/sessions"));
+        assert!(engine_path_allowed("GET", "/chat/sessions/chat_1"));
+        assert!(engine_path_allowed("POST", "/chat/sessions/chat_1/messages"));
+        assert!(engine_path_allowed("POST", "/chat/sessions/chat_1/cancel"));
+        assert!(!engine_path_allowed("DELETE", "/chat/sessions/chat_1"));
     }
 }

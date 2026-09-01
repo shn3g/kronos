@@ -1,0 +1,173 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+import { useEffect, useId, useState, type ReactNode } from "react";
+
+export type MenuId = "file" | "edit" | "view" | "help" | null;
+
+interface MenuBarProps {
+  historyOpen: boolean;
+  activityCollapsed: boolean;
+  onNewChat: () => void;
+  onOpenWorkspace: () => void;
+  onToggleHistory: () => void;
+  onToggleActivityBar: () => void;
+  onOpenSettings: () => void;
+  onOpenModels: () => void;
+}
+
+export function MenuBar({
+  historyOpen,
+  activityCollapsed,
+  onNewChat,
+  onOpenWorkspace,
+  onToggleHistory,
+  onToggleActivityBar,
+  onOpenSettings,
+  onOpenModels,
+}: MenuBarProps) {
+  const [open, setOpen] = useState<MenuId>(null);
+  const fileId = useId();
+  const editId = useId();
+  const viewId = useId();
+  const helpId = useId();
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  return (
+    <div className="menu-bar" role="menubar" aria-label="Application">
+      <Menu
+        id={fileId}
+        label="File"
+        open={open === "file"}
+        onOpen={() => {
+          setOpen(open === "file" ? null : "file");
+        }}
+      >
+        <MenuItem
+          label="New chat"
+          onSelect={() => {
+            setOpen(null);
+            onNewChat();
+          }}
+        />
+        <MenuItem
+          label="Open workspace"
+          onSelect={() => {
+            setOpen(null);
+            onOpenWorkspace();
+          }}
+        />
+        <MenuItem
+          label="Settings"
+          onSelect={() => {
+            setOpen(null);
+            onOpenSettings();
+          }}
+        />
+      </Menu>
+      <Menu
+        id={editId}
+        label="Edit"
+        open={open === "edit"}
+        onOpen={() => {
+          setOpen(open === "edit" ? null : "edit");
+        }}
+      >
+        <MenuItem
+          label="Models"
+          onSelect={() => {
+            setOpen(null);
+            onOpenModels();
+          }}
+        />
+      </Menu>
+      <Menu
+        id={viewId}
+        label="View"
+        open={open === "view"}
+        onOpen={() => {
+          setOpen(open === "view" ? null : "view");
+        }}
+      >
+        <MenuItem
+          label={historyOpen ? "Hide chat history" : "Chat history"}
+          onSelect={() => {
+            setOpen(null);
+            onToggleHistory();
+          }}
+        />
+        <MenuItem
+          label={activityCollapsed ? "Show activity bar" : "Hide activity bar"}
+          onSelect={() => {
+            setOpen(null);
+            onToggleActivityBar();
+          }}
+        />
+      </Menu>
+      <Menu
+        id={helpId}
+        label="Help"
+        open={open === "help"}
+        onOpen={() => {
+          setOpen(open === "help" ? null : "help");
+        }}
+      >
+        <p className="menu-help">
+          Kronos is a locally installed desktop app for coding agents on your git folders.
+        </p>
+      </Menu>
+    </div>
+  );
+}
+
+interface MenuProps {
+  id: string;
+  label: string;
+  open: boolean;
+  onOpen: () => void;
+  children: ReactNode;
+}
+
+function Menu({ id, label, open, onOpen, children }: MenuProps) {
+  return (
+    <div className="menu">
+      <button
+        type="button"
+        className="menu__trigger"
+        role="menuitem"
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={onOpen}
+      >
+        {label}
+      </button>
+      {open ? (
+        <div className="menu__panel" id={id} role="menu">
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+interface MenuItemProps {
+  label: string;
+  onSelect: () => void;
+}
+
+function MenuItem({ label, onSelect }: MenuItemProps) {
+  return (
+    <button type="button" className="menu__item" role="menuitem" onClick={onSelect}>
+      {label}
+    </button>
+  );
+}

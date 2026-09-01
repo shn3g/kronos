@@ -1,6 +1,6 @@
 # Quickstart
 
-Kronos is a local software-engineering operating system. One desktop application plans bounded work, runs tests, and keeps repository automation under committed policy.
+Kronos is a locally installed desktop app for coding agents. You pick a git folder, connect a model, and work in a chat window. The app can search a local index, start longer goals, and run tests under committed policy.
 
 Windows, macOS, and Linux. Licensed under GNU AGPL v3.0.
 
@@ -8,7 +8,7 @@ Windows, macOS, and Linux. Licensed under GNU AGPL v3.0.
 
 Download a Windows NSIS installer, Linux `.deb`, or macOS `.app` from a [GitHub Release](https://github.com/shn3g/kronos/releases) (`v0.1.0` is the current preview).
 
-Signing is not present. Windows SmartScreen and macOS Gatekeeper will warn. That is the OS. Use "Run anyway" or right-click Open for the unsigned path.
+Installers are not code-signed yet. Windows SmartScreen and macOS Gatekeeper will warn because they do not recognize the publisher. If you built this release or trust the download, choose Run anyway on Windows, or Open on macOS.
 
 The desktop sidecar still runs `python -m kronos_engine` (`python` on Windows, `python3` elsewhere) from PATH. Python 3.11+ must be installed until a later bundle. An unsigned installer that does not bundle Python is not fully one-click.
 
