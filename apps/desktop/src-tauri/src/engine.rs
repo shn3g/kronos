@@ -237,10 +237,12 @@ pub async fn engine_stream(
     path: String,
     body: Option<serde_json::Value>,
     request_id: String,
-) {
+) -> Result<(), String> {
+    // Tauri 2: async commands that take State<'_> (a reference) must return Result,
+    // or generate_handler! omits the command and the crate does not compile.
     let supervisor = state.inner().clone();
     let cancels = cancels.inner().clone();
-    let _ = tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(move || {
         run_engine_stream(
             &app,
             &supervisor,
@@ -251,7 +253,9 @@ pub async fn engine_stream(
             &request_id,
         );
     })
-    .await;
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1514,6 +1518,19 @@ mod tests {
         assert!(!engine_path_allowed("GET", "/conversations/conv_abc/messages"));
         assert!(!engine_path_allowed("DELETE", "/repositories/repo_alpha/conversations"));
         assert!(!engine_path_allowed("POST", "/conversations/../secret/messages"));
+    }
+
+    #[test]
+    fn engine_stream_command_returns_result_for_tauri_state_refs() {
+        let src = include_str!("engine.rs");
+        let start = src
+            .find("pub async fn engine_stream(")
+            .expect("engine_stream command");
+        let signature = &src[start..start.saturating_add(500)];
+        assert!(
+            signature.contains("-> Result<(), String>"),
+            "Tauri 2 rejects async commands with State<'_> unless they return Result"
+        );
     }
 
     #[test]
