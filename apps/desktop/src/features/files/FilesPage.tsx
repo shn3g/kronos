@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { EngineClient } from "../../engine/client";
+import type { IndexClient, IndexHit } from "../index/client";
 import {
   createProductionRepositoriesClient,
   type RepositoriesClient,
@@ -20,14 +21,18 @@ interface FilesPageProps {
   engineClient: EngineClient;
   repositoryId: string | null;
   repositoriesClient?: RepositoriesClient;
+  indexClient?: IndexClient;
   onOpenWorkspace: () => void;
+  onAskInChat?: (path: string) => void;
 }
 
 export function FilesPage({
   engineClient,
   repositoryId,
   repositoriesClient,
+  indexClient,
   onOpenWorkspace,
+  onAskInChat,
 }: FilesPageProps) {
   const client = repositoriesClient ?? productionRepos;
   const [ready, setReady] = useState(false);
@@ -40,6 +45,10 @@ export function FilesPage({
   const [preview, setPreview] = useState<WorkspaceFileContents | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchHits, setSearchHits] = useState<IndexHit[]>([]);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searching, setSearching] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,6 +75,9 @@ export function FilesPage({
     setExpanded(new Set());
     setPaths([]);
     setListError(null);
+    setSearchQuery("");
+    setSearchHits([]);
+    setSearchError(null);
   }, [repositoryId]);
 
   useEffect(() => {
@@ -135,6 +147,30 @@ export function FilesPage({
     return expanded;
   }, [expanded, filter, visible]);
   const rows = useMemo(() => flattenFileTree(visible, expandedPaths), [expandedPaths, visible]);
+
+  async function onSearch(): Promise<void> {
+    if (!indexClient || !repositoryId) {
+      return;
+    }
+    const query = searchQuery.trim();
+    if (query === "") {
+      setSearchHits([]);
+      setSearchError("Type something to search this workspace.");
+      return;
+    }
+    setSearching(true);
+    setSearchError(null);
+    try {
+      const next = await indexClient.search(repositoryId, query);
+      setSearchHits(next);
+      setSearchError(next.length === 0 ? "No matching files in this workspace." : null);
+    } catch {
+      setSearchHits([]);
+      setSearchError("Could not search this workspace. Check that the engine is running, then try again.");
+    } finally {
+      setSearching(false);
+    }
+  }
 
   if (!ready) {
     return (
@@ -209,7 +245,20 @@ export function FilesPage({
           </div>
         </div>
         <div className="files-page__pane files-page__pane--preview">
-          <p className="files-page__preview-kicker">Read-only preview</p>
+          <div className="files-page__preview-head">
+            <p className="files-page__preview-kicker">Read-only preview</p>
+            {selectedPath && onAskInChat ? (
+              <button
+                type="button"
+                className="btn-quiet"
+                onClick={() => {
+                  onAskInChat(selectedPath);
+                }}
+              >
+                Ask in chat
+              </button>
+            ) : null}
+          </div>
           {previewError ? <p className="wizard__error">{previewError}</p> : null}
           {loadingPreview ? (
             <p className="files-page__status" aria-live="polite">
@@ -222,6 +271,49 @@ export function FilesPage({
           {preview && !loadingPreview ? <PreviewBody preview={preview} /> : null}
         </div>
       </div>
+      {indexClient ? (
+        <form
+          className="files-page__search"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void onSearch();
+          }}
+        >
+          <label className="files-page__filter" htmlFor="files-search">
+            Search contents
+            <input
+              id="files-search"
+              type="search"
+              role="searchbox"
+              value={searchQuery}
+              onChange={(event) => {
+                setSearchQuery(event.target.value);
+              }}
+            />
+          </label>
+          <button type="submit" className="btn-quiet" disabled={searching}>
+            Search
+          </button>
+        </form>
+      ) : null}
+      {searchError ? <p className="wizard__error">{searchError}</p> : null}
+      {searchHits.length > 0 ? (
+        <ul className="files-page__hits">
+          {searchHits.map((hit) => (
+            <li key={`${hit.path}:${hit.startLine}`}>
+              <button
+                type="button"
+                className="files-page__hit"
+                onClick={() => {
+                  setSelectedPath(hit.path);
+                }}
+              >
+                {hit.path}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </section>
   );
 }

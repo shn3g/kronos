@@ -29,6 +29,22 @@ export function insertMention(text: string, start: number, query: string, path: 
   return `${text.slice(0, start)}@${path} ${text.slice(start + 1 + query.length)}`;
 }
 
+export function appendMention(text: string, path: string): string {
+  const posix = path.replaceAll("\\", "/").trim();
+  if (posix === "") {
+    return text;
+  }
+  const token = `@${posix}`;
+  const parts = text.trim().split(/\s+/).filter((part) => part !== "");
+  if (parts.includes(token)) {
+    return `${parts.join(" ")} `;
+  }
+  if (parts.length === 0) {
+    return `${token} `;
+  }
+  return `${parts.join(" ")} ${token} `;
+}
+
 export function uniqueMentionPaths(hits: { path: string }[]): string[] {
   const seen = new Set<string>();
   const paths: string[] = [];

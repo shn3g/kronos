@@ -130,4 +130,110 @@ describe("FilesPage", () => {
     expect(await screen.findByRole("treeitem", { name: "README.md" })).toBeInTheDocument();
     expect(screen.queryByRole("treeitem", { name: "src" })).not.toBeInTheDocument();
   });
+
+  it("asks in chat for the selected file", async () => {
+    const user = userEvent.setup();
+    const onAskInChat = vi.fn();
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos()}
+        onOpenWorkspace={() => undefined}
+        onAskInChat={onAskInChat}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: /ask in chat/i })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    await user.click(await screen.findByRole("button", { name: /ask in chat/i }));
+    expect(onAskInChat).toHaveBeenCalledWith("src/app.py");
+  });
+
+  it("searches workspace contents and opens a hit in the preview", async () => {
+    const user = userEvent.setup();
+    const search = vi.fn(async () => [
+      {
+        path: "src/app.py",
+        startLine: 1,
+        endLine: 4,
+        commit: "abc123",
+        symbol: "connect",
+        rankSources: ["sparse"],
+        trust: "tracked",
+        text: "def connect",
+      },
+    ]);
+    const readWorkspaceFile = vi.fn(async (_id: string, path: string) => ({
+      path,
+      content: "print(1)\n",
+      binary: false,
+    }));
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({ readWorkspaceFile })}
+        indexClient={{
+          status: async () => ({
+            repositoryId: "repo_alpha",
+            commit: "abc123",
+            chunkCount: 4,
+            denseAvailable: false,
+            indexPath: "C:/cache/indexes/repo_alpha",
+            ready: true,
+          }),
+          rebuild: async () => {
+            throw new Error("rebuild should not run");
+          },
+          search,
+        }}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.type(await screen.findByRole("searchbox", { name: /search contents/i }), "connect");
+    await user.click(screen.getByRole("button", { name: /^search$/i }));
+    expect(search).toHaveBeenCalledWith("repo_alpha", "connect");
+    await user.click(await screen.findByRole("button", { name: "src/app.py" }));
+    expect(readWorkspaceFile).toHaveBeenCalledWith("repo_alpha", "src/app.py");
+    expect(await screen.findByText("print(1)")).toBeInTheDocument();
+  });
+
+  it("shows a specific error when content search fails", async () => {
+    const user = userEvent.setup();
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos()}
+        indexClient={{
+          status: async () => ({
+            repositoryId: "repo_alpha",
+            commit: "abc123",
+            chunkCount: 4,
+            denseAvailable: false,
+            indexPath: "C:/cache/indexes/repo_alpha",
+            ready: true,
+          }),
+          rebuild: async () => {
+            throw new Error("rebuild should not run");
+          },
+          search: async () => {
+            throw new Error("engine request failed: 500");
+          },
+        }}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.type(await screen.findByRole("searchbox", { name: /search contents/i }), "connect");
+    await user.click(screen.getByRole("button", { name: /^search$/i }));
+    expect(
+      await screen.findByText(
+        /could not search this workspace\. check that the engine is running, then try again/i,
+      ),
+    ).toBeInTheDocument();
+  });
 });

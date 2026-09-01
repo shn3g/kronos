@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, it } from "vitest";
-import { insertMention, mentionQueryAtCursor, mentionSegments, uniqueMentionPaths } from "./mentionQuery";
+import { appendMention, insertMention, mentionQueryAtCursor, mentionSegments, uniqueMentionPaths } from "./mentionQuery";
 
 describe("mentionQueryAtCursor", () => {
   it("reads the query after the last @ before the cursor", () => {
@@ -20,6 +20,17 @@ describe("mentionQueryAtCursor", () => {
 describe("insertMention", () => {
   it("replaces the @query with a path token", () => {
     expect(insertMention("fix @ap", 4, "ap", "src/App.tsx")).toBe("fix @src/App.tsx ");
+  });
+});
+
+describe("appendMention", () => {
+  it("starts a draft with the path token", () => {
+    expect(appendMention("", "src/app.py")).toBe("@src/app.py ");
+  });
+
+  it("appends the path to existing text and skips a duplicate", () => {
+    expect(appendMention("explain this", "src/app.py")).toBe("explain this @src/app.py ");
+    expect(appendMention("@src/app.py ", "src/app.py")).toBe("@src/app.py ");
   });
 });
 

@@ -406,6 +406,30 @@ describe("ChatPage", () => {
     expect(mentioned[0]?.tagName).toBe("CODE");
   });
 
+  it("appends a workspace path from an external mention request", async () => {
+    const { rerender } = render(
+      <ChatPage
+        chatClient={chatClient()}
+        repositoryId="repo_alpha"
+        historyOpen={false}
+        mentionRequest={{ path: "", nonce: 0 }}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByRole("textbox", { name: /ask kronos/i })).toHaveValue("");
+    rerender(
+      <ChatPage
+        chatClient={chatClient()}
+        repositoryId="repo_alpha"
+        historyOpen={false}
+        mentionRequest={{ path: "src/app.py", nonce: 1 }}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+    expect(await screen.findByRole("textbox", { name: /ask kronos/i })).toHaveValue("@src/app.py ");
+  });
+
   it("inserts an indexed file path when an @ mention is chosen", async () => {
     const user = userEvent.setup();
     const search = vi.fn(async () => [

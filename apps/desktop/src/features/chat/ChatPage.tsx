@@ -3,15 +3,18 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatClient, ChatMessage, ChatSession } from "./client";
 import { ChatMarkdown } from "./ChatMarkdown";
-import { insertMention, mentionQueryAtCursor, mentionSegments, uniqueMentionPaths } from "./mentionQuery";
+import { appendMention, insertMention, mentionQueryAtCursor, mentionSegments, uniqueMentionPaths } from "./mentionQuery";
 import { toolCardLabel } from "./toolCard";
 import type { IndexClient } from "../index/client";
+
+const EMPTY_MENTION_REQUEST = { path: "", nonce: 0 };
 
 interface ChatPageProps {
   chatClient: ChatClient;
   repositoryId: string | null;
   historyOpen: boolean;
   newChatRequest?: number;
+  mentionRequest?: { path: string; nonce: number };
   plannerName?: string | null;
   indexClient?: IndexClient;
   onOpenWorkspace: () => void;
@@ -23,6 +26,7 @@ export function ChatPage({
   repositoryId,
   historyOpen,
   newChatRequest = 0,
+  mentionRequest = EMPTY_MENTION_REQUEST,
   plannerName = null,
   indexClient,
   onOpenWorkspace,
@@ -99,6 +103,16 @@ export function ChatPage({
     }
     void startNewChat();
   }, [newChatRequest]);
+
+  useEffect(() => {
+    if (mentionRequest.nonce === 0 || mentionRequest.path.trim() === "") {
+      return;
+    }
+    setDraft((current) => appendMention(current, mentionRequest.path));
+    requestAnimationFrame(() => {
+      composerRef.current?.focus();
+    });
+  }, [mentionRequest]);
 
   useEffect(() => {
     const node = threadRef.current;

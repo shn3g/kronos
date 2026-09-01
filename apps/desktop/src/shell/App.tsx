@@ -101,6 +101,7 @@ export function App({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("changes");
   const [newChatRequest, setNewChatRequest] = useState(0);
+  const [mentionRequest, setMentionRequest] = useState({ path: "", nonce: 0 });
   const [activityCollapsed, setActivityCollapsed] = useState(() =>
     readFlag(ACTIVITY_BAR_STORAGE_KEY),
   );
@@ -353,6 +354,7 @@ export function App({
                   repositoryId={session.workspaceId}
                   historyOpen={historyOpen}
                   newChatRequest={newChatRequest}
+                  mentionRequest={mentionRequest}
                   plannerName={plannerName}
                   indexClient={index}
                   onOpenWorkspace={() => {
@@ -378,8 +380,13 @@ export function App({
                     engineClient={engine}
                     repositoryId={session.workspaceId}
                     repositoriesClient={repos}
+                    indexClient={index}
                     onOpenWorkspace={() => {
                       setActivity("workspaces");
+                    }}
+                    onAskInChat={(path) => {
+                      setMentionRequest((current) => ({ path, nonce: current.nonce + 1 }));
+                      setActivity("chat");
                     }}
                   />
                 </div>
