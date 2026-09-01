@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { EngineClient } from "../../engine/client";
 import {
   createProductionRepositoriesClient,
@@ -32,6 +32,7 @@ export function TerminalPage({
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [historyStash, setHistoryStash] = useState("");
+  const stoppingRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,6 +71,41 @@ export function TerminalPage({
       setBusy(false);
     }
   }
+
+  async function onStop(): Promise<void> {
+    if (!repositoryId || stoppingRef.current || !busy) {
+      return;
+    }
+    stoppingRef.current = true;
+    try {
+      await client.cancelWorkspaceCommand(repositoryId);
+    } catch {
+      setError("Could not stop that command. Wait for it to finish, then try again.");
+    } finally {
+      stoppingRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    if (!busy) {
+      return;
+    }
+    function onKey(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        void onStop();
+        return;
+      }
+      if (event.key === "c" && (event.ctrlKey || event.metaKey) && !event.shiftKey) {
+        event.preventDefault();
+        void onStop();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [busy, client, repositoryId]);
 
   if (!ready) {
     return (
@@ -156,6 +192,11 @@ export function TerminalPage({
         >
           {busy ? "Running" : "Run"}
         </button>
+        {busy ? (
+          <button type="button" className="btn-quiet" onClick={() => void onStop()}>
+            Stop
+          </button>
+        ) : null}
       </div>
       <pre className="terminal-page__output" data-empty={run ? undefined : "true"}>
         {run?.output ?? "Run a command in this workspace."}
@@ -170,6 +211,9 @@ function runStatus(run: WorkspaceTerminalRun | null, busy: boolean): string | nu
   }
   if (!run) {
     return null;
+  }
+  if (run.cancelled) {
+    return "Stopped.";
   }
   if (run.timedOut) {
     return "The command timed out.";

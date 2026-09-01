@@ -55,6 +55,7 @@ export interface WorkspaceTerminalRun {
   command: string;
   exitCode: number | null;
   timedOut: boolean;
+  cancelled: boolean;
   output: string;
 }
 
@@ -72,6 +73,7 @@ export interface RepositoriesClient {
   readWorkspaceFile(id: string, path: string): Promise<WorkspaceFileContents>;
   writeWorkspaceFile(id: string, path: string, content: string): Promise<void>;
   runWorkspaceCommand(id: string, command: string): Promise<WorkspaceTerminalRun>;
+  cancelWorkspaceCommand(id: string): Promise<{ ok: boolean }>;
 }
 
 export async function pickRepositoryFolder(): Promise<string | null> {
@@ -158,8 +160,18 @@ export function createProductionRepositoriesClient(
         command: stringField(payload, "command") || command,
         exitCode: typeof payload.exit_code === "number" ? payload.exit_code : null,
         timedOut: payload.timed_out === true,
+        cancelled: payload.cancelled === true,
         output: stringField(payload, "output"),
       };
+    },
+    async cancelWorkspaceCommand(id: string) {
+      const payload = await jsonRequest(
+        request,
+        "POST",
+        `/repositories/${id}/terminal/runs/cancel`,
+        {},
+      );
+      return { ok: payload.ok === true };
     },
   };
 }

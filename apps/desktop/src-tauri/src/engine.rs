@@ -22,6 +22,7 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const ENGINE_JSON_TIMEOUT: Duration = Duration::from_secs(30);
 const CHAT_TURN_TIMEOUT: Duration = Duration::from_secs(300);
 const INDEX_JOB_TIMEOUT: Duration = Duration::from_secs(180);
+const TERMINAL_RUN_TIMEOUT: Duration = Duration::from_secs(90);
 
 #[derive(Clone, Serialize)]
 #[serde(tag = "status", rename_all = "camelCase")]
@@ -408,6 +409,7 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
                     | ("POST", Some("commits"))
                     | ("POST", Some("writes/revert"))
                     | ("POST", Some("terminal/runs"))
+                    | ("POST", Some("terminal/runs/cancel"))
                     | ("POST", Some("pause" | "disable" | "remove" | "re-enrol" | "resume"))
             )
         }
@@ -758,6 +760,9 @@ fn engine_json_timeout(method: &str, path: &str) -> Duration {
     if normalized.ends_with("/index/rebuild") || normalized.ends_with("/index/refresh") {
         return INDEX_JOB_TIMEOUT;
     }
+    if normalized.ends_with("/terminal/runs") {
+        return TERMINAL_RUN_TIMEOUT;
+    }
     if method == "POST" || method == "PUT" {
         return ENGINE_JSON_TIMEOUT;
     }
@@ -945,6 +950,10 @@ mod tests {
         assert!(engine_path_allowed("POST", "/repositories/repo_alpha/commits"));
         assert!(engine_path_allowed("POST", "/repositories/repo_alpha/writes/revert"));
         assert!(engine_path_allowed("POST", "/repositories/repo_alpha/terminal/runs"));
+        assert!(engine_path_allowed(
+            "POST",
+            "/repositories/repo_alpha/terminal/runs/cancel"
+        ));
         assert!(!engine_path_allowed("DELETE", "/repositories/repo_alpha/index"));
         assert!(engine_path_allowed("GET", "/goals"));
         assert!(engine_path_allowed("POST", "/goals"));
@@ -1004,6 +1013,10 @@ mod tests {
         assert_eq!(
             engine_json_timeout("GET", "/ops/doctor"),
             PROBE_TIMEOUT
+        );
+        assert!(
+            engine_json_timeout("POST", "/repositories/repo_alpha/terminal/runs")
+                >= Duration::from_secs(60)
         );
     }
 }

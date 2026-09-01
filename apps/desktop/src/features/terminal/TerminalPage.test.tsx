@@ -36,8 +36,10 @@ function repos(overrides: Partial<RepositoriesClient> = {}): RepositoriesClient 
       command: "echo hi",
       exitCode: 0,
       timedOut: false,
+      cancelled: false,
       output: "hi\n",
     }),
+    cancelWorkspaceCommand: unused,
     ...overrides,
   };
 }
@@ -85,6 +87,7 @@ describe("TerminalPage", () => {
       command: "python probe.py",
       exitCode: 0,
       timedOut: false,
+      cancelled: false,
       output: "from-workspace\n",
     }));
     render(
@@ -105,6 +108,90 @@ describe("TerminalPage", () => {
     expect(runWorkspaceCommand).toHaveBeenCalledWith("repo_alpha", "python probe.py");
   });
 
+  it("stops a running command without waiting for the timeout", async () => {
+    const user = userEvent.setup();
+    let finish!: (run: {
+      command: string;
+      exitCode: number | null;
+      timedOut: boolean;
+      cancelled: boolean;
+      output: string;
+    }) => void;
+    const runWorkspaceCommand = vi.fn(
+      () =>
+        new Promise<{
+          command: string;
+          exitCode: number | null;
+          timedOut: boolean;
+          cancelled: boolean;
+          output: string;
+        }>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const cancelWorkspaceCommand = vi.fn(async () => {
+      finish({
+        command: "sleep 5",
+        exitCode: null,
+        timedOut: false,
+        cancelled: true,
+        output: "partial\n",
+      });
+      return { ok: true };
+    });
+    render(
+      <TerminalPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({ runWorkspaceCommand, cancelWorkspaceCommand })}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.type(await screen.findByRole("textbox", { name: /command/i }), "sleep 5");
+    await user.click(screen.getByRole("button", { name: /^run$/i }));
+    await user.click(await screen.findByRole("button", { name: /^stop$/i }));
+
+    expect(cancelWorkspaceCommand).toHaveBeenCalledWith("repo_alpha");
+    expect(await screen.findByText("partial")).toBeInTheDocument();
+    expect(screen.getByText("Stopped.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^run$/i })).toBeEnabled();
+  });
+
+  it("says so when stop cannot reach the engine", async () => {
+    const user = userEvent.setup();
+    const runWorkspaceCommand = vi.fn(
+      () =>
+        new Promise<{
+          command: string;
+          exitCode: number | null;
+          timedOut: boolean;
+          cancelled: boolean;
+          output: string;
+        }>(() => undefined),
+    );
+    render(
+      <TerminalPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({
+          runWorkspaceCommand,
+          cancelWorkspaceCommand: async () => {
+            throw new Error("engine request failed: 500");
+          },
+        })}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.type(await screen.findByRole("textbox", { name: /command/i }), "sleep 5");
+    await user.click(screen.getByRole("button", { name: /^run$/i }));
+    await user.click(await screen.findByRole("button", { name: /^stop$/i }));
+    expect(
+      await screen.findByText(/could not stop that command. wait for it to finish, then try again/i),
+    ).toBeInTheDocument();
+  });
+
   it("says so when the command times out or the engine call fails", async () => {
     const user = userEvent.setup();
     const runWorkspaceCommand = vi
@@ -113,6 +200,7 @@ describe("TerminalPage", () => {
         command: "sleep 5",
         exitCode: null,
         timedOut: true,
+        cancelled: false,
         output: "still going",
       })
       .mockRejectedValueOnce(new Error("engine request failed: 409"));
@@ -172,6 +260,7 @@ describe("TerminalPage", () => {
       command,
       exitCode: 0,
       timedOut: false,
+      cancelled: false,
       output: `${command} ok\n`,
     }));
     render(

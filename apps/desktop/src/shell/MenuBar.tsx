@@ -174,7 +174,8 @@ export function MenuBar({
           Kronos is a locally installed desktop app for coding agents on your git folders. Ctrl+N
           or Cmd+N starts a new chat. Ctrl+B or Cmd+B hides the activity bar. Ctrl+Shift+J or
           Cmd+Shift+J hides Changes. Ctrl+` or Cmd+` shows Terminal. In Terminal, Up and Down
-          recall previous commands. Escape stops the current turn.
+          recall previous commands. Stop, Escape, or Ctrl+C ends a running command. Escape also
+          stops the current chat turn.
           Revert in Changes restores the last chat write for that file, or the last committed
           version if chat did not write it. Commit records a local git commit. This turn lists
           files chat wrote. All lists every dirty file. Kronos does not push. AGENTS.md,
