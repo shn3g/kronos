@@ -7,6 +7,8 @@ import struct
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
+
 from kronos_engine.memory.procedural import backfill_memory_vectors, persist_record
 from kronos_engine.memory.records import MemoryKind, MemoryRecord, MemoryStatus
 from kronos_engine.state.database import Database
@@ -141,3 +143,37 @@ def test_backfill_survives_embed_exception_in_a_batch(tmp_path: Path) -> None:
     assert filled == 1
     stored = conn.execute("SELECT COUNT(*) AS n FROM memory_vectors").fetchone()["n"]
     assert stored == 1
+
+
+class _PartialThenOk:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def available(self, kind: str) -> bool:
+        return kind == "document"
+
+    def embed(self, texts: list[str], *, kind: str) -> list[object] | None:
+        _ = kind
+        self.calls += 1
+        if self.calls == 1:
+            return [[1.0, 0.25], None]
+        return [[1.0, 0.25] for _ in texts]
+
+
+def test_backfill_failed_batch_does_not_commit_when_later_batch_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("kronos_engine.memory.procedural._BACKFILL_BATCH", 2)
+    conn = Database(tmp_path / "kronos.sqlite3").connect()
+    persist_record(conn, _record("mem-a", "alpha"), embeddings=None)
+    persist_record(conn, _record("mem-b", "beta"), embeddings=None)
+    persist_record(conn, _record("mem-c", "gamma"), embeddings=None)
+    persist_record(conn, _record("mem-d", "delta"), embeddings=None)
+
+    filled = backfill_memory_vectors(conn, _PartialThenOk())
+    ids = {
+        str(row["record_id"])
+        for row in conn.execute("SELECT record_id FROM memory_vectors")
+    }
+    assert ids == {"mem-c", "mem-d"}
+    assert filled == 2

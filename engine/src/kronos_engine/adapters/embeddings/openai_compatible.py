@@ -30,15 +30,18 @@ class OpenAICompatibleEmbeddingAdapter:
         self._transport = transport or UrllibTransport()
 
     def available(self, kind: str) -> bool:
-        if kind not in _EMBED_KINDS or not self._model_id.strip():
+        try:
+            if kind not in _EMBED_KINDS or not str(self._model_id).strip():
+                return False
+            return _is_http_url(self._base_url)
+        except Exception:
             return False
-        return _is_http_url(self._base_url)
 
     def embed(self, texts: Sequence[str], *, kind: str) -> Sequence[Sequence[float]] | None:
-        if not self.available(kind):
-            return None
-        headers: dict[str, str] = {"Content-Type": "application/json"}
         try:
+            if not self.available(kind):
+                return None
+            headers: dict[str, str] = {"Content-Type": "application/json"}
             if self._secret is not None:
                 headers["Authorization"] = f"Bearer {self._secret.require_fresh()}"
             status, payload = self._transport.post(
@@ -47,18 +50,18 @@ class OpenAICompatibleEmbeddingAdapter:
                 headers,
                 30.0,
             )
-        except Exception:
-            return None
-        if status != 200:
-            return None
-        try:
+            if status != 200:
+                return None
             return _parse_embeddings(payload, expected=len(texts))
         except Exception:
             return None
 
 
 def _is_http_url(url: str) -> bool:
-    return urlparse(url).scheme.lower() in {"http", "https"}
+    try:
+        return urlparse(url).scheme.lower() in {"http", "https"}
+    except Exception:
+        return False
 
 
 def _parse_embeddings(payload: object, *, expected: int) -> list[list[float]] | None:

@@ -282,6 +282,76 @@ def test_unknown_onnx_input_fails_closed(tmp_path: Path) -> None:
     assert session.ran is False
 
 
+class _ShapedOnnxSession:
+    def __init__(self, output: object) -> None:
+        self._inputs = [_OnnxInput("input_ids"), _OnnxInput("attention_mask")]
+        self.output = output
+
+    def get_inputs(self) -> list[_OnnxInput]:
+        return list(self._inputs)
+
+    def run(self, _names: object, feeds: dict[str, object]) -> list[object]:
+        _ = feeds
+        return [self.output]
+
+
+def test_embed_empty_texts_returns_none_without_raising(tmp_path: Path) -> None:
+    pytest.importorskip("onnxruntime")
+    pytest.importorskip("tokenizers")
+    models = write_local_embedding_fixtures(tmp_path / "models")
+    adapter = LocalEmbeddingAdapter(models)
+    assert adapter.available("code") is True
+    try:
+        empty = adapter.embed([], kind="code")
+    except Exception as exc:
+        raise AssertionError(f"embed([]) raised {type(exc).__name__}: {exc}") from exc
+    assert empty is None
+
+
+def test_incompatible_onnx_output_shape_returns_none_without_raising(tmp_path: Path) -> None:
+    pytest.importorskip("onnxruntime")
+    pytest.importorskip("tokenizers")
+    numpy = pytest.importorskip("numpy")
+    models = write_local_embedding_fixtures(tmp_path / "models")
+    adapter = LocalEmbeddingAdapter(models)
+    assert adapter.available("code") is True
+    adapter._sessions["code"] = _ShapedOnnxSession(numpy.ones((1, 2, 3, 4), dtype=numpy.float32))
+    try:
+        four_d = adapter.embed(["hello"], kind="code")
+    except Exception as exc:
+        raise AssertionError(f"embed raised {type(exc).__name__}: {exc}") from exc
+    assert four_d is None
+    adapter._sessions["code"] = _ShapedOnnxSession(numpy.array([["x", "y"]], dtype=object))
+    try:
+        non_numeric = adapter.embed(["hello"], kind="code")
+    except Exception as exc:
+        raise AssertionError(f"embed raised {type(exc).__name__}: {exc}") from exc
+    assert non_numeric is None
+
+
+def test_available_and_embed_fail_closed_when_session_load_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("onnxruntime")
+    pytest.importorskip("tokenizers")
+    models = write_local_embedding_fixtures(tmp_path / "models")
+    adapter = LocalEmbeddingAdapter(models)
+
+    def boom(_kind: str) -> object:
+        raise RuntimeError("session exploded")
+
+    monkeypatch.setattr(adapter, "_load_session", boom)
+    try:
+        available = adapter.available("code")
+        vectors = adapter.embed(["hello"], kind="code")
+    except Exception as exc:
+        raise AssertionError(
+            f"local adapter raised {type(exc).__name__}: {exc}"
+        ) from exc
+    assert available is False
+    assert vectors is None
+
+
 def test_position_ids_are_offsets_not_token_ids(tmp_path: Path) -> None:
     pytest.importorskip("onnxruntime")
     pytest.importorskip("tokenizers")

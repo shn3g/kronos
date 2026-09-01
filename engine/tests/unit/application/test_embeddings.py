@@ -67,6 +67,32 @@ def test_resolver_sparse_only_when_no_profile_and_no_local_model(tmp_path: Path)
     assert resolved.adapter.embed(["hello"], kind="document") is None
 
 
+def test_malformed_assigned_embedding_url_does_not_raise(tmp_path: Path) -> None:
+    service, secrets, models_dir = _service(tmp_path)
+    service.register_provider(
+        ProviderDraft(
+            kind="openai_compatible",
+            display_name="Broken URL",
+            base_url="http://[",
+            billed=False,
+            api_key="sk-embed",
+        )
+    )
+    profiles = {item.role: item for item in service.list_profiles()}
+    service.assign({role: profiles[role].id for role in MODEL_ROLES})
+    try:
+        resolved = resolve_embedder(service._registry, secrets, models_dir)
+        available = resolved.adapter.available("document")
+        vectors = resolved.adapter.embed(["hello"], kind="document")
+    except Exception as exc:
+        raise AssertionError(
+            f"resolve/available/embed raised {type(exc).__name__}: {exc}"
+        ) from exc
+    assert resolved.backend.kind == "none"
+    assert available is False
+    assert vectors is None
+
+
 def test_composition_and_app_resolve_the_embedding_role() -> None:
     engine_src = Path(__file__).resolve().parents[3] / "src" / "kronos_engine"
     composition = (engine_src / "application" / "composition.py").read_text(encoding="utf-8")

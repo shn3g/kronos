@@ -57,57 +57,56 @@ class LocalEmbeddingAdapter:
         self._tokenize_failed = False
 
     def available(self, kind: str) -> bool:
-        if self._tokenize_failed:
+        try:
+            if self._tokenize_failed:
+                return False
+            session = self._load_session(kind)
+            tokenizer = self._load_tokenizer()
+            if session is None or tokenizer is None:
+                return False
+            return _onnx_inputs_supported(session)
+        except Exception:
             return False
-        session = self._load_session(kind)
-        tokenizer = self._load_tokenizer()
-        if session is None or tokenizer is None:
-            return False
-        return _onnx_inputs_supported(session)
 
     def embed(self, texts: Sequence[str], *, kind: str) -> Sequence[Sequence[float]] | None:
-        if self._tokenize_failed:
-            return None
-        session = self._load_session(kind)
-        tokenizer = self._load_tokenizer()
-        if session is None or tokenizer is None:
-            return None
-        run = getattr(session, "run", None)
-        get_inputs = getattr(session, "get_inputs", None)
-        if run is None or get_inputs is None:
-            return None
         try:
+            if self._tokenize_failed:
+                return None
+            if not texts:
+                return None
+            session = self._load_session(kind)
+            tokenizer = self._load_tokenizer()
+            if session is None or tokenizer is None:
+                return None
+            run = getattr(session, "run", None)
+            get_inputs = getattr(session, "get_inputs", None)
+            if run is None or get_inputs is None:
+                return None
             inputs = list(get_inputs())
-        except Exception:
-            return None
-        if not _onnx_inputs_supported(session):
-            return None
-        try:
+            if not _onnx_inputs_supported(session):
+                return None
             numpy = cast(Any, importlib.import_module("numpy"))
-        except ImportError:
-            return None
-        seq_len = _sequence_length(inputs)
-        try:
-            input_ids, attention_mask = _tokenize(tokenizer, texts, seq_len)
-        except Exception:
-            self._tokenize_failed = True
-            return None
-        ids = numpy.asarray(input_ids, dtype=numpy.int64)
-        mask = numpy.asarray(attention_mask, dtype=numpy.int64)
-        feeds = _onnx_feeds(inputs, ids, mask, numpy)
-        if feeds is None:
-            return None
-        try:
+            seq_len = _sequence_length(inputs)
+            try:
+                input_ids, attention_mask = _tokenize(tokenizer, texts, seq_len)
+            except Exception:
+                self._tokenize_failed = True
+                return None
+            ids = numpy.asarray(input_ids, dtype=numpy.int64)
+            mask = numpy.asarray(attention_mask, dtype=numpy.int64)
+            feeds = _onnx_feeds(inputs, ids, mask, numpy)
+            if feeds is None:
+                return None
             outputs = run(None, feeds)
+            if not outputs:
+                return None
+            hidden = numpy.asarray(outputs[0])
+            pooled = _pool(hidden, mask)
+            if pooled is None:
+                return None
+            return _as_vectors(pooled)
         except Exception:
             return None
-        if not outputs:
-            return None
-        hidden = numpy.asarray(outputs[0])
-        pooled = _pool(hidden, mask)
-        if pooled is None:
-            return None
-        return [[float(value) for value in row] for row in pooled]
 
     def _spec(self, kind: str) -> EmbeddingModelConfig | None:
         if kind == "document":
@@ -192,26 +191,35 @@ def _onnx_inputs_supported(session: object) -> bool:
 
 
 def _onnx_feeds(inputs: Sequence[Any], ids: Any, mask: Any, numpy: Any) -> dict[str, Any] | None:
-    feeds: dict[str, Any] = {}
-    batch, seq_len = int(ids.shape[0]), int(ids.shape[1])
-    positions = numpy.broadcast_to(
-        numpy.arange(seq_len, dtype=numpy.int64),
-        (batch, seq_len),
-    ).copy()
-    token_types = numpy.zeros_like(ids)
-    for spec in inputs:
-        name = str(getattr(spec, "name", ""))
-        if name == "input_ids":
-            feeds[name] = ids
-        elif name == "attention_mask":
-            feeds[name] = mask
-        elif name == "token_type_ids":
-            feeds[name] = token_types
-        elif name == "position_ids":
-            feeds[name] = positions
-        else:
+    try:
+        id_shape = list(getattr(ids, "shape", ()))
+        mask_shape = list(getattr(mask, "shape", ()))
+        if len(id_shape) < 2 or len(mask_shape) < 2:
             return None
-    return feeds
+        batch, seq_len = int(id_shape[0]), int(id_shape[1])
+        if batch <= 0 or seq_len <= 0:
+            return None
+        positions = numpy.broadcast_to(
+            numpy.arange(seq_len, dtype=numpy.int64),
+            (batch, seq_len),
+        ).copy()
+        token_types = numpy.zeros_like(ids)
+        feeds: dict[str, Any] = {}
+        for spec in inputs:
+            name = str(getattr(spec, "name", ""))
+            if name == "input_ids":
+                feeds[name] = ids
+            elif name == "attention_mask":
+                feeds[name] = mask
+            elif name == "token_type_ids":
+                feeds[name] = token_types
+            elif name == "position_ids":
+                feeds[name] = positions
+            else:
+                return None
+        return feeds
+    except Exception:
+        return None
 
 
 def _sequence_length(inputs: Sequence[Any]) -> int:
@@ -259,14 +267,38 @@ def _pad_id(tokenizer: object) -> int:
 
 
 def _pool(hidden: Any, mask: Any) -> Any | None:
-    if getattr(hidden, "ndim", None) == 2:
-        return hidden
-    if getattr(hidden, "ndim", None) != 3:
+    try:
+        ndim = getattr(hidden, "ndim", None)
+        if ndim == 2:
+            return hidden
+        if ndim != 3:
+            return None
+        weights = mask.astype(hidden.dtype)[:, :, None]
+        summed = (hidden * weights).sum(axis=1)
+        counts = weights.sum(axis=1).clip(min=1.0)
+        return summed / counts
+    except Exception:
         return None
-    weights = mask.astype(hidden.dtype)[:, :, None]
-    summed = (hidden * weights).sum(axis=1)
-    counts = weights.sum(axis=1).clip(min=1.0)
-    return summed / counts
+
+
+def _as_vectors(pooled: Any) -> list[list[float]] | None:
+    try:
+        if getattr(pooled, "ndim", None) != 2:
+            return None
+        rows: list[list[float]] = []
+        for row in pooled:
+            values = [float(value) for value in row]
+            if not values:
+                return None
+            rows.append(values)
+        if not rows:
+            return None
+        width = len(rows[0])
+        if any(len(row) != width for row in rows):
+            return None
+        return rows
+    except Exception:
+        return None
 
 
 def _sha256(path: Path) -> str:

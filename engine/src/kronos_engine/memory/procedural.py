@@ -222,6 +222,7 @@ def backfill_memory_vectors(
             _LOG.warning("memory embedding backfill batch returned no vectors")
             continue
         try:
+            conn.execute("SAVEPOINT backfill_batch")
             for row, vector in zip(batch, vectors, strict=True):
                 values = [float(value) for value in vector]
                 payload = struct.pack(f"{len(values)}f", *values)
@@ -230,10 +231,20 @@ def backfill_memory_vectors(
                     " VALUES (?, ?, ?, ?)",
                     (str(row["id"]), "document", len(values), payload),
                 )
-                filled += 1
+            conn.execute("RELEASE SAVEPOINT backfill_batch")
             conn.commit()
         except Exception:
             _LOG.exception("memory embedding backfill persist failed")
+            try:
+                conn.execute("ROLLBACK TO SAVEPOINT backfill_batch")
+                conn.execute("RELEASE SAVEPOINT backfill_batch")
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    _LOG.exception("memory embedding backfill rollback failed")
+            continue
+        filled += len(batch)
     return filled
 
 
