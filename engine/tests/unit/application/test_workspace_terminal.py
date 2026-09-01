@@ -112,3 +112,51 @@ def test_run_workspace_command_stops_when_cancelled(tmp_path: Path) -> None:
     assert result["timed_out"] is False
     assert time.monotonic() - began < 4
     assert cancel_workspace_command(run_key) is False
+
+
+def test_peek_sees_output_while_command_still_runs(tmp_path: Path) -> None:
+    import threading
+    import time
+
+    from kronos_engine.application.workspace_terminal import peek_workspace_command
+
+    repo = init_git_repo(tmp_path / "alpha", files={"README.md": "hello\n"})
+    command = _python_script(
+        repo,
+        "stream.py",
+        "import time\nprint('hello-live', flush=True)\ntime.sleep(3)\nprint('done-live', flush=True)\n",
+    )
+    run_key = "terminal:repo_stream"
+    result_box: dict[str, object] = {}
+
+    def run() -> None:
+        result_box["result"] = run_workspace_command(
+            repo, command, run_key=run_key, timeout_seconds=8
+        )
+
+    worker = threading.Thread(target=run)
+    worker.start()
+    seen = ""
+    deadline = time.monotonic() + 4
+    while time.monotonic() < deadline:
+        snapshot = peek_workspace_command(run_key)
+        if snapshot is not None and "hello-live" in snapshot["output"]:
+            seen = snapshot["output"]
+            assert snapshot["running"] is True
+            assert snapshot["command"] == command
+            break
+        time.sleep(0.05)
+    worker.join(timeout=8)
+
+    assert "hello-live" in seen
+    assert peek_workspace_command(run_key) is None
+    finished = result_box["result"]
+    assert isinstance(finished, dict)
+    assert "done-live" in finished["output"]
+    assert finished["running"] is False
+
+
+def test_peek_returns_none_when_nothing_is_running() -> None:
+    from kronos_engine.application.workspace_terminal import peek_workspace_command
+
+    assert peek_workspace_command("terminal:missing") is None

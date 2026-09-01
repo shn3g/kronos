@@ -125,6 +125,7 @@ from kronos_engine.application.workspace_changes import (
 from kronos_engine.application.workspace_files import list_workspace_files, read_workspace_file
 from kronos_engine.application.workspace_terminal import (
     cancel_workspace_command,
+    peek_workspace_command,
     run_workspace_command,
     terminal_run_key,
 )
@@ -922,7 +923,37 @@ def create_app(
             exit_code=result["exit_code"],
             timed_out=result["timed_out"],
             cancelled=result["cancelled"],
+            running=result["running"],
             output=result["output"],
+        )
+
+    @app.get(
+        "/repositories/{repository_id}/terminal/runs",
+        response_model=TerminalRunResponse,
+    )
+    def peek_repository_terminal(
+        repository_id: str,
+        _: None = Depends(require_auth),
+    ) -> TerminalRunResponse:
+        with repository_service() as repos:
+            _load(repos, repository_id)
+        snapshot = peek_workspace_command(terminal_run_key(repository_id))
+        if snapshot is None:
+            return TerminalRunResponse(
+                command="",
+                exit_code=None,
+                timed_out=False,
+                cancelled=False,
+                running=False,
+                output="",
+            )
+        return TerminalRunResponse(
+            command=snapshot["command"],
+            exit_code=snapshot["exit_code"],
+            timed_out=snapshot["timed_out"],
+            cancelled=snapshot["cancelled"],
+            running=snapshot["running"],
+            output=snapshot["output"],
         )
 
     @app.post(

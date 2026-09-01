@@ -245,6 +245,53 @@ async def test_workspace_terminal_cancel_stops_a_running_command(
 
 
 @pytest.mark.asyncio
+async def test_workspace_terminal_peek_streams_output_and_fail_closed(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    import asyncio
+
+    http, headers, repo = client
+    enrolled = await http.post("/repositories", headers=headers, json={"path": str(repo)})
+    repo_id = enrolled.json()["repository"]["id"]
+    (repo / "stream.py").write_text(
+        "import time\nprint('hello-live', flush=True)\ntime.sleep(4)\nprint('done-live', flush=True)\n",
+        encoding="utf-8",
+    )
+
+    unauth = await http.get(f"/repositories/{repo_id}/terminal/runs")
+    assert unauth.status_code == 401
+
+    missing = await http.get("/repositories/repo_missing/terminal/runs", headers=headers)
+    assert missing.status_code == 404
+
+    idle = await http.get(f"/repositories/{repo_id}/terminal/runs", headers=headers)
+    assert idle.status_code == 200
+    assert idle.json()["running"] is False
+
+    running = asyncio.create_task(
+        http.post(
+            f"/repositories/{repo_id}/terminal/runs",
+            headers=headers,
+            json={"command": f'"{sys.executable}" stream.py'},
+            timeout=10,
+        )
+    )
+    seen = False
+    for _ in range(80):
+        peeked = await http.get(f"/repositories/{repo_id}/terminal/runs", headers=headers)
+        if peeked.status_code == 200 and "hello-live" in peeked.json().get("output", ""):
+            assert peeked.json()["running"] is True
+            seen = True
+            break
+        await asyncio.sleep(0.05)
+    ran = await running
+    assert seen is True
+    assert ran.status_code == 200
+    assert "done-live" in ran.json()["output"]
+    assert ran.json()["running"] is False
+
+
+@pytest.mark.asyncio
 async def test_workspace_file_write_fail_closed(
     client: tuple[AsyncClient, dict[str, str], Path],
 ) -> None:

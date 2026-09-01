@@ -49,6 +49,7 @@ class TerminalRunResponse(BaseModel):
     exit_code: int | None
     timed_out: bool
     cancelled: bool = False
+    running: bool = False
     output: str
 
 
