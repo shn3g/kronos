@@ -242,6 +242,7 @@ class IndexingService:
             )
             return self._status(repo_id, store, policy=policy)
         finally:
+            self._idle_if_busy(store, repo_id)
             store.close()
 
     def _incremental(
@@ -347,6 +348,7 @@ class IndexingService:
                 )
                 return self._status(repo_id, store, policy=policy)
         finally:
+            self._idle_if_busy(store, repo_id)
             store.close()
         return self._rebuild(repo_id, root, policy)
 
@@ -433,6 +435,14 @@ class IndexingService:
 
     def _index_dir(self, repo_id: str) -> Path:
         return self._paths.cache / "indexes" / repo_id
+
+    def _idle_if_busy(self, store: SqliteIndexStore, repo_id: str) -> None:
+        try:
+            state = _state_meta(store.meta("index_state"))
+            if state in {INDEX_STATE_SCANNING, INDEX_STATE_EMBEDDING}:
+                self._mark(store, repo_id, INDEX_STATE_IDLE, event_kind="index.idle")
+        except Exception:
+            _LOG.exception("index failed to reset idle state")
 
     def _mark(
         self,

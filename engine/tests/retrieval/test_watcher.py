@@ -4,13 +4,15 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Iterator, Sequence
+from dataclasses import replace
 from pathlib import Path
 
-from tests.retrieval.support import indexing_policy, kronos_paths, write_and_commit
+from tests.retrieval.support import commit_tree, indexing_policy, kronos_paths, write_and_commit
 from tests.support.git_fixtures import init_git_repo
 
 from kronos_engine.domain.entities import EnrolledRepository, RepositoryId, RepositoryStatus
 from kronos_engine.indexing.service import IndexingService
+from kronos_engine.indexing.sparse import SqliteIndexStore
 from kronos_engine.indexing.watcher import IndexWatcher
 
 
@@ -96,16 +98,15 @@ def test_watcher_loop_processes_debounced_edits_and_stops_cleanly(tmp_path: Path
 
     def fake_watch(
         *watch_paths: Path | str,
-        debounce: int = 1600,
         stop_event: threading.Event | None = None,
         **_kwargs: object,
     ) -> Iterator[set[tuple[object, str]]]:
-        assert debounce == record.policy.indexing.debounce_ms
         assert any(Path(item).resolve() == root.resolve() for item in watch_paths)
         while stop_event is None or not stop_event.is_set():
             if pending:
                 yield pending.pop(0)
                 continue
+            yield set()
             if stop_event is None:
                 return
             released.wait(0.05)
@@ -118,7 +119,7 @@ def test_watcher_loop_processes_debounced_edits_and_stops_cleanly(tmp_path: Path
     watcher.start()
     (root / "src/mod.py").write_text("LOOP_AFTER_TOKEN = 2\n", encoding="utf-8")
     pending.append({("modified", str(root / "src/mod.py"))})
-    deadline = time.time() + 2.0
+    deadline = time.time() + 3.0
     while time.time() < deadline:
         if service.search(record.id.value, "LOOP_AFTER_TOKEN", mode="sparse").items:
             break
@@ -126,6 +127,126 @@ def test_watcher_loop_processes_debounced_edits_and_stops_cleanly(tmp_path: Path
     watcher.stop()
     assert service.search(record.id.value, "LOOP_AFTER_TOKEN", mode="sparse").items
     assert not watcher.is_alive()
+
+
+def test_watcher_loop_indexes_git_commit_without_source_file_event(tmp_path: Path) -> None:
+    paths = kronos_paths(tmp_path)
+    root = init_git_repo(
+        tmp_path / "git-only",
+        files={"src/mod.py": "BASE_TOKEN = 1\n"},
+    )
+    service = IndexingService(paths, embeddings=_CountingEmbedder())
+    record = _record(root, "repo_git_only")
+    first = service.rebuild(record.id.value, root, record.policy)
+    (root / "src/mod.py").write_text("COMMITTED_FROM_DIRTY = 2\n", encoding="utf-8")
+    service.incremental(record.id.value, root, record.policy)
+    new_head = commit_tree(root, "commit dirty without rewriting the working tree")
+    assert new_head != first.commit
+
+    def fake_watch(
+        *_watch_paths: Path | str,
+        stop_event: threading.Event | None = None,
+        **_kwargs: object,
+    ) -> Iterator[set[tuple[object, str]]]:
+        while stop_event is None or not stop_event.is_set():
+            yield set()
+            if stop_event is None:
+                return
+            stop_event.wait(0.02)
+
+    watcher = IndexWatcher(list_repos=lambda: (record,), indexer=service, watch=fake_watch)
+    watcher.start()
+    deadline = time.time() + 3.0
+    while time.time() < deadline:
+        if service.status(record.id.value).commit == new_head:
+            break
+        time.sleep(0.05)
+    watcher.stop()
+    assert service.status(record.id.value).commit == new_head
+    store = SqliteIndexStore(paths.cache / "indexes" / record.id.value / "index.sqlite3")
+    try:
+        assert store.dirty_paths() == ()
+    finally:
+        store.close()
+
+
+def test_watcher_honors_per_repo_debounce_ms(tmp_path: Path) -> None:
+    paths = kronos_paths(tmp_path)
+    fast_root = init_git_repo(tmp_path / "fast", files={"src/a.py": "FAST_BEFORE = 1\n"})
+    slow_root = init_git_repo(tmp_path / "slow", files={"src/b.py": "SLOW_BEFORE = 1\n"})
+    inner = IndexingService(paths, embeddings=_CountingEmbedder())
+    base = indexing_policy()
+    fast = replace(
+        _record(fast_root, "repo_fast"),
+        policy=replace(base, indexing=replace(base.indexing, debounce_ms=40)),
+    )
+    slow = replace(
+        _record(slow_root, "repo_slow"),
+        policy=replace(base, indexing=replace(base.indexing, debounce_ms=180)),
+    )
+    inner.rebuild(fast.id.value, fast_root, fast.policy)
+    inner.rebuild(slow.id.value, slow_root, slow.policy)
+    applied: list[tuple[str, float]] = []
+
+    class _TimedIndexer:
+        def __getattr__(self, name: str) -> object:
+            return getattr(inner, name)
+
+        def incremental(
+            self,
+            repo_id: str,
+            git_root: Path,
+            policy: object,
+            *,
+            paths: Sequence[str] | None = None,
+        ) -> object:
+            applied.append((repo_id, time.monotonic()))
+            return inner.incremental(repo_id, git_root, policy, paths=paths)
+
+    change_at: dict[str, float] = {}
+
+    def fake_watch(
+        *_watch_paths: Path | str,
+        debounce: int = 1600,
+        step: int = 50,
+        stop_event: threading.Event | None = None,
+        **_kwargs: object,
+    ) -> Iterator[set[tuple[object, str]]]:
+        _ = debounce, step
+        change_at["t"] = time.monotonic()
+        yield {
+            ("modified", str(fast_root / "src/a.py")),
+            ("modified", str(slow_root / "src/b.py")),
+        }
+        while stop_event is None or not stop_event.is_set():
+            yield set()
+            if stop_event is None:
+                return
+            stop_event.wait(0.02)
+
+    (fast_root / "src/a.py").write_text("FAST_AFTER_TOKEN = 2\n", encoding="utf-8")
+    (slow_root / "src/b.py").write_text("SLOW_AFTER_TOKEN = 2\n", encoding="utf-8")
+    watcher = IndexWatcher(
+        list_repos=lambda: (fast, slow),
+        indexer=_TimedIndexer(),  # type: ignore[arg-type]
+        watch=fake_watch,
+    )
+    watcher.start()
+    deadline = time.time() + 3.0
+    while time.time() < deadline:
+        ids = {repo_id for repo_id, _when in applied}
+        if ids >= {fast.id.value, slow.id.value}:
+            break
+        time.sleep(0.02)
+    watcher.stop()
+    fast_times = [when for repo_id, when in applied if repo_id == fast.id.value]
+    slow_times = [when for repo_id, when in applied if repo_id == slow.id.value]
+    assert fast_times and slow_times
+    origin = change_at["t"]
+    fast_delay = min(fast_times) - origin
+    slow_delay = min(slow_times) - origin
+    assert slow_delay >= 0.15
+    assert fast_delay < slow_delay
 
 
 def test_watcher_errors_fail_open(tmp_path: Path) -> None:

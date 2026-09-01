@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineClient } from "../../engine/client";
@@ -104,6 +104,88 @@ describe("IndexPage", () => {
     expect(search).toHaveBeenCalledWith("repo_alpha", "connect");
     expect(await screen.findByText("pkg/db.py")).toBeInTheDocument();
     expect(screen.getByText(/sparse, graph/i)).toBeInTheDocument();
+  });
+
+  it("clears previous status when switching repositories and ignores stale responses", async () => {
+    const user = userEvent.setup();
+    const bravoWaiters: Array<(value: IndexStatus) => void> = [];
+    const statusFn = vi.fn(async (id: string) => {
+      if (id === "repo_bravo") {
+        return await new Promise<IndexStatus>((resolve) => {
+          bravoWaiters.push(resolve);
+        });
+      }
+      return status({
+        repositoryId: "repo_alpha",
+        commit: "alpha-commit",
+        watchEnabled: true,
+      });
+    });
+    let finishWatch: (value: IndexStatus) => void = () => {};
+    const setWatch = vi.fn(
+      async () =>
+        await new Promise<IndexStatus>((resolve) => {
+          finishWatch = resolve;
+        }),
+    );
+    render(
+      <IndexPage
+        engineClient={engine("ready")}
+        indexClient={clients({
+          listRepositories: async () => [
+            {
+              id: "repo_alpha",
+              displayName: "alpha",
+              realpath: "C:/tmp/alpha",
+              origin: "https://github.com/acme/alpha.git",
+              status: "active",
+            },
+            {
+              id: "repo_bravo",
+              displayName: "bravo",
+              realpath: "C:/tmp/bravo",
+              origin: "https://github.com/acme/bravo.git",
+              status: "active",
+            },
+          ],
+          status: statusFn,
+          setWatch,
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("alpha-commit")).toBeInTheDocument();
+    await user.click(screen.getByLabelText(/watch working tree/i));
+    await user.selectOptions(screen.getByRole("combobox", { name: /repository/i }), "repo_bravo");
+    expect(screen.queryByText("alpha-commit")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/watch working tree/i)).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: /repository/i }), "repo_alpha");
+    expect(await screen.findByText("alpha-commit")).toBeInTheDocument();
+    const bravoStatus = status({
+      repositoryId: "repo_bravo",
+      commit: "stale-bravo",
+      watchEnabled: false,
+      chunkCount: 99,
+    });
+    await act(async () => {
+      for (const resolve of bravoWaiters) {
+        resolve(bravoStatus);
+      }
+      finishWatch(
+        status({
+          repositoryId: "repo_alpha",
+          commit: "stale-watch",
+          watchEnabled: false,
+          chunkCount: 99,
+        }),
+      );
+      await Promise.resolve();
+    });
+    expect(screen.queryByText("stale-bravo")).not.toBeInTheDocument();
+    expect(screen.queryByText("stale-watch")).not.toBeInTheDocument();
+    expect(screen.getByText("alpha-commit")).toBeInTheDocument();
+    expect(screen.getByLabelText(/watch working tree/i)).toBeChecked();
   });
 
   it("toggles the watcher without rebuilding", async () => {

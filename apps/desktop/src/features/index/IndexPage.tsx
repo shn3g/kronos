@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { EngineClient } from "../../engine/client";
 import {
   createProductionRepositoriesClient,
@@ -40,6 +40,9 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<IndexHit[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const selectedRef = useRef(selectedId);
+  const requestGen = useRef(0);
+  selectedRef.current = selectedId;
 
   useEffect(() => {
     let cancelled = false;
@@ -79,10 +82,12 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
     if (!ready || !selectedId) {
       return;
     }
+    const gen = requestGen.current;
     let cancelled = false;
     const refresh = () => {
-      void client.status(selectedId).then((next) => {
-        if (!cancelled) {
+      const repoId = selectedId;
+      void client.status(repoId).then((next) => {
+        if (!cancelled && requestGen.current === gen && selectedRef.current === repoId) {
           setStatus(next);
         }
       });
@@ -108,16 +113,31 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
     );
   }
 
+  function selectRepository(id: string) {
+    requestGen.current += 1;
+    setSelectedId(id);
+    setHits([]);
+    setStatus(null);
+    setError(null);
+  }
+
   async function onRebuild() {
     if (!selectedId) {
       return;
     }
+    const repoId = selectedId;
+    const gen = requestGen.current;
     setError(null);
     try {
-      const next = await client.rebuild(selectedId);
+      const next = await client.rebuild(repoId);
+      if (requestGen.current !== gen || selectedRef.current !== repoId) {
+        return;
+      }
       setStatus(next);
     } catch {
-      setError("Could not rebuild the index.");
+      if (requestGen.current === gen && selectedRef.current === repoId) {
+        setError("Could not rebuild the index.");
+      }
     }
   }
 
@@ -125,12 +145,19 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
     if (!selectedId || !status) {
       return;
     }
+    const repoId = selectedId;
+    const gen = requestGen.current;
     setError(null);
     try {
-      const next = await client.setWatch(selectedId, !status.watchEnabled);
+      const next = await client.setWatch(repoId, !status.watchEnabled);
+      if (requestGen.current !== gen || selectedRef.current !== repoId) {
+        return;
+      }
       setStatus(next);
     } catch {
-      setError("Could not update the index watcher.");
+      if (requestGen.current === gen && selectedRef.current === repoId) {
+        setError("Could not update the index watcher.");
+      }
     }
   }
 
@@ -162,10 +189,7 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
             id="index-repo"
             value={selectedId}
             onChange={(event) => {
-              const id = event.target.value;
-              setSelectedId(id);
-              setHits([]);
-              void client.status(id).then(setStatus);
+              selectRepository(event.target.value);
             }}
           >
             {repositories.map((repo) => (

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from tests.retrieval.support import indexing_policy, kronos_paths, write_and_commit
 from tests.support.git_fixtures import init_git_repo
 
@@ -141,6 +142,57 @@ def test_status_reports_progress_watch_and_idle_after_rebuild(tmp_path: Path) ->
     kinds = [kind for kind, _payload in events]
     assert "index.progress" in kinds
     assert "index.idle" in kinds
+
+
+class _BoomEmbedder(_CountingEmbedder):
+    def __init__(self, *, fail: bool = True) -> None:
+        super().__init__()
+        self.fail = fail
+
+    def embed(self, texts: list[str], *, kind: str) -> list[list[float]]:
+        if self.fail:
+            raise RuntimeError("embed exploded")
+        return super().embed(texts, kind=kind)
+
+
+def test_rebuild_exception_resets_state_to_idle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = kronos_paths(tmp_path)
+    root = init_git_repo(tmp_path / "boom-rebuild", files={"src/mod.py": "OK_TOKEN = 1\n"})
+    policy = indexing_policy()
+    service = IndexingService(paths, embeddings=_CountingEmbedder())
+    first = service.rebuild("repo_boom_rebuild", root, policy)
+    assert first.state == "idle"
+
+    def boom_scan(*_args: object, **_kwargs: object) -> list[object]:
+        raise RuntimeError("scan exploded")
+
+    monkeypatch.setattr("kronos_engine.indexing.service.scan_with_working_tree", boom_scan)
+    with pytest.raises(RuntimeError, match="scan exploded"):
+        service.rebuild("repo_boom_rebuild", root, policy)
+    status = service.status("repo_boom_rebuild", policy=policy)
+    assert status.state == "idle"
+    assert status.last_activity_at
+    assert status.last_activity_at != first.last_activity_at
+
+
+def test_incremental_exception_resets_state_to_idle(tmp_path: Path) -> None:
+    paths = kronos_paths(tmp_path)
+    root = init_git_repo(tmp_path / "boom-incr", files={"src/mod.py": "OK_TOKEN = 1\n"})
+    policy = indexing_policy()
+    embedder = _BoomEmbedder(fail=False)
+    service = IndexingService(paths, embeddings=embedder)
+    first = service.rebuild("repo_boom_incr", root, policy)
+    assert first.state == "idle"
+    embedder.fail = True
+    (root / "src/mod.py").write_text("NEW_TOKEN = 2\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="embed exploded"):
+        service.incremental("repo_boom_incr", root, policy)
+    status = service.status("repo_boom_incr", policy=policy)
+    assert status.state == "idle"
+    assert status.last_activity_at
+    assert status.last_activity_at != first.last_activity_at
 
 
 def test_watch_override_persists_outside_the_enrolled_tree(tmp_path: Path) -> None:
