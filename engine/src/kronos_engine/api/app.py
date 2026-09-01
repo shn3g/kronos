@@ -77,6 +77,9 @@ from kronos_engine.api.models import (
     TelegramStatusResponse,
     TelegramTokenRequest,
     VersionResponse,
+    WorkspaceFileContentsResponse,
+    WorkspaceFileItem,
+    WorkspaceFilesResponse,
 )
 from kronos_engine.application.chat import (
     ChatCompleter,
@@ -112,6 +115,7 @@ from kronos_engine.application.workspace_changes import (
     list_working_tree_changes,
     mark_chat_writes,
 )
+from kronos_engine.application.workspace_files import list_workspace_files, read_workspace_file
 from kronos_engine.config.repository import (
     EnrolmentPreview,
     github_owner,
@@ -801,6 +805,42 @@ def create_app(
         with chat_service() as service:
             service.forget_file_backups(repository_id, committed)
         return result
+
+    @app.get("/repositories/{repository_id}/files", response_model=WorkspaceFilesResponse)
+    def list_repository_files(
+        repository_id: str,
+        _: None = Depends(require_auth),
+    ) -> WorkspaceFilesResponse:
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+        files = list_workspace_files(Path(record.realpath))
+        return WorkspaceFilesResponse(
+            files=[WorkspaceFileItem(path=item["path"]) for item in files]
+        )
+
+    @app.get(
+        "/repositories/{repository_id}/files/contents",
+        response_model=WorkspaceFileContentsResponse,
+    )
+    def read_repository_file(
+        repository_id: str,
+        _: None = Depends(require_auth),
+        path: Annotated[str, Query()] = "",
+    ) -> WorkspaceFileContentsResponse:
+        rel = path.strip()
+        if rel == "":
+            raise HTTPException(status_code=400, detail="path is required")
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+        try:
+            payload = read_workspace_file(Path(record.realpath), rel)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return WorkspaceFileContentsResponse(
+            path=payload["path"],
+            content=payload["content"],
+            binary=payload["binary"],
+        )
 
     @app.get("/repositories/{repository_id}/index", response_model=IndexStatusResponse)
     def index_status(repository_id: str, _: None = Depends(require_auth)) -> IndexStatusResponse:

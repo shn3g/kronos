@@ -98,3 +98,51 @@ async def test_working_tree_changes_and_commit_fail_closed(
         json={"message": "Again"},
     )
     assert nothing.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_workspace_files_list_and_read_fail_closed(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    http, headers, repo = client
+    (repo / "src").mkdir()
+    (repo / "src" / "app.py").write_text("print(1)\n", encoding="utf-8")
+    enrolled = await http.post("/repositories", headers=headers, json={"path": str(repo)})
+    assert enrolled.status_code == 200
+    repo_id = enrolled.json()["repository"]["id"]
+
+    unauth = await http.get(f"/repositories/{repo_id}/files")
+    assert unauth.status_code == 401
+
+    missing_repo = await http.get("/repositories/repo_missing/files", headers=headers)
+    assert missing_repo.status_code == 404
+
+    listed = await http.get(f"/repositories/{repo_id}/files", headers=headers)
+    assert listed.status_code == 200
+    paths = {item["path"] for item in listed.json()["files"]}
+    assert "hello.py" in paths
+    assert "src/app.py" in paths
+
+    missing_path = await http.get(
+        f"/repositories/{repo_id}/files/contents",
+        headers=headers,
+    )
+    assert missing_path.status_code == 400
+
+    escaped = await http.get(
+        f"/repositories/{repo_id}/files/contents",
+        headers=headers,
+        params={"path": "../secret.txt"},
+    )
+    assert escaped.status_code == 409
+
+    contents = await http.get(
+        f"/repositories/{repo_id}/files/contents",
+        headers=headers,
+        params={"path": "src/app.py"},
+    )
+    assert contents.status_code == 200
+    payload = contents.json()
+    assert payload["path"] == "src/app.py"
+    assert payload["content"] == "print(1)\n"
+    assert payload["binary"] is False

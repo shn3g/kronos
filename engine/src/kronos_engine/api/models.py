@@ -40,6 +40,20 @@ class CommitRequest(BaseModel):
     paths: list[str] | None = None
 
 
+class WorkspaceFileItem(BaseModel):
+    path: str
+
+
+class WorkspaceFilesResponse(BaseModel):
+    files: list[WorkspaceFileItem]
+
+
+class WorkspaceFileContentsResponse(BaseModel):
+    path: str
+    content: str
+    binary: bool
+
+
 class PreviewFileModel(BaseModel):
     path: str
     action: str
