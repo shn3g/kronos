@@ -420,6 +420,7 @@ describe("App shell", () => {
     expect(screen.getByRole("menuitem", { name: /^copy$/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^paste$/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^select all$/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^find$/i })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /^models$/i })).not.toBeInTheDocument();
   });
 

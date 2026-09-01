@@ -436,4 +436,77 @@ describe("FilesPage", () => {
     expect(screen.getByText(/select a file to open it/i)).toBeInTheDocument();
     expect(readWorkspaceFile).not.toHaveBeenCalled();
   });
+
+  it("shows a line-number gutter for the open file", async () => {
+    const user = userEvent.setup();
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos()}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    await screen.findByRole("textbox", { name: "src/app.py" });
+    const lines = [...document.querySelectorAll(".files-page__gutter li")].map((node) => node.textContent);
+    expect(lines).toEqual(["1", "2"]);
+  });
+
+  it("finds matches in the open file and steps through them", async () => {
+    const user = userEvent.setup();
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({
+          readWorkspaceFile: async () => ({
+            path: "src/app.py",
+            content: "alpha\nbeta\nalpha\n",
+            binary: false,
+          }),
+        })}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    const editor = await screen.findByRole("textbox", { name: "src/app.py" });
+    await user.keyboard("{Control>}f{/Control}");
+    const find = await screen.findByRole("searchbox", { name: /find in file/i });
+    await user.type(find, "alpha");
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
+    expect(editor).toHaveProperty("selectionStart", 0);
+    expect(editor).toHaveProperty("selectionEnd", 5);
+    await user.click(screen.getByRole("button", { name: /^next$/i }));
+    expect(screen.getByText("2 of 2")).toBeInTheDocument();
+    expect(editor).toHaveProperty("selectionStart", 11);
+    expect(editor).toHaveProperty("selectionEnd", 16);
+    await user.click(screen.getByRole("button", { name: /^previous$/i }));
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
+  });
+
+  it("says so when find matches nothing, and Escape closes the bar", async () => {
+    const user = userEvent.setup();
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos()}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    await screen.findByRole("textbox", { name: "src/app.py" });
+    await user.keyboard("{Control>}f{/Control}");
+    await user.type(await screen.findByRole("searchbox", { name: /find in file/i }), "zzz");
+    expect(screen.getByText(/no matches/i)).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("searchbox", { name: /find in file/i })).not.toBeInTheDocument();
+  });
 });

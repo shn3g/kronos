@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
 import type { EngineClient } from "../../engine/client";
 import type { IndexClient, IndexHit } from "../index/client";
 import {
@@ -9,8 +9,13 @@ import {
   type WorkspaceFileContents,
 } from "../workspaces/client";
 import {
+  editorLineLabels,
   fileDraftIsDirty,
+  fileFindStatusLabel,
+  FIND_IN_FILE_EVENT,
+  findInFileText,
   insertEditorText,
+  nextFileFindIndex,
   SAVE_FILE_EVENT,
 } from "./fileEditor";
 import {
@@ -69,7 +74,18 @@ export function FilesPage({
   const dirty = fileDraftIsDirty(savedContent, draft);
   const dirtyRef = useRef(dirty);
   const saveRef = useRef<() => Promise<void>>(async () => undefined);
+  const pageRef = useRef<HTMLElement>(null);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const findInputRef = useRef<HTMLInputElement>(null);
+  const findOpenRef = useRef(false);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findIndex, setFindIndex] = useState(0);
   dirtyRef.current = dirty;
+  findOpenRef.current = findOpen;
+  const findMatches = useMemo(() => findInFileText(draft ?? "", findQuery), [draft, findQuery]);
+  const activeFind =
+    findMatches.length === 0 ? 0 : Math.min(findIndex, findMatches.length - 1);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,6 +119,9 @@ export function FilesPage({
     setSearchQuery("");
     setSearchHits([]);
     setSearchError(null);
+    setFindOpen(false);
+    setFindQuery("");
+    setFindIndex(0);
   }, [repositoryId]);
 
   function openPath(path: string): void {
@@ -229,21 +248,73 @@ export function FilesPage({
   saveRef.current = onSave;
 
   useEffect(() => {
+    if (!findOpen) {
+      return;
+    }
+    findInputRef.current?.focus();
+    findInputRef.current?.select();
+  }, [findOpen]);
+
+  useEffect(() => {
+    if (!findOpen) {
+      return;
+    }
+    const node = editorRef.current;
+    const match = findMatches[activeFind];
+    if (!node || match === undefined) {
+      return;
+    }
+    const keepFindFocus = document.activeElement === findInputRef.current;
+    node.selectionStart = match.start;
+    node.selectionEnd = match.end;
+    if (keepFindFocus) {
+      findInputRef.current?.focus();
+    }
+  }, [activeFind, findMatches, findOpen, draft]);
+
+  useEffect(() => {
+    function filesHidden(): boolean {
+      return pageRef.current === null || pageRef.current.closest("[hidden]") !== null;
+    }
+    function closeFind(): void {
+      setFindOpen(false);
+      setFindQuery("");
+      setFindIndex(0);
+    }
     function onKey(event: KeyboardEvent): void {
-      if (event.key.toLowerCase() !== "s" || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) {
+      const modifier = event.ctrlKey || event.metaKey;
+      if (event.key.toLowerCase() === "s" && modifier && !event.altKey && !event.shiftKey) {
+        event.preventDefault();
+        void saveRef.current();
         return;
       }
-      event.preventDefault();
-      void saveRef.current();
+      if (event.key.toLowerCase() === "f" && modifier && !event.altKey && !event.shiftKey) {
+        if (filesHidden()) {
+          return;
+        }
+        event.preventDefault();
+        setFindOpen(true);
+        return;
+      }
+      if (event.key === "Escape" && findOpenRef.current && !filesHidden()) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeFind();
+      }
     }
     function onMenuSave(): void {
       void saveRef.current();
     }
-    window.addEventListener("keydown", onKey);
+    function onMenuFind(): void {
+      setFindOpen(true);
+    }
+    window.addEventListener("keydown", onKey, true);
     window.addEventListener(SAVE_FILE_EVENT, onMenuSave);
+    window.addEventListener(FIND_IN_FILE_EVENT, onMenuFind);
     return () => {
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onKey, true);
       window.removeEventListener(SAVE_FILE_EVENT, onMenuSave);
+      window.removeEventListener(FIND_IN_FILE_EVENT, onMenuFind);
     };
   }, []);
 
@@ -303,9 +374,19 @@ export function FilesPage({
   }
 
   const canEdit = Boolean(preview && !preview.binary && draft !== null && !loadingPreview);
+  const findStatus = !canEdit
+    ? "Select a file to find in it."
+    : fileFindStatusLabel(findQuery, findMatches.length, activeFind);
+
+  function stepFind(delta: number): void {
+    if (findMatches.length === 0) {
+      return;
+    }
+    setFindIndex(nextFileFindIndex(activeFind, delta, findMatches.length));
+  }
 
   return (
-    <section className="files-page">
+    <section className="files-page" ref={pageRef}>
       <header className="files-page__header">
         <h1 className="page-title">Files</h1>
         <label className="files-page__filter" htmlFor="files-filter">
@@ -425,11 +506,80 @@ export function FilesPage({
           {!selectedPath && !loadingPreview ? (
             <p className="files-page__status">Select a file to open it.</p>
           ) : null}
+          {findOpen ? (
+            <form
+              className="files-page__find"
+              onSubmit={(event) => {
+                event.preventDefault();
+                stepFind(1);
+              }}
+            >
+              <label className="files-page__filter" htmlFor="files-find">
+                Find in file
+                <input
+                  ref={findInputRef}
+                  id="files-find"
+                  type="search"
+                  role="searchbox"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={findQuery}
+                  onChange={(event) => {
+                    setFindQuery(event.target.value);
+                    setFindIndex(0);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && event.shiftKey) {
+                      event.preventDefault();
+                      stepFind(-1);
+                    }
+                  }}
+                />
+              </label>
+              {findStatus ? (
+                <p className="files-page__find-status" role="status">
+                  {findStatus}
+                </p>
+              ) : null}
+              <button
+                type="button"
+                className="btn-quiet"
+                disabled={findMatches.length === 0}
+                onClick={() => {
+                  stepFind(1);
+                }}
+              >
+                Next
+              </button>
+              <button
+                type="button"
+                className="btn-quiet"
+                disabled={findMatches.length === 0}
+                onClick={() => {
+                  stepFind(-1);
+                }}
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                className="btn-quiet"
+                onClick={() => {
+                  setFindOpen(false);
+                  setFindQuery("");
+                  setFindIndex(0);
+                }}
+              >
+                Close
+              </button>
+            </form>
+          ) : null}
           {preview && !loadingPreview ? (
             <EditorBody
               preview={preview}
               draft={draft}
               disabled={saving}
+              editorRef={editorRef}
               onDraft={setDraft}
             />
           ) : null}
@@ -486,13 +636,16 @@ function EditorBody({
   preview,
   draft,
   disabled,
+  editorRef,
   onDraft,
 }: {
   preview: WorkspaceFileContents;
   draft: string | null;
   disabled: boolean;
+  editorRef: RefObject<HTMLTextAreaElement | null>;
   onDraft: (value: string) => void;
 }) {
+  const gutterRef = useRef<HTMLOListElement>(null);
   if (preview.binary) {
     return (
       <p className="files-page__status">This file is binary, so Kronos is not showing its contents.</p>
@@ -501,20 +654,35 @@ function EditorBody({
   if (draft === null) {
     return null;
   }
+  const labels = editorLineLabels(draft);
   return (
-    <textarea
-      className="files-page__preview-body files-page__editor"
-      aria-label={preview.path}
-      spellCheck={false}
-      value={draft}
-      disabled={disabled}
-      onChange={(event) => {
-        onDraft(event.target.value);
-      }}
-      onKeyDown={(event) => {
-        onEditorKeyDown(event, draft, onDraft);
-      }}
-    />
+    <div className="files-page__editor-wrap">
+      <ol className="files-page__gutter" aria-hidden="true" ref={gutterRef}>
+        {labels.map((label) => (
+          <li key={label}>{label}</li>
+        ))}
+      </ol>
+      <textarea
+        ref={editorRef}
+        className="files-page__preview-body files-page__editor"
+        aria-label={preview.path}
+        spellCheck={false}
+        value={draft}
+        disabled={disabled}
+        onChange={(event) => {
+          onDraft(event.target.value);
+        }}
+        onScroll={(event) => {
+          const gutter = gutterRef.current;
+          if (gutter) {
+            gutter.scrollTop = event.currentTarget.scrollTop;
+          }
+        }}
+        onKeyDown={(event) => {
+          onEditorKeyDown(event, draft, onDraft);
+        }}
+      />
+    </div>
   );
 }
 
