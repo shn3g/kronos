@@ -8,9 +8,13 @@ from math import isfinite
 from urllib.parse import urlparse
 
 from kronos_engine.adapters.models.openai_compatible import HttpTransport, UrllibTransport
+from kronos_engine.domain.models import CostCeilingExceeded, ResourceLimits, assert_cost_allowed
 from kronos_engine.ports.secrets import ScopedSecret
 
 _EMBED_KINDS = frozenset({"document", "code"})
+_CLOSED_LIMITS = ResourceLimits(
+    max_tokens=1, max_attempts=1, timeout_seconds=30.0, cost_ceiling=0.0
+)
 
 
 class OpenAICompatibleEmbeddingAdapter:
@@ -22,19 +26,30 @@ class OpenAICompatibleEmbeddingAdapter:
         billed: bool,
         secret: ScopedSecret | None = None,
         transport: HttpTransport | None = None,
+        limits: ResourceLimits | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._model_id = model_id
         self._billed = billed
         self._secret = secret
         self._transport = transport or UrllibTransport()
+        self._limits = limits if limits is not None else _CLOSED_LIMITS
 
     def available(self, kind: str) -> bool:
         try:
             if kind not in _EMBED_KINDS or not str(self._model_id).strip():
                 return False
+            if not self._cost_allowed():
+                return False
             return _is_http_url(self._base_url)
         except Exception:
+            return False
+
+    def _cost_allowed(self) -> bool:
+        try:
+            assert_cost_allowed(self._limits, estimated_cost=0.0, billed=self._billed)
+            return True
+        except CostCeilingExceeded:
             return False
 
     def embed(self, texts: Sequence[str], *, kind: str) -> Sequence[Sequence[float]] | None:

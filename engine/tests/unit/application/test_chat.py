@@ -120,6 +120,7 @@ def _harness(
     *,
     planner: object | None = None,
     complete: object | None = None,
+    stream: object | None = None,
     assign_orchestrator: bool = True,
     profile_max_tokens: int = 4096,
     policy_overrides: dict[str, object] | None = None,
@@ -194,7 +195,8 @@ def _harness(
         registry,
         secrets,
         SqliteEventStore(conn),
-        complete=complete,
+        complete=complete,  # type: ignore[arg-type]
+        stream=stream,  # type: ignore[arg-type]
     )
     conversation = chat.create_conversation(enrolled.id.value, title="Chat")
     return chat, goals, enrolled, conversation, indexer, conn
@@ -517,3 +519,29 @@ def test_stream_message_syncs_progress_into_model_history(tmp_path: Path) -> Non
     )
     stored = SqliteEventStore(conn).list_after(0)
     assert any(str(item.payload.get("goal_id")) == goal.id.value for item in stored)
+
+
+def test_stream_message_yields_each_delta_before_final_turn(tmp_path: Path) -> None:
+    def stream(request: CompletionRequest, secret: object):
+        _ = request, secret
+        yield "Hel"
+        yield "lo"
+
+    chat, goals, _enrolled, conversation, _indexer, _conn = _harness(tmp_path, stream=stream)
+    tokens: list[str] = []
+    final: ChatTurn | None = None
+    for item in chat.stream_message(conversation.id, "Say hello"):
+        if isinstance(item, str):
+            tokens.append(item)
+        else:
+            final = item
+    assert tokens == ["Hel", "lo"]
+    assert final is not None
+    assert final.content == "Hello"
+    assert list(goals.list()) == []
+    stored = [
+        item
+        for item in chat.get_conversation(conversation.id).messages
+        if item.role == "assistant"
+    ]
+    assert stored[-1].content == "Hello"

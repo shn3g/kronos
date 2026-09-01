@@ -92,6 +92,7 @@ def _from_assignment(
         billed=provider.billed or profile.billed,
         secret=secret,
         transport=transport,
+        limits=profile.limits,
     )
     if not adapter.available("document") and not adapter.available("code"):
         return None

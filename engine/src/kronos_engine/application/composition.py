@@ -32,7 +32,7 @@ from kronos_engine.config.settings import Settings
 from kronos_engine.domain.attestations import ATTESTATION_HMAC_KEY_REF, ATTESTATION_VERIFY_KEY_REF
 from kronos_engine.domain.entities import EnrolledRepository
 from kronos_engine.indexing.service import IndexingService
-from kronos_engine.ports.embedding import EmbeddingPort
+from kronos_engine.ports.embedding import EmbeddingIdentity, EmbeddingPort
 from kronos_engine.ports.executor import Executor, ExecutorRequest, ExecutorResult
 from kronos_engine.ports.forge import ForgeAuthError, ForgeTarget
 from kronos_engine.ports.sandbox import Sandbox
@@ -68,12 +68,19 @@ def build_goal_engine(
     recorder = Recorder(conn, events, outbox)  # type: ignore[arg-type]
     leases = SqliteLeases(conn)  # type: ignore[arg-type]
     registry = SqliteModelRegistry(conn)  # type: ignore[arg-type]
-    embeddings = resolve_embedder(
+    resolved = resolve_embedder(
         registry,
         secrets,
         settings.paths.cache / "models",
-    ).adapter
-    indexer = IndexingService(settings.paths, embeddings=embeddings)
+    )
+    embeddings = resolved.adapter
+    indexer = IndexingService(
+        settings.paths,
+        embeddings=embeddings,
+        embedding_identity=EmbeddingIdentity(
+            kind=resolved.backend.kind, model_id=resolved.backend.model_id
+        ),
+    )
     forge_for = make_forge_for(conn, settings, secrets, github_http, override=forge)
     apps = SqliteGithubAppStore(conn)  # type: ignore[arg-type]
     repos = RepositoryService(
@@ -96,7 +103,9 @@ def build_goal_engine(
     )
     skills.load_core()
     chosen_planner = planner or LlmPlanner(registry, secrets, indexed, retrieve=skills.retrieve)
-    chosen_executor = executor or RepositoryPolicyExecutor(repos)
+    chosen_executor = executor or RepositoryPolicyExecutor(
+        repos, coder_model_id=_assigned_coder_model_id(registry)
+    )
     chosen_gates = gates or ProcessGateRunner()
     chosen_forge: object = forge if forge is not None else UnavailableForge()
     merge = MergeService(
@@ -151,24 +160,39 @@ def build_goal_engine(
     )
 
 
-def select_executor(profile: str) -> Executor:
+def select_executor(profile: str, *, model_id: str | None = None) -> Executor:
     name = "controlled" if profile in {"standard", "controlled", ""} else profile
     if name == "cursor" and detect_cursor_cli() is not None:
         return CursorExecutor()
     if name == "opencode" and detect_opencode_cli() is not None:
-        return OpencodeExecutor()
+        return OpencodeExecutor(model_id=model_id)
     return ControlledOpenExecutor()
 
 
 class RepositoryPolicyExecutor:
     """Route each dispatch to the executor required by that task's repository policy."""
 
-    def __init__(self, repos: RepositoryService) -> None:
+    def __init__(self, repos: RepositoryService, *, coder_model_id: str | None = None) -> None:
         self._repos = repos
+        self._coder_model_id = coder_model_id
 
     def run(self, request: ExecutorRequest, sandbox: Sandbox) -> ExecutorResult:
         record = self._repos.get(request.repository_id)
-        return select_executor(record.policy.executor.profile).run(request, sandbox)
+        return select_executor(
+            record.policy.executor.profile, model_id=self._coder_model_id
+        ).run(request, sandbox)
+
+
+def _assigned_coder_model_id(registry: SqliteModelRegistry) -> str | None:
+    assignments = registry.load_assignments()
+    if not assignments.coder:
+        return None
+    profiles = {item.id: item for item in registry.list_profiles()}
+    profile = profiles.get(assignments.coder)
+    if profile is None:
+        return None
+    model_id = profile.model_id.strip()
+    return model_id or None
 
 
 def _attestation_key(secrets: SecretStore) -> bytes:

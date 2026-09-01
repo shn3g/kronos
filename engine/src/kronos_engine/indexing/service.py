@@ -16,7 +16,7 @@ from kronos_engine.config.paths import KronosPaths
 from kronos_engine.domain.policy import RepositoryPolicy
 from kronos_engine.indexing.chunks import chunk_text
 from kronos_engine.indexing.context import ContextPack, assemble_context, repo_map
-from kronos_engine.indexing.dense import search_dense, upsert_embeddings
+from kronos_engine.indexing.dense import EmbedStats, drop_vectors, search_dense, upsert_embeddings
 from kronos_engine.indexing.fusion import reciprocal_rank_fusion
 from kronos_engine.indexing.graph import build_relations, expand_paths
 from kronos_engine.indexing.scanner import (
@@ -29,7 +29,7 @@ from kronos_engine.indexing.scanner import (
     scan_working_tree_path,
 )
 from kronos_engine.indexing.sparse import SqliteIndexStore
-from kronos_engine.ports.embedding import EmbeddingPort
+from kronos_engine.ports.embedding import EmbeddingIdentity, EmbeddingPort
 from kronos_engine.ports.index_store import IndexedChunk
 
 INDEX_STATE_IDLE = "idle"
@@ -67,12 +67,15 @@ class IndexingService:
         paths: KronosPaths,
         embeddings: EmbeddingPort | None = None,
         emit_event: EventEmitter | None = None,
+        *,
+        embedding_identity: EmbeddingIdentity | None = None,
     ) -> None:
         self._paths = paths
         self._embeddings: EmbeddingPort = embeddings or LocalEmbeddingAdapter(
             paths.cache / "models"
         )
         self._emit_event = emit_event
+        self._embedding_identity = embedding_identity
 
     def rebuild(self, repo_id: str, git_root: Path, policy: RepositoryPolicy) -> IndexStatus:
         with _repo_lock(repo_id):
@@ -247,7 +250,7 @@ class IndexingService:
                 files_done=total,
                 files_total=total,
             )
-            stats = upsert_embeddings(store.connection(), chunks, self._embeddings)
+            stats = self._embed_chunks(store, chunks)
             store.set_indexed_commit(commit)
             store.set_dirty_paths(list_dirty_paths(root))
             self._mark(
@@ -292,6 +295,25 @@ class IndexingService:
                 and not stored_dirty
                 and not targeted
             ):
+                if self._backend_changed(store):
+                    self._mark(
+                        store,
+                        repo_id,
+                        INDEX_STATE_EMBEDDING,
+                        files_done=0,
+                        files_total=0,
+                    )
+                    stats = self._embed_chunks(store, list(store.list_chunks()))
+                    self._mark(
+                        store,
+                        repo_id,
+                        INDEX_STATE_IDLE,
+                        files_done=0,
+                        files_total=0,
+                        chunks_embedded=stats.embedded,
+                        chunks_skipped=stats.skipped,
+                        event_kind="index.idle",
+                    )
                 return self._status(repo_id, store, policy=policy)
             refresh: set[str] = set(targeted)
             commit_diff: tuple[tuple[str, str, str], ...] | None
@@ -353,7 +375,7 @@ class IndexingService:
                     files_done=len(refresh),
                     files_total=len(refresh),
                 )
-                stats = upsert_embeddings(store.connection(), changed_chunks, self._embeddings)
+                stats = self._embed_chunks(store, changed_chunks)
                 store.set_indexed_commit(new)
                 if targeted:
                     refreshed = set(refresh)
@@ -397,6 +419,27 @@ class IndexingService:
         chunked = list(chunk_text(scanned, commit=commit))
         store.replace_path_chunks(posix, chunked)
         return chunked
+
+    def _embed_chunks(self, store: SqliteIndexStore, chunks: Sequence[IndexedChunk]) -> EmbedStats:
+        if self._embedding_identity is not None and self._backend_changed(store):
+            drop_vectors(store.connection())
+        stats = upsert_embeddings(store.connection(), chunks, self._embeddings)
+        identity = self._embedding_identity
+        if identity is not None:
+            store.set_meta("embedding_kind", identity.kind)
+            store.set_meta("embedding_model_id", identity.model_id)
+        return stats
+
+    def _backend_changed(self, store: SqliteIndexStore) -> bool:
+        identity = self._embedding_identity
+        if identity is None:
+            return False
+        stored_kind = store.meta("embedding_kind")
+        stored_model = store.meta("embedding_model_id")
+        if stored_kind is None and stored_model is None:
+            row = store.connection().execute("SELECT 1 FROM vectors LIMIT 1").fetchone()
+            return row is not None
+        return stored_kind != identity.kind or stored_model != identity.model_id
 
     def _graph_ranking(
         self, store: SqliteIndexStore, sparse_ids: list[str], *, limit: int

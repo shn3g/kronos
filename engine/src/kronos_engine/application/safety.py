@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Protocol
 
 from kronos_engine.application.unavailable_forge import UnavailableForge
+from kronos_engine.config.repository import github_owner_repo
 from kronos_engine.domain.entities import EnrolledRepository
 from kronos_engine.ports.forge import GithubAppRecord
 
@@ -65,14 +66,27 @@ def evaluate_repository_safety(
     reviewer: GithubAppRecord | None,
 ) -> SafetyReport:
     root = Path(record.realpath)
+    remote = github_owner_repo(record.origin) is not None
+    ref = record.policy.branches.protected
+    forge_files = forge if remote else None
     checks = (
         _ruleset_check(forge),
         _file_check(
             "kronos_pr_workflow",
             root / ".github" / "workflows" / "kronos-pr.yml",
             "Kronos PR workflow",
+            forge=forge_files,
+            ref=ref,
+            remote_path=".github/workflows/kronos-pr.yml",
         ),
-        _file_check("codeowners", root / ".github" / "CODEOWNERS", "CODEOWNERS"),
+        _file_check(
+            "codeowners",
+            root / ".github" / "CODEOWNERS",
+            "CODEOWNERS",
+            forge=forge_files,
+            ref=ref,
+            remote_path=".github/CODEOWNERS",
+        ),
         _reviewer_check(reviewer),
     )
     return SafetyReport(ok=all(item.ok for item in checks), checks=checks)
@@ -100,7 +114,24 @@ def _ruleset_check(forge: object | None) -> SafetyCheck:
     return SafetyCheck(id="ruleset_strict", ok=ok, detail=detail)
 
 
-def _file_check(check_id: str, path: Path, label: str) -> SafetyCheck:
+def _file_check(
+    check_id: str,
+    path: Path,
+    label: str,
+    *,
+    forge: object | None = None,
+    ref: str | None = None,
+    remote_path: str | None = None,
+) -> SafetyCheck:
+    if forge is not None and ref and remote_path:
+        method = getattr(forge, "file_at_sha", None)
+        if callable(method):
+            try:
+                text = method(ref, remote_path)
+            except Exception:
+                text = None
+            if isinstance(text, str) and text.strip():
+                return SafetyCheck(id=check_id, ok=True, detail=f"{label} is present on GitHub")
     if path.is_file():
         return SafetyCheck(id=check_id, ok=True, detail=f"{label} is present")
     return SafetyCheck(id=check_id, ok=False, detail=f"{label} is missing")

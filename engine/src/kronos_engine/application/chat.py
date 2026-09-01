@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterator, Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol
 
@@ -81,6 +81,7 @@ class SearchIndexer(Protocol):
 
 
 CompleteFn = Callable[[CompletionRequest, ScopedSecret | None], CompletionResult]
+StreamFn = Callable[[CompletionRequest, ScopedSecret | None], Iterator[str]]
 
 
 class ChatService:
@@ -96,6 +97,7 @@ class ChatService:
         events: EventStore,
         *,
         complete: CompleteFn | None = None,
+        stream: StreamFn | None = None,
         transport: HttpTransport | None = None,
         embeddings: EmbeddingPort | None = None,
     ) -> None:
@@ -108,6 +110,7 @@ class ChatService:
         self._secrets = secrets
         self._events = events
         self._complete = complete
+        self._stream = stream
         self._transport = transport
         self._embeddings = embeddings
         self._store = SqliteConversationStore(conn)
@@ -181,18 +184,15 @@ class ChatService:
             messages=_completion_messages(history, content, packed),
         )
         usage: int | None = None
+        streamed = False
         if self._complete is not None:
             result = self._complete(request, secret)
             usage = result.usage.tokens
             raw = result.text
         else:
-            adapter = OpenAICompatibleProvider(
-                base_url=provider.base_url or "",
-                billed=provider.billed,
-                transport=self._transport,
+            raw, streamed = yield from _emit_plain_deltas(
+                self._iter_model_tokens(provider, request, secret)
             )
-            pieces = list(adapter.stream(request, secret))
-            raw = "".join(pieces)
         envelope = _parse_envelope(raw)
         if envelope is not None and envelope.get("intent") == "goal":
             title = _string_field(envelope, "title") or _title_and_criteria(content)[0]
@@ -221,10 +221,26 @@ class ChatService:
             model=profile.model_id,
             token_count=usage,
         )
-        if answer:
+        if answer and not streamed:
             yield answer
         self._persist_assistant(conversation_id, turn)
         yield turn
+
+    def _iter_model_tokens(
+        self,
+        provider: ProviderConfig,
+        request: CompletionRequest,
+        secret: ScopedSecret | None,
+    ) -> Iterator[str]:
+        if self._stream is not None:
+            yield from self._stream(request, secret)
+            return
+        adapter = OpenAICompatibleProvider(
+            base_url=provider.base_url or "",
+            billed=provider.billed,
+            transport=self._transport,
+        )
+        yield from adapter.stream(request, secret)
 
     def _create_goal_turn(
         self, conversation: ConversationRecord, title: str, success_criteria: str
@@ -321,6 +337,35 @@ class ChatService:
             capped = min(ANSWER_TOKEN_CAP, profile.limits.max_tokens)
             profile = replace(profile, limits=replace(profile.limits, max_tokens=capped))
         return provider, profile, secret
+
+
+def _emit_plain_deltas(
+    pieces: Iterator[str],
+) -> Generator[str, None, tuple[str, bool]]:
+    parts: list[str] = []
+    json_mode: bool | None = None
+    streamed = False
+    for piece in pieces:
+        parts.append(piece)
+        if json_mode is True:
+            continue
+        if json_mode is False:
+            if piece:
+                yield piece
+                streamed = True
+            continue
+        stripped = "".join(parts).lstrip()
+        if not stripped:
+            continue
+        if stripped.startswith("{"):
+            json_mode = True
+            continue
+        json_mode = False
+        for part in parts:
+            if part:
+                yield part
+                streamed = True
+    return "".join(parts), streamed
 
 
 def _slash_goal_body(text: str) -> str | None:

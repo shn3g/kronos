@@ -65,3 +65,16 @@ def test_m_dispatch_uses_standard_limits(tmp_path: Path) -> None:
     assert capture.last is not None
     assert capture.last.limits.max_tokens == 4096
     assert capture.last.limits.max_attempts == 3
+
+
+def test_xs_task_cannot_consume_more_than_one_attempt(tmp_path: Path) -> None:
+    harness = GoalHarness(tmp_path, "happy")
+    harness.setup_goal()
+    task = harness.store.get_task(harness.task_id)
+    harness.store.save_task(replace(task, size="XS"))
+    harness.store.set_task_attempts(harness.task_id, 1)
+    claimed = harness.dispatch.claim(harness.task_id, dry_run=False, holder_id="worker-1")
+    assert claimed.ok is False
+    assert claimed.failed_step == "budget"
+    assert "attempt" in claimed.reason.lower()
+    assert harness.store.task_attempts(harness.task_id) == 1

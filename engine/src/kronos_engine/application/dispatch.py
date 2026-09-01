@@ -140,9 +140,11 @@ class DispatchService:
         meter = self._store.budget_meter(repo.id, day)
         attempts = self._store.task_attempts(ident)
         goal = self._store.get_goal(task.goal_id)
+        effort = effort_for_size(repo.policy, task.size)
+        attempt_cap = min(goal.max_attempts, effort.max_attempts)
         try:
             check_budget(meter, repo.policy, task_attempts=attempts)
-            if attempts >= goal.max_attempts:
+            if attempts >= attempt_cap:
                 raise BudgetExceeded("per-issue attempt cap reached")
         except (BudgetExceeded, BreakerTripped) as error:
             self._recorder.emit(

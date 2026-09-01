@@ -10,7 +10,33 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from kronos_engine.adapters.embeddings.openai_compatible import OpenAICompatibleEmbeddingAdapter
+from kronos_engine.domain.models import ResourceLimits
 from kronos_engine.ports.secrets import ScopedSecret
+
+
+def _limits(*, cost_ceiling: float) -> ResourceLimits:
+    return ResourceLimits(
+        max_tokens=1024,
+        max_attempts=1,
+        timeout_seconds=15.0,
+        cost_ceiling=cost_ceiling,
+    )
+
+
+class _CountingTransport:
+    def __init__(self) -> None:
+        self.posts = 0
+
+    def get(self, url: str, timeout: float) -> tuple[int, dict[str, object]]:
+        _ = url, timeout
+        return 200, {}
+
+    def post(
+        self, url: str, json: dict[str, object], headers: dict[str, str], timeout: float
+    ) -> tuple[int, dict[str, object]]:
+        _ = url, json, headers, timeout
+        self.posts += 1
+        return 200, {"data": [{"embedding": [0.25, 0.5], "index": 0}]}
 
 
 @contextmanager
@@ -88,6 +114,7 @@ def test_embed_posts_openai_shape_with_bearer_secret() -> None:
             model_id="text-embedding-3-small",
             billed=True,
             secret=ScopedSecret(value="sk-live-embed", ttl_seconds=30),
+            limits=_limits(cost_ceiling=1.0),
         )
         assert adapter.available("document") is True
         assert adapter.available("code") is True
@@ -124,6 +151,7 @@ def test_http_and_parse_failures_return_none_without_raising() -> None:
             model_id="text-embedding-3-small",
             billed=True,
             secret=ScopedSecret(value="sk-fail", ttl_seconds=30),
+            limits=_limits(cost_ceiling=1.0),
         )
         try:
             assert failing.embed(["hello"], kind="document") is None
@@ -136,6 +164,7 @@ def test_http_and_parse_failures_return_none_without_raising() -> None:
             model_id="text-embedding-3-small",
             billed=True,
             secret=None,
+            limits=_limits(cost_ceiling=1.0),
         )
         try:
             assert malformed.embed(["hello"], kind="document") is None
@@ -229,3 +258,19 @@ def test_malformed_embedding_values_return_none_without_raising() -> None:
         )
         is None
     )
+
+
+def test_billed_embedder_fails_closed_when_cost_ceiling_is_zero() -> None:
+    transport = _CountingTransport()
+    adapter = OpenAICompatibleEmbeddingAdapter(
+        base_url="https://api.openai.com/v1",
+        model_id="text-embedding-3-small",
+        billed=True,
+        secret=ScopedSecret(value="sk-paid-embed", ttl_seconds=30),
+        transport=transport,
+        limits=_limits(cost_ceiling=0.0),
+    )
+    assert adapter.available("document") is False
+    assert adapter.available("code") is False
+    assert adapter.embed(["hello"], kind="document") is None
+    assert transport.posts == 0

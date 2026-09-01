@@ -100,6 +100,7 @@ from kronos_engine.application.embeddings import ResolvedEmbedder, resolve_embed
 from kronos_engine.application.event_query import EventQuery
 from kronos_engine.application.github_setup import GitHubSetupService
 from kronos_engine.application.goal_engine import GoalEngine
+from kronos_engine.application.goal_ticker import GOAL_TICK_INTERVAL_SECONDS, run_goal_ticker
 from kronos_engine.application.goals import GoalService
 from kronos_engine.application.model_profiles import (
     ModelProfileService,
@@ -144,6 +145,7 @@ from kronos_engine.memory.procedural import backfill_memory_vectors
 from kronos_engine.memory.promotion import PromotionBlocked, activate_promoted
 from kronos_engine.memory.records import MemoryRecord, MemoryRejected
 from kronos_engine.observability.otel import LocalMetrics, Tracer
+from kronos_engine.ports.embedding import EmbeddingIdentity
 from kronos_engine.ports.executor import Executor
 from kronos_engine.ports.forge import (
     ForgeAuthError,
@@ -214,6 +216,7 @@ def create_app(
             hook()
         stop_polling = threading.Event()
         worker: threading.Thread | None = None
+        goal_worker: threading.Thread | None = None
         watcher: IndexWatcher | None = None
         try:
             watcher = IndexWatcher(
@@ -226,6 +229,16 @@ def create_app(
             logging.getLogger("kronos.engine").exception("index watcher failed to start")
             watcher = None
         _app.state.index_watcher = watcher
+
+        def _goal_poll() -> None:
+            def _tick() -> None:
+                with goal_engine() as engine:
+                    engine.tick()
+
+            run_goal_ticker(_tick, stop_polling, interval=GOAL_TICK_INTERVAL_SECONDS)
+
+        goal_worker = threading.Thread(target=_goal_poll, daemon=True, name="kronos-goals")
+        goal_worker.start()
         if telegram_auto_poll:
             poller = TelegramPoller(store, telegram_connector)
 
@@ -239,6 +252,8 @@ def create_app(
         stop_polling.set()
         if worker is not None:
             worker.join(timeout=2.0)
+        if goal_worker is not None:
+            goal_worker.join(timeout=2.0)
         if watcher is not None:
             watcher.stop()
 
@@ -316,10 +331,12 @@ def create_app(
             logging.getLogger("kronos.engine").exception("index event emit failed")
 
     def _indexing_service(conn: object) -> IndexingService:
+        resolved = _resolve_embedder(conn)
         return IndexingService(
             settings.paths,
-            embeddings=_resolve_embedder(conn).adapter,
+            embeddings=resolved.adapter,
             emit_event=_emit_index_event,
+            embedding_identity=_embedding_identity(resolved),
         )
 
     def _wired_repository_service(conn: object) -> RepositoryService:
@@ -362,10 +379,12 @@ def create_app(
             conn.close()
 
     def _live_indexer() -> IndexingService:
+        resolved = _current_embedder()
         return IndexingService(
             settings.paths,
-            embeddings=_current_embedder().adapter,
+            embeddings=resolved.adapter,
             emit_event=_emit_index_event,
+            embedding_identity=_embedding_identity(resolved),
         )
 
     def _list_watched_repos() -> tuple[EnrolledRepository, ...]:
@@ -1767,6 +1786,10 @@ def _detail_response(
         committed=False,
         pushed=False,
     )
+
+
+def _embedding_identity(resolved: ResolvedEmbedder) -> EmbeddingIdentity:
+    return EmbeddingIdentity(kind=resolved.backend.kind, model_id=resolved.backend.model_id)
 
 
 def _embedding_backend_model(resolved: ResolvedEmbedder) -> EmbeddingBackendModel:

@@ -169,6 +169,7 @@ def test_chat_streams_orchestrator_tokens_from_local_provider(tmp_path: Path) ->
             else:
                 final = item
         assert "".join(tokens) == "Hello"
+        assert tokens == ["Hel", "lo"]
         assert final is not None
         assert final.content == "Hello"
         assert final.goal_refs == ()

@@ -11,7 +11,7 @@ from tests.support.secrets import InMemorySecretStore
 
 from kronos_engine.application.embeddings import resolve_embedder
 from kronos_engine.application.model_profiles import ModelProfileService, ProviderDraft
-from kronos_engine.domain.models import MODEL_ROLES
+from kronos_engine.domain.models import MODEL_ROLES, ResourceLimits
 from kronos_engine.state.database import Database
 from kronos_engine.state.model_profiles import SqliteModelRegistry
 
@@ -36,6 +36,13 @@ def test_resolver_uses_assigned_embedding_profile_before_onnx(tmp_path: Path) ->
         )
     )
     profiles = {item.role: item for item in service.list_profiles()}
+    service.update_profile(
+        profiles["embedding"].id,
+        model_id=profiles["embedding"].model_id,
+        limits=ResourceLimits(
+            max_tokens=4096, max_attempts=3, timeout_seconds=120.0, cost_ceiling=1.0
+        ),
+    )
     service.assign({role: profiles[role].id for role in MODEL_ROLES})
     resolved = resolve_embedder(service._registry, secrets, models_dir)
     assert resolved.backend.kind == "openai_compatible"
@@ -91,6 +98,50 @@ def test_malformed_assigned_embedding_url_does_not_raise(tmp_path: Path) -> None
     assert resolved.backend.kind == "none"
     assert available is False
     assert vectors is None
+
+
+def test_billed_assigned_embedder_with_zero_ceiling_does_not_post(tmp_path: Path) -> None:
+    service, secrets, models_dir = _service(tmp_path)
+
+    class _Transport:
+        def __init__(self) -> None:
+            self.posts = 0
+
+        def get(self, url: str, timeout: float) -> tuple[int, dict[str, object]]:
+            _ = url, timeout
+            return 200, {}
+
+        def post(
+            self, url: str, json: dict[str, object], headers: dict[str, str], timeout: float
+        ) -> tuple[int, dict[str, object]]:
+            _ = url, json, headers, timeout
+            self.posts += 1
+            return 200, {"data": [{"embedding": [0.1, 0.2], "index": 0}]}
+
+    transport = _Transport()
+    service.register_provider(
+        ProviderDraft(
+            kind="openai_compatible",
+            display_name="Paid embed",
+            base_url="https://api.openai.com/v1",
+            billed=True,
+            api_key="sk-embed",
+        )
+    )
+    profiles = {item.role: item for item in service.list_profiles()}
+    service.update_profile(
+        profiles["embedding"].id,
+        model_id=profiles["embedding"].model_id,
+        limits=ResourceLimits(
+            max_tokens=1024, max_attempts=1, timeout_seconds=15.0, cost_ceiling=0.0
+        ),
+    )
+    service.assign({role: profiles[role].id for role in MODEL_ROLES})
+    resolved = resolve_embedder(service._registry, secrets, models_dir, transport=transport)
+    assert resolved.adapter.available("document") is False
+    assert resolved.adapter.available("code") is False
+    assert resolved.adapter.embed(["hello"], kind="document") is None
+    assert transport.posts == 0
 
 
 def test_composition_and_app_resolve_the_embedding_role() -> None:

@@ -10,7 +10,7 @@ from tests.support.git_fixtures import init_git_repo
 from kronos_engine.indexing.scanner import list_dirty_paths
 from kronos_engine.indexing.service import IndexingService
 from kronos_engine.indexing.sparse import SqliteIndexStore
-from kronos_engine.ports.embedding import EmbeddingPort
+from kronos_engine.ports.embedding import EmbeddingIdentity, EmbeddingPort
 
 
 class _CountingEmbedder:
@@ -100,6 +100,37 @@ def test_unchanged_chunks_are_not_reembedded(tmp_path: Path) -> None:
     service.incremental("repo_hash", root, policy)
     assert embedder.calls == first_calls
     _ = EmbeddingPort
+
+
+def test_swapping_embedder_identity_does_not_reuse_stale_vectors(tmp_path: Path) -> None:
+    paths = kronos_paths(tmp_path)
+    root = init_git_repo(
+        tmp_path / "hash-model",
+        files={"src/mod.py": "STABLE_TOKEN = 1\n"},
+    )
+    policy = indexing_policy()
+    first = _CountingEmbedder()
+    service = IndexingService(
+        paths,
+        embeddings=first,
+        embedding_identity=EmbeddingIdentity(kind="openai_compatible", model_id="small"),
+    )
+    service.rebuild("repo_model", root, policy)
+    assert first.calls >= 1
+    skipped = first.calls
+    service.rebuild("repo_model", root, policy)
+    assert first.calls == skipped
+    service.incremental("repo_model", root, policy)
+    assert first.calls == skipped
+
+    second = _CountingEmbedder()
+    swapped = IndexingService(
+        paths,
+        embeddings=second,
+        embedding_identity=EmbeddingIdentity(kind="openai_compatible", model_id="large"),
+    )
+    swapped.incremental("repo_model", root, policy)
+    assert second.calls >= 1
 
 
 def test_changed_content_is_reembedded(tmp_path: Path) -> None:

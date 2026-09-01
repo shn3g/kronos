@@ -258,3 +258,29 @@ def test_cursor_run_succeeds_when_worker_writes_artifact_without_stdout(tmp_path
     assert result.status == "succeeded"
     assert (worktree / "artifacts" / "hello.txt").read_text(encoding="utf-8") == SYNTHETIC_CONTENT
 
+
+def test_opencode_passes_model_flag_when_configured(tmp_path: Path) -> None:
+    captured: list[list[str]] = []
+
+    def invoke(
+        argv: list[str], env: dict[str, str], cwd: Path, timeout: float
+    ) -> CliResult:
+        captured.append(list(argv))
+        _assert_opencode_prompt_names_artifact(argv)
+        _ = env, cwd, timeout
+        return CliResult(returncode=0, stdout=SYNTHETIC_CONTENT, stderr="")
+
+    executor = OpencodeExecutor(
+        which=lambda name: "C:/fake/opencode" if name == "opencode" else None,
+        invoke=invoke,
+        model_id="opencode/glm-4.6",
+    )
+    worktree = tmp_path / "wt"
+    sandbox = ProcessJailSandbox(worktree)
+    result = executor.run(synthetic_request(worktree), sandbox)
+    assert result.status == "succeeded"
+    assert captured
+    argv = captured[0]
+    assert "--model" in argv
+    assert argv[argv.index("--model") + 1] == "opencode/glm-4.6"
+

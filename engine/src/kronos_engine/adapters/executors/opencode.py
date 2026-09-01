@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -41,9 +42,16 @@ def detect_opencode_cli(
 
 
 class OpencodeExecutor:
-    def __init__(self, *, which: WhichFn | None = None, invoke: InvokeFn | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        which: WhichFn | None = None,
+        invoke: InvokeFn | None = None,
+        model_id: str | None = None,
+    ) -> None:
         self._which = which
         self._invoke = invoke or _subprocess_invoke
+        self._model_id = model_id
 
     def detect(self) -> OpencodeCli | None:
         return detect_opencode_cli(self._which)
@@ -71,13 +79,11 @@ class OpencodeExecutor:
             f"{request.context.story}\n"
             f"Write the expected artifact to {request.context.expected_artifact}"
         )
-        argv = [
-            detected.path,
-            "run",
-            "--dir",
-            str(request.worktree),
-            prompt,
-        ]
+        argv = [detected.path, "run"]
+        chosen = (self._model_id or os.environ.get("KRONOS_OPENCODE_MODEL") or "").strip()
+        if chosen:
+            argv.extend(["--model", chosen])
+        argv.extend(["--dir", str(request.worktree), prompt])
         result = self._invoke(argv, env, request.worktree, request.limits.timeout_seconds)
         if result.returncode != 0:
             return ExecutorResult(
