@@ -19,7 +19,7 @@ Kronos is a locally installed desktop app (Tauri WebView, also previewable in a 
 
 ## Chat
 
-Streaming conversation in the pane. The agent may search the local per-repository index, read and write files inside the enrolled realpath, search active memories, and create a bounded Goal for unattended work. Most turns stay in the thread. Tool calls render as named cards with a text status (done, failed, running). The user message appears as soon as Send is pressed. Stop asks the engine to cancel the current turn between model steps.
+Streaming conversation in the pane. Tokens appear as the model writes them. The agent may search the local per-repository index, read and write files inside the enrolled realpath, search active memories, and create a bounded Goal for unattended work. Most turns stay in the thread. Tool calls render as named cards with a text status (done, failed, running). The user message appears as soon as Send is pressed. Stop closes the in-flight model request. The local index refreshes from git commits and from uncommitted files in enrolled folders.
 
 ## Research applied
 

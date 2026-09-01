@@ -50,6 +50,30 @@ export function ChatPage({
   }, [chatClient]);
 
   useEffect(() => {
+    if (!busy) {
+      return;
+    }
+    const sessionId = inflightSessionId.current ?? activeId;
+    if (!sessionId) {
+      return;
+    }
+    let cancelled = false;
+    const pull = () => {
+      void chatClient.getSession(sessionId).then((payload) => {
+        if (!cancelled && payload.messages.length > 0) {
+          setMessages(payload.messages);
+        }
+      });
+    };
+    pull();
+    const timer = window.setInterval(pull, 250);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [busy, chatClient, activeId]);
+
+  useEffect(() => {
     if (newChatRequest === 0) {
       return;
     }
@@ -91,6 +115,9 @@ export function ChatPage({
     setError(null);
     setDraft("");
     setMessages((current) => [...current, pending]);
+    if (activeId) {
+      inflightSessionId.current = activeId;
+    }
     try {
       const id = await ensureSession();
       inflightSessionId.current = id;
@@ -171,7 +198,7 @@ export function ChatPage({
             {messages.map((item) => (
               <li
                 key={item.id}
-                className={`chat-bubble chat-bubble--${item.role}`}
+                className={`chat-bubble chat-bubble--${item.role}${item.toolStatus === "streaming" ? " chat-bubble--streaming" : ""}`}
                 data-tool={item.toolName ?? undefined}
               >
                 {item.role === "tool" ? (

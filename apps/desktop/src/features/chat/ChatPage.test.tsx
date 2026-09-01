@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ChatPage } from "./ChatPage";
@@ -163,5 +163,72 @@ describe("ChatPage", () => {
     await user.click(await screen.findByRole("button", { name: /^stop$/i }));
     expect(cancelTurn).toHaveBeenCalledWith("chat_1");
     expect(await screen.findByText(/stopped/i)).toBeInTheDocument();
+  });
+
+  it("shows streamed assistant text while send is still in flight", async () => {
+    const user = userEvent.setup();
+    let polls = 0;
+    const getSession = vi.fn(async () => {
+      polls += 1;
+      const streamed =
+        polls >= 2
+          ? [
+              {
+                id: "a1",
+                role: "assistant" as const,
+                content: "Staff is missing",
+                toolName: null,
+                toolStatus: "streaming",
+              },
+            ]
+          : [];
+      return {
+        session: {
+          id: "chat_1",
+          title: "New chat",
+          repositoryId: null,
+          updatedAt: "t",
+        },
+        messages: [
+          {
+            id: "u1",
+            role: "user" as const,
+            content: "Go",
+            toolName: null,
+            toolStatus: null,
+          },
+          ...streamed,
+        ],
+      };
+    });
+    const sendMessage = vi.fn(
+      () =>
+        new Promise<{
+          messages: Array<{
+            id: string;
+            role: "user" | "assistant" | "tool";
+            content: string;
+            toolName: string | null;
+            toolStatus: string | null;
+          }>;
+        }>(() => undefined),
+    );
+    render(
+      <ChatPage
+        chatClient={chatClient({ sendMessage, getSession })}
+        repositoryId={null}
+        historyOpen={false}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "Go");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    await waitFor(
+      () => {
+        expect(screen.getByText(/staff is missing/i)).toBeInTheDocument();
+      },
+      { timeout: 1500 },
+    );
   });
 });

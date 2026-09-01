@@ -17,7 +17,7 @@ export function toolCardLabel(name: string | null, status: string | null): strin
   if (status === "error") {
     return `${label} · failed`;
   }
-  if (status === "running") {
+  if (status === "running" || status === "streaming") {
     return `${label} · running`;
   }
   return label;
