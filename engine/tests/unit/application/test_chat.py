@@ -158,6 +158,42 @@ def test_write_file_stays_inside_workspace_and_rejects_escape(tmp_path: Path) ->
     assert not (tmp_path / "secret.txt").exists()
 
 
+class _WriteEvents:
+    def __init__(self) -> None:
+        self.items: list[tuple[str, dict[str, object]]] = []
+
+    def emit(self, event_type: str, payload: dict[str, object]) -> None:
+        self.items.append((event_type, dict(payload)))
+
+
+def test_write_file_records_a_workspace_diff(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "hello.py").write_text("old\n", encoding="utf-8")
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    events = _WriteEvents()
+    service = ChatService(
+        SqliteChatStore(conn),
+        ScriptedCompleter(
+            [
+                '```tool\n{"name": "write_file", "path": "hello.py", "content": "new\\n"}\n```',
+                "Updated hello.py.",
+            ]
+        ),
+        repos=_RepoLookup(repo),
+        events=events,
+    )
+    session = service.create_session()
+    service.send_message(session.id, "Patch hello.py", repository_id="repo_alpha")
+    assert events.items
+    kind, payload = events.items[0]
+    assert kind == "git.wrote"
+    assert payload["path"] == "hello.py"
+    assert payload["repository_id"] == "repo_alpha"
+    assert "hello.py" in str(payload["summary"])
+
+
 def test_active_memories_are_injected_into_the_system_prompt(tmp_path: Path) -> None:
     database = Database(tmp_path / "kronos.sqlite3")
     conn = database.connect()

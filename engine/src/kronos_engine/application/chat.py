@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -60,6 +60,10 @@ class ChatCompleter(Protocol):
     ) -> str: ...
 
 
+class ChatEventSink(Protocol):
+    def emit(self, event_type: str, payload: Mapping[str, object]) -> object: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ChatTurn:
     role: str
@@ -108,6 +112,7 @@ class ChatService:
         goals: GoalService | None = None,
         clock: datetime | None = None,
         memory_conn: sqlite3.Connection | None = None,
+        events: ChatEventSink | None = None,
     ) -> None:
         self._store = store
         self._completer = completer
@@ -116,6 +121,7 @@ class ChatService:
         self._goals = goals
         self._clock = clock
         self._memory_conn = memory_conn
+        self._events = events
 
     def create_session(self, *, repository_id: str | None = None) -> ChatSessionView:
         now = self._now()
@@ -402,6 +408,7 @@ class ChatService:
             return "That path is outside the workspace or is not a file."
         target.write_text(content, encoding="utf-8")
         self._refresh_written_path(repository_id, root, record, as_posix)
+        self._note_write(repository_id, as_posix)
         return f"Wrote {as_posix} ({len(content)} characters)."
 
     def _refresh_written_path(
@@ -417,6 +424,21 @@ class ChatService:
             return
         try:
             upsert(repository_id, root, policy, (rel_path,))
+        except Exception:
+            return
+
+    def _note_write(self, repository_id: str, path: str) -> None:
+        if self._events is None:
+            return
+        try:
+            self._events.emit(
+                "git.wrote",
+                {
+                    "repository_id": repository_id,
+                    "path": path,
+                    "summary": f"Wrote {path}",
+                },
+            )
         except Exception:
             return
 

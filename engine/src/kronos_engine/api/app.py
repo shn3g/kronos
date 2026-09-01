@@ -362,6 +362,7 @@ def create_app(
                 SqliteModelRegistry(conn),
                 store,
             )
+            events = Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn))
             yield ChatService(
                 SqliteChatStore(conn),
                 completer,
@@ -370,10 +371,11 @@ def create_app(
                 goals=GoalService(
                     SqliteGoalStore(conn),
                     repos,
-                    Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn)),
+                    events,
                     notifications=_notifications_for(conn),
                 ),
                 memory_conn=conn,
+                events=events,
             )
         finally:
             conn.close()
