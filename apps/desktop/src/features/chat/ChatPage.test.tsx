@@ -687,4 +687,106 @@ describe("ChatPage", () => {
     await user.type(box, "Look at @zzzz");
     expect(await screen.findByText("No matching files.")).toBeInTheDocument();
   });
+
+  it("lets you try again after a send failure", async () => {
+    const user = userEvent.setup();
+    const sendMessage = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("down"))
+      .mockResolvedValueOnce({
+        messages: [
+          { id: "u1", role: "user", content: "Fix staff", toolName: null, toolStatus: null },
+          {
+            id: "a1",
+            role: "assistant",
+            content: "Staff is missing before the calendar route.",
+            toolName: null,
+            toolStatus: null,
+          },
+        ],
+      });
+
+    render(
+      <ChatPage
+        chatClient={chatClient({ sendMessage })}
+        repositoryId={null}
+        historyOpen={false}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "Fix staff");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+
+    expect(
+      await screen.findByText("Could not send that message. Check the model connection and try again."),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^try again$/i }));
+
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendMessage).toHaveBeenLastCalledWith("chat_1", "Fix staff", null);
+    expect(
+      await screen.findByText("Staff is missing before the calendar route."),
+    ).toBeInTheDocument();
+  });
+
+  it("retries the last user message after a reply", async () => {
+    const user = userEvent.setup();
+    const sendMessage = vi
+      .fn()
+      .mockResolvedValueOnce({
+        messages: [
+          { id: "u1", role: "user", content: "Fix staff", toolName: null, toolStatus: null },
+          {
+            id: "a1",
+            role: "assistant",
+            content: "Staff is missing before the calendar route.",
+            toolName: null,
+            toolStatus: null,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        messages: [
+          { id: "u1", role: "user", content: "Fix staff", toolName: null, toolStatus: null },
+          {
+            id: "a1",
+            role: "assistant",
+            content: "Staff is missing before the calendar route.",
+            toolName: null,
+            toolStatus: null,
+          },
+          { id: "u2", role: "user", content: "Fix staff", toolName: null, toolStatus: null },
+          {
+            id: "a2",
+            role: "assistant",
+            content: "Create staff first.",
+            toolName: null,
+            toolStatus: null,
+          },
+        ],
+      });
+
+    render(
+      <ChatPage
+        chatClient={chatClient({ sendMessage })}
+        repositoryId={null}
+        historyOpen={false}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "Fix staff");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    expect(await screen.findByText("Staff is missing before the calendar route.")).toBeInTheDocument();
+
+    await user.type(box, "draft keep");
+    await user.click(screen.getByRole("button", { name: /^retry$/i }));
+
+    expect(sendMessage).toHaveBeenLastCalledWith("chat_1", "Fix staff", null);
+    expect(await screen.findByText("Create staff first.")).toBeInTheDocument();
+    expect(box).toHaveValue("draft keep");
+  });
 });

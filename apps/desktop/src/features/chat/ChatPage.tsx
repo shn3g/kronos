@@ -190,7 +190,14 @@ export function ChatPage({
   }
 
   async function onSend() {
-    const text = draft.trim();
+    await sendText(draft.trim(), { clearDraft: true });
+  }
+
+  async function onRetry() {
+    await sendText(lastUserMessageText(messages), { clearDraft: false });
+  }
+
+  async function sendText(text: string, options: { clearDraft: boolean }): Promise<void> {
     if (text === "" || busy) {
       return;
     }
@@ -203,7 +210,9 @@ export function ChatPage({
     };
     setBusy(true);
     setError(null);
-    setDraft("");
+    if (options.clearDraft) {
+      setDraft("");
+    }
     closeMentionPicker();
     setMessages((current) => [...current, pending]);
     if (activeId) {
@@ -218,7 +227,9 @@ export function ChatPage({
       setSessions(listed);
     } catch {
       setMessages((current) => current.filter((item) => item.id !== pending.id));
-      setDraft(text);
+      if (options.clearDraft) {
+        setDraft(text);
+      }
       setError("Could not send that message. Check the model connection and try again.");
     } finally {
       inflightSessionId.current = null;
@@ -364,7 +375,21 @@ export function ChatPage({
             Working on this turn.
           </p>
         ) : null}
-        {error ? <p className="wizard__error">{error}</p> : null}
+        {error ? (
+          <div className="chat-send-error">
+            <p className="wizard__error">{error}</p>
+            <button type="button" className="btn-quiet" onClick={() => void onSend()}>
+              Try again
+            </button>
+          </div>
+        ) : null}
+        {!busy && !error && lastUserMessageText(messages) !== "" ? (
+          <div className="chat-retry">
+            <button type="button" className="btn-quiet" onClick={() => void onRetry()}>
+              Retry
+            </button>
+          </div>
+        ) : null}
         <div className="chat-composer-wrap">
           {mentionHint ? (
             <p className="chat-mentions chat-mentions--hint" role="status">
@@ -507,4 +532,14 @@ function UserMentionText({ content }: { content: string }) {
       )}
     </p>
   );
+}
+
+function lastUserMessageText(messages: ChatMessage[]): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const item = messages[index];
+    if (item?.role === "user") {
+      return item.content.trim();
+    }
+  }
+  return "";
 }
