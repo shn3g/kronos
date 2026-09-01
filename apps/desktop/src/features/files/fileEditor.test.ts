@@ -12,6 +12,7 @@ import {
   parseGoToLineInput,
   replaceAllInFileText,
   replaceInFileMatch,
+  askInChatSelection,
   selectionForLineColumn,
   workspaceSearchHitLabel,
   workspaceSearchHitSnippet,
@@ -177,6 +178,43 @@ describe("parseGoToLineInput", () => {
     expect(parseGoToLineInput("0")).toBeNull();
     expect(parseGoToLineInput("line 2")).toBeNull();
     expect(parseGoToLineInput("2:0")).toBeNull();
+  });
+});
+
+describe("askInChatSelection", () => {
+  it("returns null when the caret has no range", () => {
+    expect(askInChatSelection("alpha\nbeta\n", 6, 6)).toBeNull();
+  });
+
+  it("reads the selected lines and swaps a reversed range", () => {
+    expect(askInChatSelection("alpha\nbeta\ngamma\n", 6, 10)).toEqual({
+      text: "beta",
+      startLine: 2,
+      endLine: 2,
+    });
+    expect(askInChatSelection("alpha\nbeta\ngamma\n", 16, 0)).toEqual({
+      text: "alpha\nbeta\ngamma",
+      startLine: 1,
+      endLine: 3,
+    });
+    expect(askInChatSelection("alpha\nbeta\ngamma\n", 0, 17)).toEqual({
+      text: "alpha\nbeta\ngamma\n",
+      startLine: 1,
+      endLine: 4,
+    });
+  });
+
+  it("returns null for whitespace-only selections", () => {
+    expect(askInChatSelection("alpha\n\nbeta\n", 6, 7)).toBeNull();
+  });
+
+  it("clips a selection that is longer than the chat cap", () => {
+    const text = `${"a".repeat(5000)}\n`;
+    const selected = askInChatSelection(text, 0, text.length);
+    expect(selected).not.toBeNull();
+    expect(selected?.text).toHaveLength(4000);
+    expect(selected?.startLine).toBe(1);
+    expect(selected?.endLine).toBe(2);
   });
 });
 

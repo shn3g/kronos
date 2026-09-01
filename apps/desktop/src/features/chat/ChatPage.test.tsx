@@ -616,6 +616,38 @@ describe("ChatPage", () => {
     expect(await screen.findByRole("textbox", { name: /ask kronos/i })).toHaveValue("@src/app.py ");
   });
 
+  it("quotes selected lines from an external mention request", async () => {
+    const { rerender } = render(
+      <ChatPage
+        chatClient={chatClient()}
+        repositoryId="repo_alpha"
+        historyOpen={false}
+        mentionRequest={{ path: "", nonce: 0 }}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByRole("textbox", { name: /ask kronos/i })).toHaveValue("");
+    rerender(
+      <ChatPage
+        chatClient={chatClient()}
+        repositoryId="repo_alpha"
+        historyOpen={false}
+        mentionRequest={{
+          path: "src/app.py",
+          nonce: 1,
+          selectedText: "def connect():",
+          startLine: 2,
+          endLine: 2,
+        }}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+    expect(await screen.findByRole("textbox", { name: /ask kronos/i })).toHaveValue(
+      "@src/app.py\n\nSelected line 2:\n```\ndef connect():\n```\n",
+    );
+  });
+
   it("inserts an indexed file path when an @ mention is chosen", async () => {
     const user = userEvent.setup();
     const search = vi.fn(async () => [

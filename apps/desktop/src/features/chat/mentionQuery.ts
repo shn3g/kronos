@@ -45,6 +45,43 @@ export function appendMention(text: string, path: string): string {
   return `${parts.join(" ")} ${token} `;
 }
 
+export interface AskInChatExcerpt {
+  text: string;
+  startLine: number;
+  endLine: number;
+}
+
+export function appendAskInChatDraft(
+  text: string,
+  path: string,
+  selection: AskInChatExcerpt | null,
+): string {
+  const withPath = appendMention(text, path);
+  if (selection === null || selection.text.trim() === "") {
+    return withPath;
+  }
+  const range =
+    selection.startLine === selection.endLine
+      ? `line ${selection.startLine}`
+      : `lines ${selection.startLine}-${selection.endLine}`;
+  return `${withPath.trimEnd()}\n\nSelected ${range}:\n\`\`\`\n${selection.text}\n\`\`\`\n`;
+}
+
+export function excerptFromMentionRequest(request: {
+  selectedText?: string;
+  startLine?: number;
+  endLine?: number;
+}): AskInChatExcerpt | null {
+  const text = request.selectedText ?? "";
+  if (text.trim() === "") {
+    return null;
+  }
+  const startLine = request.startLine !== undefined && request.startLine > 0 ? request.startLine : 1;
+  const endLine =
+    request.endLine !== undefined && request.endLine >= startLine ? request.endLine : startLine;
+  return { text, startLine, endLine };
+}
+
 export function uniqueMentionPaths(hits: { path: string }[]): string[] {
   const seen = new Set<string>();
   const paths: string[] = [];

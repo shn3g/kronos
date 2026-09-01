@@ -17,6 +17,7 @@ interface MenuBarProps {
   onFindInFiles: () => void;
   onReplaceInFile: () => void;
   onGoToLine: () => void;
+  onAskInChat: () => void;
   onToggleHistory: () => void;
   onToggleActivityBar: () => void;
   onToggleInspector: () => void;
@@ -37,6 +38,7 @@ export function MenuBar({
   onFindInFiles,
   onReplaceInFile,
   onGoToLine,
+  onAskInChat,
   onToggleHistory,
   onToggleActivityBar,
   onToggleInspector,
@@ -150,6 +152,13 @@ export function MenuBar({
           }}
         />
         <MenuItem
+          label="Ask in chat"
+          onSelect={() => {
+            setOpen(null);
+            onAskInChat();
+          }}
+        />
+        <MenuItem
           label="Find"
           onSelect={() => {
             setOpen(null);
@@ -232,6 +241,7 @@ export function MenuBar({
           Match case limits that search to the same letter case.
           Whole word and Regular expression refine that search.
           Ctrl+Shift+F or Cmd+Shift+F searches the workspace index. Click a hit to open that line.
+          Ctrl+L or Cmd+L asks about the selected lines in Files.
           Ctrl+H or Cmd+H replaces text in the open file. Ctrl+G or Cmd+G jumps to a line.
           Revert in Changes restores the last chat write for that file, or the last committed
           version if chat did not write it. Open a change to see added and removed lines.

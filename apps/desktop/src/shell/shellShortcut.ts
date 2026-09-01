@@ -7,7 +7,8 @@ export type ShellShortcut =
   | "toggle-terminal"
   | "open-settings"
   | "go-to-file"
-  | "find-in-files";
+  | "find-in-files"
+  | "ask-in-chat";
 
 interface ShortcutKeys {
   key: string;
@@ -37,6 +38,9 @@ export function shellShortcutFromKeyboard(event: ShortcutKeys): ShellShortcut | 
   }
   if (key === "p" && !event.shiftKey) {
     return "go-to-file";
+  }
+  if (key === "l" && !event.shiftKey) {
+    return "ask-in-chat";
   }
   if (key === "f" && event.shiftKey) {
     return "find-in-files";

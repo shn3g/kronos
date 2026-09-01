@@ -9,6 +9,7 @@ import {
   type WorkspaceFileContents,
 } from "../workspaces/client";
 import {
+  ASK_IN_CHAT_EVENT,
   editorLineLabels,
   fileDraftIsDirty,
   fileFindQueryError,
@@ -25,9 +26,11 @@ import {
   replaceAllInFileText,
   replaceInFileMatch,
   SAVE_FILE_EVENT,
+  askInChatSelection,
   selectionForLineColumn,
   workspaceSearchHitLabel,
   workspaceSearchHitSnippet,
+  type AskInChatSelection,
 } from "./fileEditor";
 import {
   fileTreeFromPaths,
@@ -46,7 +49,7 @@ interface FilesPageProps {
   repositoriesClient?: RepositoriesClient;
   indexClient?: IndexClient;
   onOpenWorkspace: () => void;
-  onAskInChat?: (path: string) => void;
+  onAskInChat?: (path: string, selection: AskInChatSelection | null) => void;
   onWroteFile?: () => void;
   revealRequest?: { path: string; nonce: number };
 }
@@ -86,6 +89,7 @@ export function FilesPage({
   const dirty = fileDraftIsDirty(savedContent, draft);
   const dirtyRef = useRef(dirty);
   const saveRef = useRef<() => Promise<void>>(async () => undefined);
+  const askInChatRef = useRef<() => void>(() => undefined);
   const pageRef = useRef<HTMLElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
@@ -302,6 +306,17 @@ export function FilesPage({
   }
 
   saveRef.current = onSave;
+  askInChatRef.current = () => {
+    if (!onAskInChat || selectedPath === null) {
+      return;
+    }
+    const node = editorRef.current;
+    const selection =
+      node !== null && draft !== null
+        ? askInChatSelection(draft, node.selectionStart, node.selectionEnd)
+        : null;
+    onAskInChat(selectedPath, selection);
+  };
 
   useEffect(() => {
     if (!findOpen) {
@@ -454,12 +469,16 @@ export function FilesPage({
     function onMenuFindInFiles(): void {
       setSearchFocusTick((current) => current + 1);
     }
+    function onMenuAskInChat(): void {
+      askInChatRef.current();
+    }
     window.addEventListener("keydown", onKey, true);
     window.addEventListener(SAVE_FILE_EVENT, onMenuSave);
     window.addEventListener(FIND_IN_FILE_EVENT, onMenuFind);
     window.addEventListener(FIND_IN_FILES_EVENT, onMenuFindInFiles);
     window.addEventListener(REPLACE_IN_FILE_EVENT, onMenuReplace);
     window.addEventListener(GO_TO_LINE_EVENT, onMenuGoToLine);
+    window.addEventListener(ASK_IN_CHAT_EVENT, onMenuAskInChat);
     return () => {
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener(SAVE_FILE_EVENT, onMenuSave);
@@ -467,6 +486,7 @@ export function FilesPage({
       window.removeEventListener(FIND_IN_FILES_EVENT, onMenuFindInFiles);
       window.removeEventListener(REPLACE_IN_FILE_EVENT, onMenuReplace);
       window.removeEventListener(GO_TO_LINE_EVENT, onMenuGoToLine);
+      window.removeEventListener(ASK_IN_CHAT_EVENT, onMenuAskInChat);
     };
   }, []);
 
@@ -726,7 +746,7 @@ export function FilesPage({
                   type="button"
                   className="btn-quiet"
                   onClick={() => {
-                    onAskInChat(selectedPath);
+                    askInChatRef.current();
                   }}
                 >
                   Ask in chat

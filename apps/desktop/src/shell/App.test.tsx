@@ -425,6 +425,7 @@ describe("App shell", () => {
     expect(screen.getByRole("menuitem", { name: /^find in files$/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^replace$/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^go to line$/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^ask in chat$/i })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /^models$/i })).not.toBeInTheDocument();
   });
 
@@ -660,6 +661,42 @@ describe("App shell", () => {
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
     await user.click(await screen.findByRole("button", { name: /ask in chat/i }));
     expect(await screen.findByRole("textbox", { name: /ask kronos/i })).toHaveValue("@src/app.py ");
+  });
+
+  it("quotes selected Files lines in chat with Ctrl+L", async () => {
+    const user = userEvent.setup();
+    const session = liveSession();
+    render(
+      <App
+        engineClient={clientOf({ status: "ready", version: "0.1.0" })}
+        modelsClient={assignedModels()}
+        chatClient={quietChat()}
+        repositoriesClient={{
+          ...session.repositoriesClient,
+          listWorkspaceFiles: async () => [{ path: "src/app.py" }],
+          readWorkspaceFile: async () => ({
+            path: "src/app.py",
+            content: "print(1)\n",
+            binary: false,
+          }),
+        }}
+        homeClient={session.homeClient}
+        goalsClient={session.goalsClient}
+        settingsClient={session.settingsClient}
+      />,
+    );
+
+    await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.click(screen.getByRole("button", { name: /^files$/i }));
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    const editor = (await screen.findByRole("textbox", { name: "src/app.py" })) as HTMLTextAreaElement;
+    editor.focus();
+    editor.setSelectionRange(0, 8);
+    await user.keyboard("{Control>}l{/Control}");
+    expect(await screen.findByRole("textbox", { name: /ask kronos/i })).toHaveValue(
+      "@src/app.py\n\nSelected line 1:\n```\nprint(1)\n```\n",
+    );
   });
 
   it("opens a mentioned file in Files from the chat thread", async () => {

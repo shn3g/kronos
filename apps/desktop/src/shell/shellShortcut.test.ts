@@ -15,10 +15,14 @@ describe("shellShortcutFromKeyboard", () => {
     ).toBe("toggle-inspector");
     expect(shellShortcutFromKeyboard({ ...base, key: "`" })).toBe("toggle-terminal");
     expect(shellShortcutFromKeyboard({ ...base, key: "p" })).toBe("go-to-file");
+    expect(shellShortcutFromKeyboard({ ...base, key: "l" })).toBe("ask-in-chat");
     expect(
       shellShortcutFromKeyboard({ ...base, key: "f", shiftKey: true }),
     ).toBe("find-in-files");
     expect(shellShortcutFromKeyboard({ ...base, key: "f" })).toBeNull();
+    expect(
+      shellShortcutFromKeyboard({ ...base, key: "l", shiftKey: true }),
+    ).toBeNull();
   });
 
   it("ignores keys without a modifier and ignores Alt combinations", () => {

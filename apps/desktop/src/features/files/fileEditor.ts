@@ -5,7 +5,15 @@ export const FIND_IN_FILE_EVENT = "kronos-find-in-file";
 export const FIND_IN_FILES_EVENT = "kronos-find-in-files";
 export const REPLACE_IN_FILE_EVENT = "kronos-replace-in-file";
 export const GO_TO_LINE_EVENT = "kronos-go-to-line";
+export const ASK_IN_CHAT_EVENT = "kronos-ask-in-chat";
 export const WORKSPACE_SEARCH_SNIPPET_LIMIT = 120;
+export const MAX_ASK_IN_CHAT_SELECTION = 4000;
+
+export interface AskInChatSelection {
+  text: string;
+  startLine: number;
+  endLine: number;
+}
 
 export interface FileFindMatch {
   start: number;
@@ -151,6 +159,37 @@ export function parseGoToLineInput(raw: string): GoToLineTarget | null {
     return null;
   }
   return { line, column };
+}
+
+export function askInChatSelection(
+  content: string,
+  start: number,
+  end: number,
+): AskInChatSelection | null {
+  const from = Math.max(0, Math.min(start, end, content.length));
+  const to = Math.max(0, Math.min(Math.max(start, end), content.length));
+  if (from === to) {
+    return null;
+  }
+  const raw = content.slice(from, to);
+  if (raw.trim() === "") {
+    return null;
+  }
+  const text =
+    raw.length > MAX_ASK_IN_CHAT_SELECTION ? raw.slice(0, MAX_ASK_IN_CHAT_SELECTION) : raw;
+  return {
+    text,
+    startLine: lineNumberAt(content, from),
+    endLine: lineNumberAt(content, to),
+  };
+}
+
+function lineNumberAt(content: string, offset: number): number {
+  const clamped = Math.max(0, Math.min(offset, content.length));
+  if (clamped === 0) {
+    return 1;
+  }
+  return content.slice(0, clamped).split("\n").length;
 }
 
 export function selectionForLineColumn(

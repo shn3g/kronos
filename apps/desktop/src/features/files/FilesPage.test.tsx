@@ -283,7 +283,65 @@ describe("FilesPage", () => {
     await user.click(await screen.findByRole("treeitem", { name: "src" }));
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
     await user.click(await screen.findByRole("button", { name: /ask in chat/i }));
-    expect(onAskInChat).toHaveBeenCalledWith("src/app.py");
+    expect(onAskInChat).toHaveBeenCalledWith("src/app.py", null);
+  });
+
+  it("asks in chat with the selected editor lines", async () => {
+    const user = userEvent.setup();
+    const onAskInChat = vi.fn();
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({
+          readWorkspaceFile: async () => ({
+            path: "src/app.py",
+            content: "alpha\nbeta\ngamma\n",
+            binary: false,
+          }),
+        })}
+        onOpenWorkspace={() => undefined}
+        onAskInChat={onAskInChat}
+      />,
+    );
+
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    const editor = (await screen.findByRole("textbox", { name: "src/app.py" })) as HTMLTextAreaElement;
+    editor.focus();
+    editor.setSelectionRange(6, 10);
+    await user.click(screen.getByRole("button", { name: /ask in chat/i }));
+    expect(onAskInChat).toHaveBeenCalledWith("src/app.py", {
+      text: "beta",
+      startLine: 2,
+      endLine: 2,
+    });
+  });
+
+  it("asks in chat from the Ask in chat event with the current selection", async () => {
+    const user = userEvent.setup();
+    const onAskInChat = vi.fn();
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos()}
+        onOpenWorkspace={() => undefined}
+        onAskInChat={onAskInChat}
+      />,
+    );
+
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    const editor = (await screen.findByRole("textbox", { name: "src/app.py" })) as HTMLTextAreaElement;
+    editor.focus();
+    editor.setSelectionRange(0, 8);
+    window.dispatchEvent(new Event("kronos-ask-in-chat"));
+    expect(onAskInChat).toHaveBeenCalledWith("src/app.py", {
+      text: "print(1)",
+      startLine: 1,
+      endLine: 1,
+    });
   });
 
   it("searches workspace contents and opens a hit in the preview", async () => {

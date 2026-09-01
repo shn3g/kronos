@@ -21,7 +21,7 @@ import {
 import { plannerDisplayName } from "../features/models/plannerLabel";
 import { FilesPage } from "../features/files/FilesPage";
 import { GoToFilePalette } from "../features/files/GoToFilePalette";
-import { FIND_IN_FILE_EVENT, FIND_IN_FILES_EVENT, GO_TO_LINE_EVENT, REPLACE_IN_FILE_EVENT } from "../features/files/fileEditor";
+import { FIND_IN_FILE_EVENT, FIND_IN_FILES_EVENT, GO_TO_LINE_EVENT, REPLACE_IN_FILE_EVENT, ASK_IN_CHAT_EVENT } from "../features/files/fileEditor";
 import { safeWorkspaceRelPath } from "../features/files/workspacePath";
 import { TerminalPage } from "../features/terminal/TerminalPage";
 import { createProductionIndexClient, type IndexClient } from "../features/index/client";
@@ -105,7 +105,13 @@ export function App({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("changes");
   const [newChatRequest, setNewChatRequest] = useState(0);
-  const [mentionRequest, setMentionRequest] = useState({ path: "", nonce: 0 });
+  const [mentionRequest, setMentionRequest] = useState({
+    path: "",
+    nonce: 0,
+    selectedText: "",
+    startLine: 0,
+    endLine: 0,
+  });
   const [fileReveal, setFileReveal] = useState({ path: "", nonce: 0 });
   const [activityCollapsed, setActivityCollapsed] = useState(() =>
     readFlag(ACTIVITY_BAR_STORAGE_KEY),
@@ -289,6 +295,11 @@ export function App({
         window.dispatchEvent(new Event(FIND_IN_FILES_EVENT));
         return;
       }
+      if (action === "ask-in-chat") {
+        window.dispatchEvent(new Event(ASK_IN_CHAT_EVENT));
+        setActivity("chat");
+        return;
+      }
       setActivity("settings");
     };
     window.addEventListener("keydown", onKey, true);
@@ -376,6 +387,10 @@ export function App({
           setActivity("files");
           window.dispatchEvent(new Event(GO_TO_LINE_EVENT));
         }}
+        onAskInChat={() => {
+          window.dispatchEvent(new Event(ASK_IN_CHAT_EVENT));
+          setActivity("chat");
+        }}
         onToggleHistory={() => {
           setHistoryOpen((open) => !open);
         }}
@@ -451,8 +466,14 @@ export function App({
                   onOpenWorkspace={() => {
                     setActivity("workspaces");
                   }}
-                  onAskInChat={(path) => {
-                    setMentionRequest((current) => ({ path, nonce: current.nonce + 1 }));
+                  onAskInChat={(path, selection) => {
+                    setMentionRequest((current) => ({
+                      path,
+                      nonce: current.nonce + 1,
+                      selectedText: selection?.text ?? "",
+                      startLine: selection?.startLine ?? 0,
+                      endLine: selection?.endLine ?? 0,
+                    }));
                     setActivity("chat");
                   }}
                   onWroteFile={() => {

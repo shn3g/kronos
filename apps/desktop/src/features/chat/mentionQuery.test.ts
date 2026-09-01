@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, it } from "vitest";
-import { appendMention, insertMention, mentionQueryAtCursor, mentionSegments, uniqueMentionPaths } from "./mentionQuery";
+import {
+  appendAskInChatDraft,
+  appendMention,
+  insertMention,
+  mentionQueryAtCursor,
+  mentionSegments,
+  uniqueMentionPaths,
+} from "./mentionQuery";
 
 describe("mentionQueryAtCursor", () => {
   it("reads the query after the last @ before the cursor", () => {
@@ -31,6 +38,32 @@ describe("appendMention", () => {
   it("appends the path to existing text and skips a duplicate", () => {
     expect(appendMention("explain this", "src/app.py")).toBe("explain this @src/app.py ");
     expect(appendMention("@src/app.py ", "src/app.py")).toBe("@src/app.py ");
+  });
+});
+
+describe("appendAskInChatDraft", () => {
+  it("appends the file mention when nothing is selected", () => {
+    expect(appendAskInChatDraft("", "src/app.py", null)).toBe("@src/app.py ");
+  });
+
+  it("quotes a single selected line after the mention", () => {
+    expect(
+      appendAskInChatDraft("", "src/app.py", {
+        text: "def connect():",
+        startLine: 2,
+        endLine: 2,
+      }),
+    ).toBe("@src/app.py\n\nSelected line 2:\n```\ndef connect():\n```\n");
+  });
+
+  it("quotes a selected range after existing text", () => {
+    expect(
+      appendAskInChatDraft("explain", "src/app.py", {
+        text: "a\nb",
+        startLine: 2,
+        endLine: 3,
+      }),
+    ).toBe("explain @src/app.py\n\nSelected lines 2-3:\n```\na\nb\n```\n");
   });
 });
 

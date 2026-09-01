@@ -6,7 +6,7 @@ import { ChatMarkdown } from "./ChatMarkdown";
 import { ChatPathButton } from "./ChatPathButton";
 import { chatContextMeterLabel, chatContextUsage, chatContextWarning } from "./contextMeter";
 import { CopyTextButton } from "./CopyTextButton";
-import { appendMention, insertMention, mentionQueryAtCursor, mentionSegments, uniqueMentionPaths } from "./mentionQuery";
+import { appendAskInChatDraft, excerptFromMentionRequest, insertMention, mentionQueryAtCursor, mentionSegments, uniqueMentionPaths } from "./mentionQuery";
 import {
   MAX_CHAT_IMAGES_PER_TURN,
   clipboardHasFiles,
@@ -21,14 +21,22 @@ import { toolCardLabel } from "./toolCard";
 import type { IndexClient } from "../index/client";
 import { safeWorkspaceRelPath } from "../files/workspacePath";
 
-const EMPTY_MENTION_REQUEST = { path: "", nonce: 0 };
+const EMPTY_MENTION_REQUEST = { path: "", nonce: 0, selectedText: "", startLine: 0, endLine: 0 };
+
+interface ChatMentionRequest {
+  path: string;
+  nonce: number;
+  selectedText?: string;
+  startLine?: number;
+  endLine?: number;
+}
 
 interface ChatPageProps {
   chatClient: ChatClient;
   repositoryId: string | null;
   historyOpen: boolean;
   newChatRequest?: number;
-  mentionRequest?: { path: string; nonce: number };
+  mentionRequest?: ChatMentionRequest;
   plannerName?: string | null;
   indexClient?: IndexClient;
   onOpenWorkspace: () => void;
@@ -128,7 +136,9 @@ export function ChatPage({
     if (mentionRequest.nonce === 0 || mentionRequest.path.trim() === "") {
       return;
     }
-    setDraft((current) => appendMention(current, mentionRequest.path));
+    setDraft((current) =>
+      appendAskInChatDraft(current, mentionRequest.path, excerptFromMentionRequest(mentionRequest)),
+    );
     requestAnimationFrame(() => {
       composerRef.current?.focus();
     });
