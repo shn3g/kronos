@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ChatPage } from "./ChatPage";
@@ -38,6 +38,7 @@ function chatClient(overrides: Partial<ChatClient> = {}): ChatClient {
       ],
     }),
     cancelTurn: async () => undefined,
+    getImage: async () => ({ mime: "image/png", data: "" }),
     ...overrides,
   };
 }
@@ -867,4 +868,115 @@ describe("ChatPage", () => {
     expect(await screen.findByText("Create staff first.")).toBeInTheDocument();
     expect(box).toHaveValue("draft keep");
   });
+
+  it("pastes a screenshot, lets you remove it, and sends it with the message", async () => {
+    const user = userEvent.setup();
+    const pngBytes = Uint8Array.from(atob(TINY_PNG_B64), (ch) => ch.charCodeAt(0));
+    const png = new File([pngBytes], "shot.png", { type: "image/png" });
+    const sendMessage = vi.fn(async () => ({
+      messages: [
+        {
+          id: "u1",
+          role: "user" as const,
+          content: "What is this?\n![Pasted image](kronos-image:img_aaa)",
+          toolName: null,
+          toolStatus: null,
+        },
+        {
+          id: "a1",
+          role: "assistant" as const,
+          content: "That is a screenshot.",
+          toolName: null,
+          toolStatus: null,
+        },
+      ],
+    }));
+    const getImage = vi.fn(async () => ({ mime: "image/png", data: TINY_PNG_B64 }));
+
+    render(
+      <ChatPage
+        chatClient={chatClient({ sendMessage, getImage })}
+        repositoryId={null}
+        historyOpen={false}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    const imageInput = screen.getByLabelText(/add image/i);
+    await user.upload(imageInput, png);
+    expect(await screen.findByRole("img", { name: /pasted image/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /remove pasted image/i }));
+    expect(screen.queryByRole("img", { name: /pasted image/i })).not.toBeInTheDocument();
+
+    await user.upload(imageInput, png);
+    await user.type(box, "What is this?");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith("chat_1", "What is this?", null, [
+        { mime: "image/png", data: TINY_PNG_B64 },
+      ]);
+    });
+    expect(await screen.findByText("That is a screenshot.")).toBeInTheDocument();
+    expect(getImage).toHaveBeenCalledWith("chat_1", "img_aaa");
+  });
+
+  it("rejects a pasted text file and can send an image with no caption", async () => {
+    const user = userEvent.setup();
+    const pngBytes = Uint8Array.from(atob(TINY_PNG_B64), (ch) => ch.charCodeAt(0));
+    const png = new File([pngBytes], "shot.png", { type: "image/png" });
+    const sendMessage = vi.fn(async () => ({
+      messages: [
+        {
+          id: "u1",
+          role: "user" as const,
+          content: "![Pasted image](kronos-image:img_aaa)",
+          toolName: null,
+          toolStatus: null,
+        },
+        {
+          id: "a1",
+          role: "assistant" as const,
+          content: "A screenshot.",
+          toolName: null,
+          toolStatus: null,
+        },
+      ],
+    }));
+
+    render(
+      <ChatPage
+        chatClient={chatClient({ sendMessage })}
+        repositoryId={null}
+        historyOpen={false}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    fireEvent.paste(box, {
+      clipboardData: {
+        files: [new File(["hello"], "note.txt", { type: "text/plain" })],
+        items: [],
+        types: ["Files"],
+        getData: () => "",
+      },
+    });
+    expect(await screen.findByText(/png, jpeg, webp, or gif/i)).toBeInTheDocument();
+
+    const imageInput = screen.getByLabelText(/add image/i);
+    await user.upload(imageInput, png);
+    expect(await screen.findByRole("img", { name: /pasted image/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith("chat_1", "", null, [
+        { mime: "image/png", data: TINY_PNG_B64 },
+      ]);
+    });
+  });
 });
+
+const TINY_PNG_B64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";

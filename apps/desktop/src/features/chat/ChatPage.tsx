@@ -1,12 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 import type { ChatClient, ChatMessage, ChatSession } from "./client";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { ChatPathButton } from "./ChatPathButton";
 import { chatContextMeterLabel, chatContextUsage, chatContextWarning } from "./contextMeter";
 import { CopyTextButton } from "./CopyTextButton";
 import { appendMention, insertMention, mentionQueryAtCursor, mentionSegments, uniqueMentionPaths } from "./mentionQuery";
+import {
+  MAX_CHAT_IMAGES_PER_TURN,
+  clipboardHasFiles,
+  dataUrlForChatImage,
+  imageFilesFromClipboard,
+  pastedImageError,
+  readPastedImageFile,
+  userMessageSegments,
+  type ChatComposerImage,
+} from "./pastedImage";
 import { toolCardLabel } from "./toolCard";
 import type { IndexClient } from "../index/client";
 import { safeWorkspaceRelPath } from "../files/workspacePath";
@@ -49,9 +59,11 @@ export function ChatPage({
   const [mentionPaths, setMentionPaths] = useState<string[]>([]);
   const [mentionHighlight, setMentionHighlight] = useState(0);
   const [mentionHint, setMentionHint] = useState<"building" | "empty" | null>(null);
+  const [composerImages, setComposerImages] = useState<ChatComposerImage[]>([]);
   const inflightSessionId = useRef<string | null>(null);
   const threadRef = useRef<HTMLOListElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
 
   function closeMentionPicker(): void {
     setMentionPaths([]);
@@ -191,20 +203,24 @@ export function ChatPage({
     setActiveId(created.id);
     setMessages([]);
     setDraft("");
+    setComposerImages([]);
     setError(null);
     closeMentionPicker();
   }
 
   async function onSend() {
-    await sendText(draft.trim(), { clearDraft: true });
+    await sendText(draft.trim(), { clearDraft: true, images: composerImages });
   }
 
   async function onRetry() {
-    await sendText(lastUserMessageText(messages), { clearDraft: false });
+    await sendText(lastUserMessageText(messages), { clearDraft: false, images: [] });
   }
 
-  async function sendText(text: string, options: { clearDraft: boolean }): Promise<void> {
-    if (text === "" || busy) {
+  async function sendText(
+    text: string,
+    options: { clearDraft: boolean; images: ChatComposerImage[] },
+  ): Promise<void> {
+    if ((text === "" && options.images.length === 0) || busy) {
       return;
     }
     const pending: ChatMessage = {
@@ -213,11 +229,13 @@ export function ChatPage({
       content: text,
       toolName: null,
       toolStatus: null,
+      previewUrls: options.images.map((image) => image.previewUrl),
     };
     setBusy(true);
     setError(null);
     if (options.clearDraft) {
       setDraft("");
+      setComposerImages([]);
     }
     closeMentionPicker();
     setMessages((current) => [...current, pending]);
@@ -227,7 +245,15 @@ export function ChatPage({
     try {
       const id = await ensureSession();
       inflightSessionId.current = id;
-      const result = await chatClient.sendMessage(id, text, repositoryId);
+      const result =
+        options.images.length > 0
+          ? await chatClient.sendMessage(
+              id,
+              text,
+              repositoryId,
+              options.images.map((image) => ({ mime: image.mime, data: image.data })),
+            )
+          : await chatClient.sendMessage(id, text, repositoryId);
       setMessages(result.messages);
       const listed = await chatClient.listSessions();
       setSessions(listed);
@@ -235,11 +261,69 @@ export function ChatPage({
       setMessages((current) => current.filter((item) => item.id !== pending.id));
       if (options.clearDraft) {
         setDraft(text);
+        setComposerImages(options.images);
       }
       setError("Could not send that message. Check the model connection and try again.");
     } finally {
       inflightSessionId.current = null;
       setBusy(false);
+    }
+  }
+
+  async function addImageFiles(files: File[]): Promise<void> {
+    if (files.length === 0) {
+      setError(pastedImageError("type"));
+      return;
+    }
+    const accepted: ChatComposerImage[] = [];
+    let failure: "type" | "size" | null = null;
+    for (const file of files) {
+      const result = await readPastedImageFile(file);
+      if (!result.ok) {
+        failure = result.reason;
+        continue;
+      }
+      accepted.push({
+        id: `local_${crypto.randomUUID()}`,
+        mime: result.mime,
+        data: result.data,
+        previewUrl: dataUrlForChatImage(result.mime, result.data),
+      });
+    }
+    if (accepted.length === 0) {
+      setError(pastedImageError(failure ?? "type"));
+      return;
+    }
+    const room = MAX_CHAT_IMAGES_PER_TURN - composerImages.length;
+    if (room <= 0) {
+      setError(pastedImageError("limit"));
+      return;
+    }
+    if (accepted.length > room) {
+      setError(pastedImageError("limit"));
+    } else if (failure) {
+      setError(pastedImageError(failure));
+    } else {
+      setError(null);
+    }
+    setComposerImages((current) => [...current, ...accepted.slice(0, room)]);
+  }
+
+  function removeComposerImage(id: string): void {
+    setComposerImages((current) => current.filter((image) => image.id !== id));
+  }
+
+  async function onComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>): Promise<void> {
+    const data = event.clipboardData;
+    if (!clipboardHasFiles(data)) {
+      return;
+    }
+    event.preventDefault();
+    closeMentionPicker();
+    try {
+      await addImageFiles(imageFilesFromClipboard(data));
+    } catch {
+      setError("Could not read that image. Use Add image instead.");
     }
   }
 
@@ -336,8 +420,8 @@ export function ChatPage({
             <h1 className="chat-empty__title">Ask Kronos</h1>
             <p>
               {repositoryId
-                ? "Chat can search this workspace, read and write files, run commands, and start a longer goal when you want unattended work. AGENTS.md and Cursor rules files in this folder are followed on every turn. Apply on a code block writes that file here. Click a file mention to open it in Files."
-                : "You can ask how Kronos works now. Open a git folder to index code."}
+                ? "Chat can search this workspace, read and write files, run commands, and start a longer goal when you want unattended work. AGENTS.md and Cursor rules files in this folder are followed on every turn. Apply on a code block writes that file here. Click a file mention to open it in Files. Paste a screenshot to ask about the UI."
+                : "You can ask how Kronos works now. Paste a screenshot, or open a git folder to index code."}
             </p>
             {repositoryId ? null : (
               <button type="button" className="btn-quiet" onClick={onOpenWorkspace}>
@@ -356,7 +440,13 @@ export function ChatPage({
                 {item.role === "assistant" ? (
                   <ChatMarkdown source={item.content} onApply={onApplyFile} onOpenPath={onOpenPath} />
                 ) : item.role === "user" ? (
-                  <UserMentionText content={item.content} onOpenPath={onOpenPath} />
+                  <UserMessage
+                    content={item.content}
+                    previewUrls={item.previewUrls}
+                    sessionId={activeId}
+                    chatClient={chatClient}
+                    onOpenPath={onOpenPath}
+                  />
                 ) : item.role === "tool" ? (
                   <>
                     <p className="chat-bubble__tool">{toolCardLabel(item.toolName, item.toolStatus)}</p>
@@ -396,7 +486,19 @@ export function ChatPage({
             </button>
           </div>
         ) : null}
-        <div className="chat-composer-wrap">
+        <div
+          className="chat-composer-wrap"
+          onDragOver={(event: DragEvent<HTMLDivElement>) => {
+            event.preventDefault();
+          }}
+          onDrop={(event: DragEvent<HTMLDivElement>) => {
+            if (!clipboardHasFiles(event.dataTransfer)) {
+              return;
+            }
+            event.preventDefault();
+            void addImageFiles(imageFilesFromClipboard(event.dataTransfer));
+          }}
+        >
           {mentionHint ? (
             <p className="chat-mentions chat-mentions--hint" role="status">
               {mentionHint === "building"
@@ -426,13 +528,51 @@ export function ChatPage({
               ))}
             </ul>
           ) : null}
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            multiple
+            className="visually-hidden"
+            aria-label="Add image"
+            onChange={(event) => {
+              const files = [...(event.target.files ?? [])];
+              event.target.value = "";
+              if (files.length > 0) {
+                void addImageFiles(files);
+              }
+            }}
+          />
           <label className="chat-composer">
             <span className="visually-hidden">Ask Kronos</span>
+            {composerImages.length > 0 ? (
+              <ul className="chat-composer__images" aria-label="Pasted images">
+                {composerImages.map((image) => (
+                  <li key={image.id} className="chat-composer__image">
+                    <img src={image.previewUrl} alt="Pasted image" />
+                    <button
+                      type="button"
+                      className="btn-quiet"
+                      aria-label="Remove pasted image"
+                      onClick={() => {
+                        removeComposerImage(image.id);
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             <textarea
               ref={composerRef}
               className="chat-composer__input"
               value={draft}
-              placeholder={repositoryId ? "Ask Kronos. Type @ to mention a file." : "Ask Kronos"}
+              placeholder={
+                repositoryId
+                  ? "Ask Kronos. Paste a screenshot, or type @ to mention a file."
+                  : "Ask Kronos. Paste a screenshot."
+              }
               aria-label="Ask Kronos"
               aria-autocomplete="list"
               aria-expanded={mentionPaths.length > 0}
@@ -446,6 +586,9 @@ export function ChatPage({
                 const node = event.target;
                 node.style.height = "auto";
                 node.style.height = `${Math.min(200, Math.max(44, node.scrollHeight))}px`;
+              }}
+              onPaste={(event) => {
+                void onComposerPaste(event);
               }}
               onKeyDown={(event) => {
                 if (event.key === "Escape" && (mentionPaths.length > 0 || mentionHint)) {
@@ -502,8 +645,17 @@ export function ChatPage({
               </span>
               <button
                 type="button"
+                className="btn-quiet"
+                onClick={() => {
+                  imageInputRef.current?.click();
+                }}
+              >
+                Add image
+              </button>
+              <button
+                type="button"
                 className={busy ? "btn-quiet" : "btn-primary"}
-                disabled={busy || draft.trim() === ""}
+                disabled={busy || (draft.trim() === "" && composerImages.length === 0)}
                 onClick={() => void onSend()}
               >
                 {busy ? "Working" : "Send"}
@@ -524,6 +676,86 @@ export function ChatPage({
       </section>
     </div>
   );
+}
+
+function UserMessage({
+  content,
+  previewUrls,
+  sessionId,
+  chatClient,
+  onOpenPath,
+}: {
+  content: string;
+  previewUrls: string[] | undefined;
+  sessionId: string | null;
+  chatClient: ChatClient;
+  onOpenPath: ((path: string) => void) | undefined;
+}) {
+  if (previewUrls && previewUrls.length > 0) {
+    return (
+      <>
+        {content.trim() !== "" ? <UserMentionText content={content} onOpenPath={onOpenPath} /> : null}
+        {previewUrls.map((url) => (
+          <img key={url} className="chat-bubble__image" alt="Pasted image" src={url} />
+        ))}
+      </>
+    );
+  }
+  const segments = userMessageSegments(content);
+  return (
+    <>
+      {segments.map((part, index) => {
+        if (part.kind === "image" && sessionId) {
+          return (
+            <ChatPastedImage
+              key={`${part.value}:${index}`}
+              sessionId={sessionId}
+              imageId={part.value}
+              chatClient={chatClient}
+            />
+          );
+        }
+        if (part.kind === "image") {
+          return (
+            <span key={`${part.value}:${index}`} className="chat-bubble__image-fallback">
+              Pasted image
+            </span>
+          );
+        }
+        return <UserMentionText key={`${part.value}:${index}`} content={part.value} onOpenPath={onOpenPath} />;
+      })}
+    </>
+  );
+}
+
+function ChatPastedImage({
+  sessionId,
+  imageId,
+  chatClient,
+}: {
+  sessionId: string;
+  imageId: string;
+  chatClient: ChatClient;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void chatClient.getImage(sessionId, imageId).then(
+      (payload) => {
+        if (!cancelled) {
+          setSrc(dataUrlForChatImage(payload.mime, payload.data));
+        }
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [chatClient, imageId, sessionId]);
+  if (!src) {
+    return <span className="chat-bubble__image-fallback">Pasted image</span>;
+  }
+  return <img className="chat-bubble__image" alt="Pasted image" src={src} />;
 }
 
 function UserMentionText({

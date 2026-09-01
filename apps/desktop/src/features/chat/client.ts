@@ -9,12 +9,18 @@ export interface ChatSession {
   updatedAt: string;
 }
 
+export interface ChatImagePayload {
+  mime: string;
+  data: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "tool";
   content: string;
   toolName: string | null;
   toolStatus: string | null;
+  previewUrls?: string[] | undefined;
 }
 
 export interface ChatClient {
@@ -25,8 +31,10 @@ export interface ChatClient {
     id: string,
     content: string,
     repositoryId?: string | null,
+    images?: readonly ChatImagePayload[] | undefined,
   ): Promise<{ messages: ChatMessage[] }>;
   cancelTurn(id: string): Promise<void>;
+  getImage(sessionId: string, imageId: string): Promise<ChatImagePayload>;
 }
 
 export function createProductionChatClient(
@@ -56,16 +64,28 @@ export function createProductionChatClient(
         messages: messages.map(mapMessage),
       };
     },
-    async sendMessage(id, content, repositoryId) {
+    async sendMessage(id, content, repositoryId, images) {
       const payload = await jsonRequest(request, "POST", `/chat/sessions/${id}/messages`, {
         content,
         repository_id: repositoryId ?? null,
+        ...(images && images.length > 0 ? { images } : {}),
       });
       const messages = Array.isArray(payload.messages) ? payload.messages : [];
       return { messages: messages.map(mapMessage) };
     },
     async cancelTurn(id) {
       await jsonRequest(request, "POST", `/chat/sessions/${id}/cancel`, {});
+    },
+    async getImage(sessionId, imageId) {
+      const payload = await jsonRequest(
+        request,
+        "GET",
+        `/chat/sessions/${sessionId}/images/${imageId}`,
+      );
+      return {
+        mime: stringField(payload, "mime"),
+        data: stringField(payload, "data"),
+      };
     },
   };
 }

@@ -336,6 +336,12 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
             return false;
         }
         if let Some((id, action)) = rest.split_once('/') {
+            if method == "GET" {
+                return match action.strip_prefix("images/") {
+                    Some(image_id) => skill_memory_id_ok(id) && skill_memory_id_ok(image_id),
+                    None => false,
+                };
+            }
             return method == "POST"
                 && skill_memory_id_ok(id)
                 && matches!(action, "messages" | "cancel");
@@ -999,6 +1005,9 @@ mod tests {
         assert!(engine_path_allowed("GET", "/chat/sessions/chat_1"));
         assert!(engine_path_allowed("POST", "/chat/sessions/chat_1/messages"));
         assert!(engine_path_allowed("POST", "/chat/sessions/chat_1/cancel"));
+        assert!(engine_path_allowed("GET", "/chat/sessions/chat_1/images/img_abc"));
+        assert!(!engine_path_allowed("POST", "/chat/sessions/chat_1/images/img_abc"));
+        assert!(!engine_path_allowed("GET", "/chat/sessions/chat_1/images/../secret"));
         assert!(!engine_path_allowed("DELETE", "/chat/sessions/chat_1"));
     }
 

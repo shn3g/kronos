@@ -83,6 +83,7 @@ function quietChat(): ChatClient {
     }),
     sendMessage: async () => ({ messages: [] }),
     cancelTurn: async () => undefined,
+    getImage: async () => ({ mime: "image/png", data: "" }),
   };
 }
 
