@@ -4,21 +4,25 @@
 //! The WebView never receives the install bearer token.
 
 use serde::Serialize;
+use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
-use tauri::{AppHandle, Manager, State};
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
 const CLIENT_VERSION: &str = "0.1.0";
 const READY_TIMEOUT: Duration = Duration::from_secs(20);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+const STREAM_READ_POLL: Duration = Duration::from_millis(200);
+const STREAM_MAX_IDLE: Duration = Duration::from_secs(300);
+const ENGINE_STREAM_EVENT: &str = "engine-stream";
 
 #[derive(Clone, Serialize)]
 #[serde(tag = "status", rename_all = "camelCase")]
@@ -158,6 +162,552 @@ pub fn engine_json(
             status: 0,
             body: String::new(),
         },
+    }
+}
+
+#[derive(Default)]
+pub struct StreamCancels {
+    inner: Mutex<HashSet<String>>,
+}
+
+impl StreamCancels {
+    fn cancel(&self, request_id: &str) {
+        if let Ok(mut guard) = self.inner.lock() {
+            guard.insert(request_id.to_string());
+        }
+    }
+
+    fn is_cancelled(&self, request_id: &str) -> bool {
+        self.inner
+            .lock()
+            .map(|guard| guard.contains(request_id))
+            .unwrap_or(false)
+    }
+
+    fn finish(&self, request_id: &str) {
+        if let Ok(mut guard) = self.inner.lock() {
+            guard.remove(request_id);
+        }
+    }
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EngineStreamEvent {
+    request_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delta: Option<String>,
+    done: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    citations: Option<Vec<StreamCitation>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    goal_refs: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StreamCitation {
+    path: String,
+    start_line: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    end_line: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SseDataEvent {
+    Delta(String),
+    Done {
+        content: String,
+        citations: Vec<StreamCitation>,
+        goal_refs: Vec<String>,
+    },
+}
+
+#[tauri::command]
+pub fn engine_stream(
+    app: AppHandle,
+    state: State<EngineSupervisor>,
+    cancels: State<StreamCancels>,
+    method: String,
+    path: String,
+    body: Option<serde_json::Value>,
+    request_id: String,
+) {
+    run_engine_stream(
+        &app,
+        &state,
+        &cancels,
+        &method,
+        &path,
+        body.as_ref(),
+        &request_id,
+    );
+}
+
+#[tauri::command]
+pub fn engine_stream_cancel(cancels: State<StreamCancels>, request_id: String) {
+    cancels.cancel(&request_id);
+}
+
+fn run_engine_stream(
+    app: &AppHandle,
+    supervisor: &EngineSupervisor,
+    cancels: &StreamCancels,
+    method: &str,
+    path: &str,
+    body: Option<&serde_json::Value>,
+    request_id: &str,
+) {
+    let emit_error = |message: String| {
+        emit_stream(
+            app,
+            EngineStreamEvent {
+                request_id: request_id.to_string(),
+                delta: None,
+                done: true,
+                error: Some(message),
+                content: None,
+                citations: None,
+                goal_refs: None,
+            },
+        );
+    };
+    if !engine_path_allowed(method, path) {
+        emit_error("path not allowed".to_string());
+        cancels.finish(request_id);
+        return;
+    }
+    let Some(connection) = supervisor.connection() else {
+        emit_error("engine unavailable".to_string());
+        cancels.finish(request_id);
+        return;
+    };
+    let result = stream_loopback(
+        app,
+        &connection,
+        cancels,
+        method,
+        path,
+        body,
+        request_id,
+    );
+    match result {
+        Ok(()) => {}
+        Err(message) if message == "cancelled" => {
+            emit_stream(
+                app,
+                EngineStreamEvent {
+                    request_id: request_id.to_string(),
+                    delta: None,
+                    done: true,
+                    error: None,
+                    content: None,
+                    citations: None,
+                    goal_refs: None,
+                },
+            );
+        }
+        Err(message) => emit_error(message),
+    }
+    cancels.finish(request_id);
+}
+
+fn stream_loopback(
+    app: &AppHandle,
+    connection: &EngineConnection,
+    cancels: &StreamCancels,
+    method: &str,
+    path: &str,
+    body: Option<&serde_json::Value>,
+    request_id: &str,
+) -> Result<(), String> {
+    let parsed = parse_loopback_http_url(&format!(
+        "{}{}",
+        connection.base_url.trim_end_matches('/'),
+        path
+    ))?;
+    let mut stream = TcpStream::connect((parsed.host.as_str(), parsed.port))
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_read_timeout(Some(STREAM_READ_POLL))
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_write_timeout(Some(PROBE_TIMEOUT))
+        .map_err(|error| error.to_string())?;
+    let payload = body
+        .and_then(|value| {
+            if value.is_null() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        })
+        .unwrap_or_default();
+    let auth = format!("Bearer {}", connection.token);
+    let mut request = format!(
+        "{} {} HTTP/1.1\r\nHost: {}:{}\r\nConnection: close\r\nAccept: text/event-stream\r\nAuthorization: {}\r\n",
+        method, parsed.path, parsed.host, parsed.port, auth
+    );
+    if !payload.is_empty() {
+        request.push_str("Content-Type: application/json\r\n");
+        request.push_str(&format!("Content-Length: {}\r\n", payload.len()));
+    }
+    request.push_str("\r\n");
+    request.push_str(&payload);
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| error.to_string())?;
+
+    let cancelled = || cancels.is_cancelled(request_id);
+    let (status, headers, leftover) = read_http_head(&mut stream, &cancelled)?;
+    let chunked = headers.iter().any(|(name, value)| {
+        name.eq_ignore_ascii_case("transfer-encoding") && value.to_ascii_lowercase().contains("chunked")
+    });
+    if status != 200 {
+        let body = read_remaining_body(&mut stream, leftover, chunked, &cancelled)?;
+        return Err(detail_from_body(status, &body));
+    }
+
+    let mut decoder = if chunked {
+        Some(ChunkDecoder::default())
+    } else {
+        None
+    };
+    let mut sse_buf = String::new();
+    let mut completed = false;
+    {
+        let mut push_bytes = |bytes: &[u8]| -> Result<(), String> {
+            let decoded = if let Some(decoder) = decoder.as_mut() {
+                decoder.push(bytes)?
+            } else {
+                bytes.to_vec()
+            };
+            if decoded.is_empty() {
+                return Ok(());
+            }
+            sse_buf.push_str(&String::from_utf8_lossy(&decoded));
+            for event in drain_sse_events(&mut sse_buf) {
+                if matches!(event, SseDataEvent::Done { .. }) {
+                    completed = true;
+                }
+                emit_sse(app, request_id, event);
+            }
+            Ok(())
+        };
+        if !leftover.is_empty() {
+            push_bytes(&leftover)?;
+        }
+
+        let mut buf = [0u8; 4096];
+        let mut last_data = Instant::now();
+        loop {
+            if cancelled() {
+                return Err("cancelled".to_string());
+            }
+            if last_data.elapsed() > STREAM_MAX_IDLE {
+                return Err("timed out reading the orchestrator stream".to_string());
+            }
+            match stream.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    last_data = Instant::now();
+                    push_bytes(&buf[..n])?;
+                }
+                Err(error) if matches!(error.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) => {
+                    continue;
+                }
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+    }
+    if !completed {
+        emit_stream(
+            app,
+            EngineStreamEvent {
+                request_id: request_id.to_string(),
+                delta: None,
+                done: true,
+                error: None,
+                content: None,
+                citations: None,
+                goal_refs: None,
+            },
+        );
+    }
+    Ok(())
+}
+
+fn emit_sse(app: &AppHandle, request_id: &str, event: SseDataEvent) {
+    match event {
+        SseDataEvent::Delta(delta) => emit_stream(
+            app,
+            EngineStreamEvent {
+                request_id: request_id.to_string(),
+                delta: Some(delta),
+                done: false,
+                error: None,
+                content: None,
+                citations: None,
+                goal_refs: None,
+            },
+        ),
+        SseDataEvent::Done {
+            content,
+            citations,
+            goal_refs,
+        } => emit_stream(
+            app,
+            EngineStreamEvent {
+                request_id: request_id.to_string(),
+                delta: None,
+                done: true,
+                error: None,
+                content: Some(content),
+                citations: Some(citations),
+                goal_refs: Some(goal_refs),
+            },
+        ),
+    }
+}
+
+fn emit_stream(app: &AppHandle, event: EngineStreamEvent) {
+    let _ = app.emit(ENGINE_STREAM_EVENT, event);
+}
+
+fn read_http_head(
+    stream: &mut TcpStream,
+    cancelled: &impl Fn() -> bool,
+) -> Result<(u16, Vec<(String, String)>, Vec<u8>), String> {
+    let mut acc = Vec::new();
+    let mut buf = [0u8; 2048];
+    let started = Instant::now();
+    loop {
+        if cancelled() {
+            return Err("cancelled".to_string());
+        }
+        if started.elapsed() > STREAM_MAX_IDLE {
+            return Err("timed out reading response headers".to_string());
+        }
+        match stream.read(&mut buf) {
+            Ok(0) => return Err("engine closed the stream".to_string()),
+            Ok(n) => {
+                acc.extend_from_slice(&buf[..n]);
+                if let Some(pos) = find_header_end(&acc) {
+                    let header_text = String::from_utf8_lossy(&acc[..pos]);
+                    let leftover = acc[pos..].to_vec();
+                    let (status, headers) = parse_response_headers(&header_text)?;
+                    return Ok((status, headers, leftover));
+                }
+            }
+            Err(error) if matches!(error.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) => {
+                continue;
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+}
+
+fn read_remaining_body(
+    stream: &mut TcpStream,
+    leftover: Vec<u8>,
+    chunked: bool,
+    cancelled: &impl Fn() -> bool,
+) -> Result<String, String> {
+    let mut decoder = if chunked {
+        Some(ChunkDecoder::default())
+    } else {
+        None
+    };
+    let mut body = Vec::new();
+    let mut push = |bytes: &[u8]| -> Result<(), String> {
+        if let Some(decoder) = decoder.as_mut() {
+            body.extend(decoder.push(bytes)?);
+        } else {
+            body.extend_from_slice(bytes);
+        }
+        Ok(())
+    };
+    if !leftover.is_empty() {
+        push(&leftover)?;
+    }
+    let mut buf = [0u8; 4096];
+    let mut last_data = Instant::now();
+    loop {
+        if cancelled() {
+            return Err("cancelled".to_string());
+        }
+        if last_data.elapsed() > STREAM_MAX_IDLE {
+            break;
+        }
+        match stream.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                last_data = Instant::now();
+                push(&buf[..n])?;
+            }
+            Err(error) if matches!(error.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) => {
+                continue;
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Ok(String::from_utf8_lossy(&body).into_owned())
+}
+
+fn find_header_end(acc: &[u8]) -> Option<usize> {
+    acc.windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|index| index + 4)
+        .or_else(|| {
+            acc.windows(2)
+                .position(|window| window == b"\n\n")
+                .map(|index| index + 2)
+        })
+}
+
+fn parse_response_headers(header_text: &str) -> Result<(u16, Vec<(String, String)>), String> {
+    let mut lines = header_text.lines();
+    let status_line = lines.next().unwrap_or("");
+    let status: u16 = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|item| item.parse().ok())
+        .ok_or_else(|| "engine stream response had no status".to_string())?;
+    let mut headers = Vec::new();
+    for line in lines {
+        if let Some((name, value)) = line.split_once(':') {
+            headers.push((name.trim().to_string(), value.trim().to_string()));
+        }
+    }
+    Ok((status, headers))
+}
+
+fn detail_from_body(status: u16, body: &str) -> String {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(body) {
+        if let Some(detail) = value.get("detail").and_then(|item| item.as_str()) {
+            return detail.to_string();
+        }
+    }
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        format!("engine request failed: {status}")
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn parse_sse_data_line(line: &str) -> Option<SseDataEvent> {
+    let trimmed = line.trim_end_matches(['\r', '\n']);
+    let data = trimmed.strip_prefix("data:")?.trim();
+    if data.is_empty() || data == "[DONE]" {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_str(data).ok()?;
+    let done = value.get("done").and_then(|item| item.as_bool()) == Some(true);
+    if done || (value.get("content").is_some() && value.get("citations").is_some()) {
+        return Some(SseDataEvent::Done {
+            content: value
+                .get("content")
+                .and_then(|item| item.as_str())
+                .unwrap_or("")
+                .to_string(),
+            citations: parse_stream_citations(&value),
+            goal_refs: parse_goal_refs(&value),
+        });
+    }
+    value
+        .get("delta")
+        .and_then(|item| item.as_str())
+        .map(|delta| SseDataEvent::Delta(delta.to_string()))
+}
+
+fn drain_sse_events(buffer: &mut String) -> Vec<SseDataEvent> {
+    let mut events = Vec::new();
+    while let Some(index) = buffer.find('\n') {
+        let line: String = buffer.drain(..=index).collect();
+        if let Some(event) = parse_sse_data_line(&line) {
+            events.push(event);
+        }
+    }
+    events
+}
+
+fn parse_stream_citations(value: &serde_json::Value) -> Vec<StreamCitation> {
+    value
+        .get("citations")
+        .and_then(|item| item.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let path = item.get("path").and_then(|value| value.as_str())?.to_string();
+            let start = item
+                .get("start_line")
+                .or_else(|| item.get("startLine"))
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0) as u32;
+            let end = item
+                .get("end_line")
+                .or_else(|| item.get("endLine"))
+                .and_then(|value| value.as_u64())
+                .map(|value| value as u32);
+            Some(StreamCitation {
+                path,
+                start_line: start,
+                end_line: end,
+            })
+        })
+        .collect()
+}
+
+fn parse_goal_refs(value: &serde_json::Value) -> Vec<String> {
+    value
+        .get("goal_refs")
+        .or_else(|| value.get("goalRefs"))
+        .and_then(|item| item.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.as_str().map(str::to_string))
+        .collect()
+}
+
+#[derive(Default)]
+struct ChunkDecoder {
+    buf: Vec<u8>,
+    finished: bool,
+}
+
+impl ChunkDecoder {
+    fn push(&mut self, data: &[u8]) -> Result<Vec<u8>, String> {
+        if self.finished {
+            return Ok(Vec::new());
+        }
+        self.buf.extend_from_slice(data);
+        let mut out = Vec::new();
+        loop {
+            let Some(pos) = self.buf.windows(2).position(|window| window == b"\r\n") else {
+                break;
+            };
+            let size_line = std::str::from_utf8(&self.buf[..pos]).map_err(|error| error.to_string())?;
+            let size = usize::from_str_radix(size_line.trim(), 16)
+                .map_err(|_| "invalid chunk size".to_string())?;
+            let header_end = pos + 2;
+            if size == 0 {
+                self.finished = true;
+                self.buf.clear();
+                break;
+            }
+            let chunk_end = header_end + size + 2;
+            if self.buf.len() < chunk_end {
+                break;
+            }
+            out.extend_from_slice(&self.buf[header_end..header_end + size]);
+            self.buf.drain(..chunk_end);
+        }
+        Ok(out)
     }
 }
 
@@ -953,5 +1503,64 @@ mod tests {
         assert!(!engine_path_allowed("GET", "/conversations/conv_abc/messages"));
         assert!(!engine_path_allowed("DELETE", "/repositories/repo_alpha/conversations"));
         assert!(!engine_path_allowed("POST", "/conversations/../secret/messages"));
+    }
+
+    #[test]
+    fn parse_sse_delta_and_done_lines() {
+        assert_eq!(
+            super::parse_sse_data_line(r#"data: {"delta": "Hel"}"#),
+            Some(super::SseDataEvent::Delta("Hel".into()))
+        );
+        assert_eq!(
+            super::parse_sse_data_line(
+                r#"data: {"content":"Hello","citations":[{"path":"a.py","start_line":3,"end_line":5}],"goal_refs":["goal_1"],"done": true}"#
+            ),
+            Some(super::SseDataEvent::Done {
+                content: "Hello".into(),
+                citations: vec![super::StreamCitation {
+                    path: "a.py".into(),
+                    start_line: 3,
+                    end_line: Some(5),
+                }],
+                goal_refs: vec!["goal_1".into()],
+            })
+        );
+        assert_eq!(super::parse_sse_data_line("event: message"), None);
+        assert_eq!(super::parse_sse_data_line("data: [DONE]"), None);
+    }
+
+    #[test]
+    fn drain_sse_keeps_incomplete_line() {
+        let mut buf = String::from("data: {\"delta\": \"a\"}\n\ndata: {\"delta\": \"b");
+        let events = super::drain_sse_events(&mut buf);
+        assert_eq!(events, vec![super::SseDataEvent::Delta("a".into())]);
+        assert!(buf.contains('b'));
+    }
+
+    #[test]
+    fn stream_event_json_omits_secrets_and_uses_camel_case() {
+        let payload = super::EngineStreamEvent {
+            request_id: "r1".into(),
+            delta: Some("x".into()),
+            done: false,
+            error: None,
+            content: None,
+            citations: None,
+            goal_refs: None,
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        assert!(json.contains("requestId"));
+        assert!(!json.to_lowercase().contains("bearer"));
+        assert!(!json.contains("http://"));
+        assert!(!json.contains("Authorization"));
+    }
+
+    #[test]
+    fn chunk_decoder_yields_payload() {
+        let mut decoder = super::ChunkDecoder::default();
+        let decoded = decoder
+            .push(b"5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n")
+            .unwrap();
+        assert_eq!(decoded, b"hello world");
     }
 }

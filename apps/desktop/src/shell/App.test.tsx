@@ -14,6 +14,7 @@ const routes = [
   { name: "Home", heading: "Home" },
   { name: "Workspaces", heading: "Workspaces" },
   { name: "Goals", heading: "Goals" },
+  { name: "Chat", heading: "Chat" },
   { name: "Runs", heading: "Runs" },
   { name: "Skills", heading: "Skills" },
   { name: "Memory", heading: "Memory" },

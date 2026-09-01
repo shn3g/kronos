@@ -13,6 +13,7 @@ import { IndexPage } from "../features/index/IndexPage";
 import { GitHubPage } from "../features/connections/github/GitHubPage";
 import { TelegramPage } from "../features/connections/telegram/TelegramPage";
 import { GoalsPage } from "../features/goals/GoalsPage";
+import { ChatPage } from "../features/chat/ChatPage";
 import { RunsPage } from "../features/runs/RunsPage";
 import { SkillsPage } from "../features/skills/SkillsPage";
 import { MemoryPage } from "../features/memory/MemoryPage";
@@ -72,6 +73,8 @@ export function App({ engineClient }: AppProps) {
             <WorkspacesPage engineClient={client} pickFolder={pickRepositoryFolder} />
           ) : path === "/goals" ? (
             <GoalsPage engineClient={client} />
+          ) : path === "/chat" ? (
+            <ChatPage engineClient={client} />
           ) : path === "/runs" ? (
             <RunsPage engineClient={client} />
           ) : path === "/skills" ? (

@@ -21,6 +21,12 @@ export const ROUTES = [
     summary: "Bounded goals are planned and tracked from this screen.",
   },
   {
+    path: "/chat",
+    name: "Chat",
+    heading: "Chat",
+    summary: "Ask the orchestrator, stream replies, and hand work to goals.",
+  },
+  {
     path: "/runs",
     name: "Runs",
     heading: "Runs",
