@@ -30,7 +30,7 @@ Contributor tests belong in [CONTRIBUTING.md](CONTRIBUTING.md). Walkthrough: [do
 
 1. If no model is connected, Kronos asks for one before the main window. Keys go into the operating system secret store.
 2. Chat is the main window. File, Edit, View, and Help are in the menu bar. The left icon bar switches Chat, Workspaces, Files, and Settings. You can hide that bar and the Changes inspector from View. The composer shows an estimated token count. At 80 percent it asks you to start a new chat. The same UI can run in a browser at `http://localhost:1420` while `python -m kronos_engine` is running on this machine. The browser never sees the engine token.
-3. Open a git folder from File or the workspace control. Kronos indexes it locally. Chat can search, read, write, and run commands inside that folder. View → Terminal runs a command you type.
+3. Open a git folder from File or the workspace control. Kronos indexes it locally. Chat can search, read, write, and run commands inside that folder. AGENTS.md, .cursorrules, and files under .cursor/rules are followed on every turn. View → Terminal runs a command you type.
 4. Changes from the git working tree show in the right inspector. This turn lists files chat wrote. All lists every dirty file. Revert restores the last chat write, or the last committed version if chat did not write that file. Commit records a local git commit of the visible list. Kronos does not push. Health ticks cover engine, model, workspace, index, and secrets.
 5. Memories live in Settings. Unattended work can become a Goal from chat.
 

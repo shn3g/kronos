@@ -176,7 +176,8 @@ export function MenuBar({
           Cmd+Shift+J hides Changes. Ctrl+` or Cmd+` shows Terminal. Escape stops the current turn.
           Revert in Changes restores the last chat write for that file, or the last committed
           version if chat did not write it. Commit records a local git commit. This turn lists
-          files chat wrote. All lists every dirty file. Kronos does not push.
+          files chat wrote. All lists every dirty file. Kronos does not push. AGENTS.md,
+          .cursorrules, and files under .cursor/rules are followed on every chat turn.
         </p>
       </Menu>
     </div>

@@ -80,6 +80,21 @@ describe("ChatPage", () => {
     expect(screen.getByRole("progressbar", { name: /about \d+ of 32000 tokens/i })).toBeInTheDocument();
   });
 
+  it("says workspace instruction files are followed when a folder is open", async () => {
+    render(
+      <ChatPage
+        chatClient={chatClient()}
+        repositoryId="repo_alpha"
+        historyOpen={false}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    expect(
+      await screen.findByText(/AGENTS.md and Cursor rules files in this folder are followed/i),
+    ).toBeInTheDocument();
+  });
+
   it("warns when the loaded thread is near the context window", async () => {
     render(
       <ChatPage

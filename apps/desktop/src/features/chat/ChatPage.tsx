@@ -319,7 +319,7 @@ export function ChatPage({
             <h1 className="chat-empty__title">Ask Kronos</h1>
             <p>
               {repositoryId
-                ? "Chat can search this workspace, read and write files, run commands, and start a longer goal when you want unattended work."
+                ? "Chat can search this workspace, read and write files, run commands, and start a longer goal when you want unattended work. AGENTS.md and Cursor rules files in this folder are followed on every turn."
                 : "You can ask how Kronos works now. Open a git folder to index code."}
             </p>
             {repositoryId ? null : (
