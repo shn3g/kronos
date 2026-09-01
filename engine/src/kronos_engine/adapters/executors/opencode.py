@@ -67,14 +67,16 @@ class OpencodeExecutor:
                 usage=_usage(0),
                 error="opencode CLI was not detected",
             )
+        prompt = (
+            f"{request.context.story}\n"
+            f"Write the expected artifact to {request.context.expected_artifact}"
+        )
         argv = [
             detected.path,
             "run",
             "--dir",
             str(request.worktree),
-            "--artifact",
-            request.context.expected_artifact,
-            request.context.story,
+            prompt,
         ]
         result = self._invoke(argv, env, request.worktree, request.limits.timeout_seconds)
         if result.returncode != 0:

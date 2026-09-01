@@ -21,6 +21,55 @@ from kronos_engine.ports.executor import Executor
 
 ExecutorFactory = Callable[[Path], Executor]
 
+_OPENCODE_FLAGS_WITH_VALUE = frozenset(
+    {
+        "--dir",
+        "--artifact",
+        "--workspace",
+        "--model",
+        "-m",
+        "--agent",
+        "--session",
+        "-s",
+        "--format",
+        "--title",
+        "--file",
+        "-f",
+        "--attach",
+    }
+)
+
+
+def _opencode_prompt(argv: list[str], stdin: str = "") -> str:
+    messages: list[str] = []
+    skip_next = False
+    seen_run = False
+    for arg in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if not seen_run:
+            if arg == "run":
+                seen_run = True
+            continue
+        if arg in _OPENCODE_FLAGS_WITH_VALUE:
+            skip_next = True
+            continue
+        if arg.startswith("-"):
+            continue
+        messages.append(arg)
+    argv_prompt = " ".join(messages)
+    if stdin:
+        return f"{argv_prompt}\n{stdin}".strip() if argv_prompt else stdin
+    return argv_prompt
+
+
+def _assert_opencode_prompt_names_artifact(argv: list[str], stdin: str = "") -> None:
+    assert "run" in argv
+    assert "--dir" in argv
+    assert "--artifact" not in argv
+    assert SYNTHETIC_ARTIFACT in _opencode_prompt(argv, stdin)
+
 
 def _controlled(_tmp_path: Path) -> Executor:
     return ControlledOpenExecutor()
@@ -55,10 +104,7 @@ def _opencode(_tmp_path: Path) -> Executor:
         cwd: Path,
         timeout: float,
     ) -> CliResult:
-        assert "run" in argv
-        assert "--dir" in argv
-        assert "--artifact" in argv
-        assert SYNTHETIC_ARTIFACT in argv
+        _assert_opencode_prompt_names_artifact(argv)
         assert env.get("GH_TOKEN") is None
         assert env.get("KRONOS_AUTH_TOKEN") is None
         _ = cwd
@@ -150,8 +196,7 @@ def test_opencode_keeps_worker_written_artifact_when_stdout_is_chatter(tmp_path:
     def invoke(
         argv: list[str], env: dict[str, str], cwd: Path, timeout: float
     ) -> CliResult:
-        assert "--artifact" in argv
-        assert SYNTHETIC_ARTIFACT in argv
+        _assert_opencode_prompt_names_artifact(argv)
         _ = env
         _ = timeout
         artifact = cwd / "artifacts" / "hello.txt"
@@ -174,8 +219,7 @@ def test_opencode_writes_stdout_when_cli_succeeds_without_file(tmp_path: Path) -
     def invoke(
         argv: list[str], env: dict[str, str], cwd: Path, timeout: float
     ) -> CliResult:
-        assert "--artifact" in argv
-        assert SYNTHETIC_ARTIFACT in argv
+        _assert_opencode_prompt_names_artifact(argv)
         _ = env
         _ = cwd
         _ = timeout
