@@ -40,6 +40,14 @@ function repos(overrides: Partial<RepositoriesClient> = {}): RepositoriesClient 
       output: "hi\n",
     }),
     cancelWorkspaceCommand: unused,
+    watchWorkspaceCommand: async () => ({
+      command: "",
+      exitCode: null,
+      timedOut: false,
+      cancelled: false,
+      running: false,
+      output: "",
+    }),
     ...overrides,
   };
 }
@@ -106,6 +114,64 @@ describe("TerminalPage", () => {
     expect(await screen.findByText("from-workspace")).toBeInTheDocument();
     expect(screen.getByText("Exit 0")).toBeInTheDocument();
     expect(runWorkspaceCommand).toHaveBeenCalledWith("repo_alpha", "python probe.py");
+  });
+
+  it("shows command output while the run is still in flight", async () => {
+    const user = userEvent.setup();
+    let finish!: (run: {
+      command: string;
+      exitCode: number | null;
+      timedOut: boolean;
+      cancelled: boolean;
+      running?: boolean;
+      output: string;
+    }) => void;
+    const runWorkspaceCommand = vi.fn(
+      () =>
+        new Promise<{
+          command: string;
+          exitCode: number | null;
+          timedOut: boolean;
+          cancelled: boolean;
+          running?: boolean;
+          output: string;
+        }>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const watchWorkspaceCommand = vi.fn(async () => ({
+      command: "python stream.py",
+      exitCode: null,
+      timedOut: false,
+      cancelled: false,
+      running: true,
+      output: "hello-live\n",
+    }));
+    render(
+      <TerminalPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({ runWorkspaceCommand, watchWorkspaceCommand })}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    const input = await screen.findByRole("textbox", { name: /command/i });
+    await user.type(input, "python stream.py");
+    await user.click(screen.getByRole("button", { name: /^run$/i }));
+
+    expect(await screen.findByText("hello-live")).toBeInTheDocument();
+    expect(screen.getByText("Running.")).toBeInTheDocument();
+    finish({
+      command: "python stream.py",
+      exitCode: 0,
+      timedOut: false,
+      cancelled: false,
+      running: false,
+      output: "hello-live\ndone-live\n",
+    });
+    expect(await screen.findByText(/done-live/)).toBeInTheDocument();
+    expect(screen.getByText("Exit 0")).toBeInTheDocument();
   });
 
   it("stops a running command without waiting for the timeout", async () => {

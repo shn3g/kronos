@@ -107,6 +107,7 @@ function quietRepos(): RepositoriesClient {
     writeWorkspaceFile: unused,
     runWorkspaceCommand: unused,
     cancelWorkspaceCommand: unused,
+    watchWorkspaceCommand: unused,
   };
 }
 

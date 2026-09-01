@@ -33,6 +33,7 @@ export function TerminalPage({
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [historyStash, setHistoryStash] = useState("");
   const stoppingRef = useRef(false);
+  const outputRef = useRef<HTMLPreElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,6 +62,14 @@ export function TerminalPage({
     setHistory((current) => rememberCommand(current, command));
     setHistoryIndex(null);
     setHistoryStash("");
+    setRun({
+      command,
+      exitCode: null,
+      timedOut: false,
+      cancelled: false,
+      running: true,
+      output: "",
+    });
     try {
       const next = await client.runWorkspaceCommand(repositoryId, command);
       setRun(next);
@@ -106,6 +115,36 @@ export function TerminalPage({
       window.removeEventListener("keydown", onKey);
     };
   }, [busy, client, repositoryId]);
+
+  useEffect(() => {
+    if (!busy || !repositoryId) {
+      return;
+    }
+    let cancelled = false;
+    const pull = () => {
+      void client.watchWorkspaceCommand(repositoryId).then((snapshot) => {
+        if (cancelled) {
+          return;
+        }
+        if (snapshot.running === true || snapshot.output !== "") {
+          setRun(snapshot);
+        }
+      }, () => undefined);
+    };
+    pull();
+    const timer = window.setInterval(pull, 150);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [busy, client, repositoryId]);
+
+  useEffect(() => {
+    const node = outputRef.current;
+    if (node) {
+      node.scrollTop = node.scrollHeight;
+    }
+  }, [run?.output]);
 
   if (!ready) {
     return (
@@ -198,8 +237,16 @@ export function TerminalPage({
           </button>
         ) : null}
       </div>
-      <pre className="terminal-page__output" data-empty={run ? undefined : "true"}>
-        {run?.output ?? "Run a command in this workspace."}
+      <pre
+        ref={outputRef}
+        className="terminal-page__output"
+        data-empty={run && (busy || run.output !== "") ? undefined : "true"}
+      >
+        {run?.output !== undefined && run.output !== ""
+          ? run.output
+          : busy
+            ? ""
+            : "Run a command in this workspace."}
       </pre>
     </section>
   );

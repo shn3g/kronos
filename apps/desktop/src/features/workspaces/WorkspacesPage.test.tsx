@@ -51,6 +51,9 @@ function repos(listImpl?: RepositoriesClient["list"]): RepositoriesClient {
     cancelWorkspaceCommand: async () => {
       throw new Error("terminal should not run");
     },
+    watchWorkspaceCommand: async () => {
+      throw new Error("terminal should not run");
+    },
   };
 }
 
@@ -121,6 +124,9 @@ describe("WorkspacesPage", () => {
         throw new Error("terminal should not run");
       },
       cancelWorkspaceCommand: async () => {
+        throw new Error("terminal should not run");
+      },
+      watchWorkspaceCommand: async () => {
         throw new Error("terminal should not run");
       },
     };
@@ -229,6 +235,9 @@ describe("WorkspacesPage", () => {
         throw new Error("terminal should not run");
       },
       cancelWorkspaceCommand: async () => {
+        throw new Error("terminal should not run");
+      },
+      watchWorkspaceCommand: async () => {
         throw new Error("terminal should not run");
       },
     };

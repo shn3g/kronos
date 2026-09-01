@@ -171,6 +171,7 @@ describe("createProductionRepositoriesClient", () => {
       exitCode: 0,
       timedOut: false,
       cancelled: false,
+      running: false,
       output: "from-workspace\n",
     });
   });
@@ -186,6 +187,33 @@ describe("createProductionRepositoriesClient", () => {
     });
 
     await expect(client.cancelWorkspaceCommand("repo_alpha")).resolves.toEqual({ ok: true });
+  });
+
+  it("reads live terminal output through the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path) => {
+      expect(method).toBe("GET");
+      expect(path).toBe("/repositories/repo_alpha/terminal/runs");
+      return {
+        status: 200,
+        body: JSON.stringify({
+          command: "python stream.py",
+          exit_code: null,
+          timed_out: false,
+          cancelled: false,
+          running: true,
+          output: "hello-live\n",
+        }),
+      };
+    });
+
+    await expect(client.watchWorkspaceCommand("repo_alpha")).resolves.toEqual({
+      command: "python stream.py",
+      exitCode: null,
+      timedOut: false,
+      cancelled: false,
+      running: true,
+      output: "hello-live\n",
+    });
   });
 
   it("writes a workspace file through the engine JSON proxy", async () => {

@@ -56,6 +56,7 @@ export interface WorkspaceTerminalRun {
   exitCode: number | null;
   timedOut: boolean;
   cancelled: boolean;
+  running?: boolean | undefined;
   output: string;
 }
 
@@ -73,6 +74,7 @@ export interface RepositoriesClient {
   readWorkspaceFile(id: string, path: string): Promise<WorkspaceFileContents>;
   writeWorkspaceFile(id: string, path: string, content: string): Promise<void>;
   runWorkspaceCommand(id: string, command: string): Promise<WorkspaceTerminalRun>;
+  watchWorkspaceCommand(id: string): Promise<WorkspaceTerminalRun>;
   cancelWorkspaceCommand(id: string): Promise<{ ok: boolean }>;
 }
 
@@ -156,13 +158,11 @@ export function createProductionRepositoriesClient(
       const payload = await jsonRequest(request, "POST", `/repositories/${id}/terminal/runs`, {
         command,
       });
-      return {
-        command: stringField(payload, "command") || command,
-        exitCode: typeof payload.exit_code === "number" ? payload.exit_code : null,
-        timedOut: payload.timed_out === true,
-        cancelled: payload.cancelled === true,
-        output: stringField(payload, "output"),
-      };
+      return mapTerminalRun(payload, command);
+    },
+    async watchWorkspaceCommand(id: string) {
+      const payload = await jsonRequest(request, "GET", `/repositories/${id}/terminal/runs`);
+      return mapTerminalRun(payload);
     },
     async cancelWorkspaceCommand(id: string) {
       const payload = await jsonRequest(
@@ -236,6 +236,17 @@ function mapChange(raw: unknown): WorkspaceFileChange {
     patch: stringField(item, "patch"),
     status: stringField(item, "status"),
     fromChat: item.from_chat === true,
+  };
+}
+
+function mapTerminalRun(payload: Record<string, unknown>, fallbackCommand = ""): WorkspaceTerminalRun {
+  return {
+    command: stringField(payload, "command") || fallbackCommand,
+    exitCode: typeof payload.exit_code === "number" ? payload.exit_code : null,
+    timedOut: payload.timed_out === true,
+    cancelled: payload.cancelled === true,
+    running: payload.running === true,
+    output: stringField(payload, "output"),
   };
 }
 

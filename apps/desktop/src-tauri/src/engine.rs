@@ -414,6 +414,7 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
                     | ("POST", Some("index/refresh"))
                     | ("POST", Some("commits"))
                     | ("POST", Some("writes/revert"))
+                    | ("GET", Some("terminal/runs"))
                     | ("POST", Some("terminal/runs"))
                     | ("POST", Some("terminal/runs/cancel"))
                     | ("POST", Some("pause" | "disable" | "remove" | "re-enrol" | "resume"))
@@ -766,7 +767,7 @@ fn engine_json_timeout(method: &str, path: &str) -> Duration {
     if normalized.ends_with("/index/rebuild") || normalized.ends_with("/index/refresh") {
         return INDEX_JOB_TIMEOUT;
     }
-    if normalized.ends_with("/terminal/runs") {
+    if method == "POST" && normalized.ends_with("/terminal/runs") {
         return TERMINAL_RUN_TIMEOUT;
     }
     if method == "POST" || method == "PUT" {
@@ -956,6 +957,7 @@ mod tests {
         assert!(engine_path_allowed("POST", "/repositories/repo_alpha/commits"));
         assert!(engine_path_allowed("POST", "/repositories/repo_alpha/writes/revert"));
         assert!(engine_path_allowed("POST", "/repositories/repo_alpha/terminal/runs"));
+        assert!(engine_path_allowed("GET", "/repositories/repo_alpha/terminal/runs"));
         assert!(engine_path_allowed(
             "POST",
             "/repositories/repo_alpha/terminal/runs/cancel"
@@ -1026,6 +1028,10 @@ mod tests {
         assert!(
             engine_json_timeout("POST", "/repositories/repo_alpha/terminal/runs")
                 >= Duration::from_secs(60)
+        );
+        assert_eq!(
+            engine_json_timeout("GET", "/repositories/repo_alpha/terminal/runs"),
+            PROBE_TIMEOUT
         );
     }
 }

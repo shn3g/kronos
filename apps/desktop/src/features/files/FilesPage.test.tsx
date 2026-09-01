@@ -34,6 +34,7 @@ function repos(overrides: Partial<RepositoriesClient> = {}): RepositoriesClient 
     writeWorkspaceFile: unused,
     runWorkspaceCommand: unused,
     cancelWorkspaceCommand: unused,
+    watchWorkspaceCommand: unused,
     ...overrides,
   };
 }
