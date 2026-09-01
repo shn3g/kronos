@@ -111,7 +111,7 @@ jobs:
   publish:
     name: GitHub Release
     needs: desktop
-    if: github.ref_type == 'tag'
+    if: ${{ github.ref_type == 'tag' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -146,13 +146,13 @@ jobs:
           case "$TAG" in
             v0.*) extra+=(--prerelease) ;;
           esac
-          cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
-Preview build. The product is not 1.0.
-
-Installers are unsigned. Windows SmartScreen and macOS Gatekeeper will warn. Use Run anyway or right-click Open.
-
-The app still starts the engine with Python 3.11+ on PATH (`python -m kronos_engine` on Windows, `python3 -m kronos_engine` elsewhere). Node and Rust are not required to run a downloaded installer.
-NOTES
+          {
+            echo 'Preview build. The product is not 1.0.'
+            echo
+            echo 'Installers are unsigned. Windows SmartScreen and macOS Gatekeeper will warn. Use Run anyway or right-click Open.'
+            echo
+            echo 'The app still starts the engine with Python 3.11+ on PATH (python -m kronos_engine on Windows, python3 -m kronos_engine elsewhere). Node and Rust are not required to run a downloaded installer.'
+          } > "$RUNNER_TEMP/notes.md"
           gh release create "$TAG" "${assets[@]}" "${extra[@]}" \
             --repo "${{ github.repository }}" \
             --title "Kronos ${TAG}" \
