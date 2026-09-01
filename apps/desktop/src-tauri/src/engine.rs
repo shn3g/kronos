@@ -352,6 +352,13 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
     {
         return method == "POST";
     }
+    if let Some(rest) = path.strip_prefix("/conversations/") {
+        let rest = rest.trim_end_matches('/');
+        if let Some(id) = rest.strip_suffix("/messages") {
+            return method == "POST" && skill_memory_id_ok(id.trim_end_matches('/'));
+        }
+        return (method == "GET" || method == "DELETE") && skill_memory_id_ok(rest);
+    }
     if !path.starts_with("/repositories") {
         return false;
     }
@@ -379,6 +386,8 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
                     | ("GET", Some("index"))
                     | ("GET", Some("index/search"))
                     | ("GET", Some("index/map"))
+                    | ("GET", Some("conversations"))
+                    | ("POST", Some("conversations"))
                     | ("POST", Some("index/rebuild"))
                     | ("POST", Some("index/refresh"))
                     | ("POST", Some("index/watch"))
@@ -936,5 +945,13 @@ mod tests {
         assert!(engine_path_allowed("POST", "/ops/rollback"));
         assert!(!engine_path_allowed("POST", "/ops/token"));
         assert!(!engine_path_allowed("POST", "/ops/pem"));
+        assert!(engine_path_allowed("GET", "/repositories/repo_alpha/conversations"));
+        assert!(engine_path_allowed("POST", "/repositories/repo_alpha/conversations"));
+        assert!(engine_path_allowed("GET", "/conversations/conv_abc"));
+        assert!(engine_path_allowed("POST", "/conversations/conv_abc/messages"));
+        assert!(engine_path_allowed("DELETE", "/conversations/conv_abc"));
+        assert!(!engine_path_allowed("GET", "/conversations/conv_abc/messages"));
+        assert!(!engine_path_allowed("DELETE", "/repositories/repo_alpha/conversations"));
+        assert!(!engine_path_allowed("POST", "/conversations/../secret/messages"));
     }
 }

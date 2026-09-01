@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping
@@ -12,7 +13,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from kronos_engine.adapters.git.detection import ManifestStackDetector
 from kronos_engine.adapters.git.repository import FilesystemGitInspector, GitError
@@ -25,6 +26,12 @@ from kronos_engine.api.models import (
     AssignmentsRequest,
     AssignmentsResponse,
     BackupRequest,
+    ChatMessageRequest,
+    ConversationCreateRequest,
+    ConversationDetailResponse,
+    ConversationListResponse,
+    ConversationMessageModel,
+    ConversationModel,
     DetectedToolModel,
     EmbeddingBackendModel,
     EventItem,
@@ -75,6 +82,11 @@ from kronos_engine.api.models import (
     TelegramTokenRequest,
     VersionResponse,
 )
+from kronos_engine.application.chat import (
+    ChatService,
+    ConversationDetail,
+    OrchestratorNotConfigured,
+)
 from kronos_engine.application.composition import build_goal_engine
 from kronos_engine.application.doctor import DoctorService, OpsSettings
 from kronos_engine.application.embeddings import ResolvedEmbedder, resolve_embedder
@@ -88,7 +100,7 @@ from kronos_engine.application.model_profiles import (
     RoleAssignmentError,
 )
 from kronos_engine.application.notifications import NotificationService
-from kronos_engine.application.planning import Planner
+from kronos_engine.application.planning import IndexedPlanner, LlmPlanner, Planner, PlanningService
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import (
     InspectResult,
@@ -151,6 +163,7 @@ from kronos_engine.skills.quarantine import (
     SkillSourcePort,
     SkillStillQuarantined,
 )
+from kronos_engine.state.conversations import ConversationRecord
 from kronos_engine.state.database import Database
 from kronos_engine.state.event_store import SqliteEventStore
 from kronos_engine.state.github_apps import SqliteGithubAppStore
@@ -493,6 +506,43 @@ def create_app(
         finally:
             conn.close()
 
+    @contextmanager
+    def chat_service() -> Iterator[ChatService]:
+        conn = database.connect()
+        try:
+            repos = RepositoryService(
+                SqliteRepositoryRegistry(conn),
+                settings.paths,
+                FilesystemGitInspector(),
+                ManifestStackDetector(),
+                CacheRuntimeLayout(),
+                indexer=_indexing_service(conn),
+            )
+            recorder = Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn))
+            goals = GoalService(
+                SqliteGoalStore(conn),
+                repos,
+                recorder,
+                notifications=_notifications_for(conn),
+            )
+            registry = SqliteModelRegistry(conn)
+            indexed = IndexedPlanner(_live_indexer())
+            chosen_planner = planner or LlmPlanner(registry, store, indexed)
+            planning = PlanningService(SqliteGoalStore(conn), repos, recorder, chosen_planner)
+            yield ChatService(
+                conn,
+                repos,
+                goals,
+                planning,
+                _live_indexer(),
+                registry,
+                store,
+                SqliteEventStore(conn),
+                embeddings=_resolve_embedder(conn).adapter,
+            )
+        finally:
+            conn.close()
+
     @app.middleware("http")
     async def loopback_only(request: Request, call_next):  # type: ignore[no-untyped-def]
         host = request.client.host if request.client else ""
@@ -796,6 +846,95 @@ def create_app(
         with repository_service() as repos:
             record = _load(repos, repository_id)
             return IndexMapResponse(text=_live_indexer().repo_map(record.id.value))
+
+    @app.post(
+        "/repositories/{repository_id}/conversations",
+        response_model=ConversationModel,
+    )
+    def create_conversation(
+        repository_id: str,
+        body: ConversationCreateRequest,
+        _: None = Depends(require_auth),
+    ) -> ConversationModel:
+        with chat_service() as service:
+            try:
+                created = service.create_conversation(repository_id, title=body.title)
+            except (LookupError, IdentifierError) as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return _conversation_model(created)
+
+    @app.get(
+        "/repositories/{repository_id}/conversations",
+        response_model=ConversationListResponse,
+    )
+    def list_conversations(
+        repository_id: str, _: None = Depends(require_auth)
+    ) -> ConversationListResponse:
+        with chat_service() as service:
+            try:
+                items = service.list_conversations(repository_id)
+            except (LookupError, IdentifierError) as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return ConversationListResponse(
+                conversations=[_conversation_model(item) for item in items]
+            )
+
+    @app.get("/conversations/{conversation_id}", response_model=ConversationDetailResponse)
+    def get_conversation(
+        conversation_id: str, _: None = Depends(require_auth)
+    ) -> ConversationDetailResponse:
+        with chat_service() as service:
+            try:
+                detail = service.get_conversation(conversation_id)
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return _conversation_detail(detail)
+
+    @app.delete("/conversations/{conversation_id}")
+    def delete_conversation(
+        conversation_id: str, _: None = Depends(require_auth)
+    ) -> dict[str, bool]:
+        with chat_service() as service:
+            try:
+                service.delete_conversation(conversation_id)
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return {"deleted": True}
+
+    @app.post("/conversations/{conversation_id}/messages")
+    def post_conversation_message(
+        conversation_id: str,
+        body: ChatMessageRequest,
+        _: None = Depends(require_auth),
+    ) -> StreamingResponse:
+        with chat_service() as service:
+            try:
+                service.prepare_reply(conversation_id, body.content)
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            except OrchestratorNotConfigured as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+
+        def generate() -> Iterator[str]:
+            with chat_service() as service:
+                for item in service.stream_message(conversation_id, body.content):
+                    if isinstance(item, str):
+                        yield f"data: {json.dumps({'delta': item})}\n\n"
+                        continue
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "content": item.content,
+                                "citations": list(item.citations),
+                                "goal_refs": list(item.goal_refs),
+                                "done": True,
+                            }
+                        )
+                        + "\n\n"
+                    )
+
+        return StreamingResponse(generate(), media_type="text/event-stream")
 
     GITHUB_APP_CREATE_URL = "https://github.com/settings/apps/new"
 
@@ -1627,6 +1766,34 @@ def _goal_model(goal: GoalRecord) -> GoalModel:
         stop_reason=goal.stop_reason,
         schedule=goal.schedule,
         max_attempts=goal.max_attempts,
+    )
+
+
+def _conversation_model(record: ConversationRecord) -> ConversationModel:
+    return ConversationModel(
+        id=record.id,
+        repository_id=record.repository_id,
+        title=record.title,
+        created_at=record.created_at,
+    )
+
+
+def _conversation_detail(detail: ConversationDetail) -> ConversationDetailResponse:
+    return ConversationDetailResponse(
+        conversation=_conversation_model(detail.conversation),
+        messages=[
+            ConversationMessageModel(
+                id=item.id,
+                role=item.role,
+                content=item.content,
+                citations=[dict(citation) for citation in item.citations],
+                goal_refs=list(item.goal_refs),
+                model=item.model,
+                token_count=item.token_count,
+                created_at=item.created_at,
+            )
+            for item in detail.messages
+        ],
     )
 
 

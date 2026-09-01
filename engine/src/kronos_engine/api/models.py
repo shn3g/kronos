@@ -385,3 +385,38 @@ class OpsSettingsRequest(BaseModel):
     otel_export: bool = False
     langfuse_export: bool = False
 
+
+class ConversationCreateRequest(BaseModel):
+    title: str = "New conversation"
+
+
+class ConversationModel(BaseModel):
+    id: str
+    repository_id: str
+    title: str
+    created_at: str
+
+
+class ConversationListResponse(BaseModel):
+    conversations: list[ConversationModel]
+
+
+class ConversationMessageModel(BaseModel):
+    id: str
+    role: str
+    content: str
+    citations: list[dict[str, Any]]
+    goal_refs: list[str]
+    model: str | None = None
+    token_count: int | None = None
+    created_at: str
+
+
+class ConversationDetailResponse(BaseModel):
+    conversation: ConversationModel
+    messages: list[ConversationMessageModel]
+
+
+class ChatMessageRequest(BaseModel):
+    content: str
+
