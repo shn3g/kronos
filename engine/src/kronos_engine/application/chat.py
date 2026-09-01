@@ -13,6 +13,15 @@ from typing import Protocol
 from uuid import uuid4
 
 from kronos_engine.application.chat_diff import unified_write_patch
+from kronos_engine.application.chat_images import (
+    ChatImageInput,
+    ChatImagePart,
+    append_image_markers,
+    decode_chat_images,
+    load_chat_image,
+    save_chat_image,
+    split_user_text_and_image_ids,
+)
 from kronos_engine.application.chat_mentions import mentioned_workspace_paths
 from kronos_engine.application.chat_tools import ToolCall, ToolParseError, parse_tool_call
 from kronos_engine.application.chat_workspace_instructions import workspace_instruction_text
@@ -44,6 +53,7 @@ Stay inside the current workspace. Do not claim you edited files unless write_fi
 When you show a file in a fenced block, put the path on the fence line, like ts src/app.ts.
 run_command runs in the workspace folder. Prefer tests and local tools. Do not push.
 Follow workspace instructions when they are provided.
+The user may paste screenshots. Use them when they are present.
 If you do not need a tool, reply without a tool fence."""
 
 _CANCEL: dict[str, Event] = {}
@@ -78,6 +88,7 @@ class ChatEventSink(Protocol):
 class ChatTurn:
     role: str
     content: str
+    images: tuple[ChatImagePart, ...] = ()
 
 
 class ChatModelError(RuntimeError):
@@ -123,6 +134,7 @@ class ChatService:
         clock: datetime | None = None,
         memory_conn: sqlite3.Connection | None = None,
         events: ChatEventSink | None = None,
+        image_root: Path | None = None,
     ) -> None:
         self._store = store
         self._completer = completer
@@ -133,6 +145,7 @@ class ChatService:
         self._memory_conn = memory_conn
         self._events = events
         self._run_commands_this_turn = 0
+        self._image_root = image_root
 
     def create_session(self, *, repository_id: str | None = None) -> ChatSessionView:
         now = self._now()
@@ -154,21 +167,39 @@ class ChatService:
         messages = tuple(_message_view(item) for item in self._store.list_messages(session_id))
         return session, messages
 
+    def get_chat_image(self, session_id: str, image_id: str) -> ChatImageInput:
+        self._store.get_session(session_id)
+        if self._image_root is None:
+            raise LookupError("chat image not found")
+        return load_chat_image(self._image_root, session_id, image_id)
+
     def send_message(
         self,
         session_id: str,
         content: str,
         *,
         repository_id: str | None = None,
+        images: Sequence[Mapping[str, str]] | None = None,
     ) -> tuple[ChatMessageView, ...]:
         text = content.strip()
-        if text == "":
+        payloads = tuple(images or ())
+        decoded = decode_chat_images(payloads) if payloads else ()
+        if text == "" and not decoded:
             raise ValueError("message is required")
+        if decoded and self._image_root is None:
+            raise ValueError("image storage is not configured")
+        refs = (
+            tuple(save_chat_image(self._image_root, session_id, item) for item in decoded)
+            if self._image_root is not None and decoded
+            else ()
+        )
+        stored = append_image_markers(text, refs)
+        title_source = text if text else "Pasted image"
         session = self._store.get_session(session_id)
         if repository_id:
             session = ChatSessionRow(
                 id=session.id,
-                title=_title_from(text, session.title),
+                title=_title_from(title_source, session.title),
                 repository_id=repository_id,
                 created_at=session.created_at,
                 updated_at=self._now(),
@@ -177,7 +208,7 @@ class ChatService:
         elif session.title == "New chat":
             session = ChatSessionRow(
                 id=session.id,
-                title=_title_from(text, session.title),
+                title=_title_from(title_source, session.title),
                 repository_id=session.repository_id,
                 created_at=session.created_at,
                 updated_at=self._now(),
@@ -186,7 +217,7 @@ class ChatService:
         self._append(
             session.id,
             role="user",
-            content=text,
+            content=stored,
             tool_name=None,
             tool_status=None,
         )
@@ -218,16 +249,28 @@ class ChatService:
             )
         return tuple(_message_view(item) for item in self._store.list_messages(session.id))
 
+    def _turn_from_row(self, item: ChatMessageRow) -> ChatTurn:
+        if item.role != "user" or self._image_root is None:
+            return ChatTurn(role=item.role, content=item.content)
+        text, image_ids = split_user_text_and_image_ids(item.content)
+        if not image_ids:
+            return ChatTurn(role=item.role, content=item.content)
+        parts: list[ChatImagePart] = []
+        for image_id in image_ids:
+            try:
+                loaded = load_chat_image(self._image_root, item.session_id, image_id)
+            except LookupError:
+                continue
+            parts.append(ChatImagePart(mime=loaded.mime, data=loaded.data))
+        return ChatTurn(role=item.role, content=text, images=tuple(parts))
+
     def _run_agent(self, session_id: str, repository_id: str | None, cancel: Event) -> None:
         self._run_commands_this_turn = 0
         for _ in range(MAX_TOOL_ROUNDS):
             if cancel.is_set():
                 self._record_stop(session_id, "")
                 return
-            turns = tuple(
-                ChatTurn(role=item.role, content=item.content)
-                for item in self._store.list_messages(session_id)
-            )
+            turns = tuple(self._turn_from_row(item) for item in self._store.list_messages(session_id))
             try:
                 reply, streaming_id = self._stream_reply(
                     session_id, turns, self._system_prompt(turns, repository_id), cancel

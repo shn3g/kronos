@@ -176,3 +176,55 @@ async def test_revert_write_restores_file_and_fails_closed(
         assert not any(item.get("path") == "hello.py" for item in after_dash.json()["diffs"])
     finally:
         await http.aclose()
+
+
+TINY_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+@pytest.mark.asyncio
+async def test_chat_image_paste_round_trip_and_fail_closed(
+    client: tuple[AsyncClient, dict[str, str]],
+) -> None:
+    http, headers = client
+    created = await http.post("/chat/sessions", headers=headers, json={})
+    session_id = created.json()["session"]["id"]
+
+    unauth = await http.get(f"/chat/sessions/{session_id}/images/img_missing")
+    assert unauth.status_code == 401
+
+    empty = await http.post(
+        f"/chat/sessions/{session_id}/messages",
+        headers=headers,
+        json={"content": "  "},
+    )
+    assert empty.status_code == 400
+
+    bad_type = await http.post(
+        f"/chat/sessions/{session_id}/messages",
+        headers=headers,
+        json={"content": "see this", "images": [{"mime": "text/plain", "data": TINY_PNG_B64}]},
+    )
+    assert bad_type.status_code == 400
+
+    sent = await http.post(
+        f"/chat/sessions/{session_id}/messages",
+        headers=headers,
+        json={"content": "", "images": [{"mime": "image/png", "data": TINY_PNG_B64}]},
+    )
+    assert sent.status_code == 200
+    user = sent.json()["messages"][0]
+    assert "kronos-image:" in user["content"]
+    image_id = user["content"].split("kronos-image:")[1].rstrip(")")
+
+    loaded = await http.get(f"/chat/sessions/{session_id}/images/{image_id}", headers=headers)
+    assert loaded.status_code == 200
+    assert loaded.json()["mime"] == "image/png"
+    assert loaded.json()["data"] == TINY_PNG_B64
+
+    missing = await http.get(
+        f"/chat/sessions/{session_id}/images/img_missing",
+        headers=headers,
+    )
+    assert missing.status_code == 404

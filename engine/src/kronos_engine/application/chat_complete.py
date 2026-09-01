@@ -11,6 +11,7 @@ from kronos_engine.adapters.models.openai_compatible import (
     OpenAICompatibleProvider,
 )
 from kronos_engine.application.chat import ChatModelError, ChatTurn, ChatTurnCancelled
+from kronos_engine.application.chat_images import user_message_content_parts
 from kronos_engine.ports.model_provider import CompletionRequest, ModelProvider
 from kronos_engine.ports.model_registry import ModelRegistry
 from kronos_engine.ports.secrets import ScopedSecret, SecretStore
@@ -18,14 +19,22 @@ from kronos_engine.ports.secrets import ScopedSecret, SecretStore
 DEFAULT_BASE = "http://127.0.0.1:11434/v1"
 
 
-def chat_completion_messages(system: str, turns: Sequence[ChatTurn]) -> list[dict[str, str]]:
-    messages = [{"role": "system", "content": system}]
+def chat_completion_messages(system: str, turns: Sequence[ChatTurn]) -> list[dict[str, object]]:
+    messages: list[dict[str, object]] = [{"role": "system", "content": system}]
     for turn in turns:
         if turn.role == "assistant":
             messages.append({"role": "assistant", "content": turn.content})
             continue
         if turn.role == "tool":
             messages.append({"role": "user", "content": f"[tool]\n{turn.content}"})
+            continue
+        if turn.images:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": user_message_content_parts(turn.content, turn.images),
+                }
+            )
             continue
         messages.append({"role": "user", "content": turn.content})
     return messages

@@ -419,9 +419,20 @@ class ChatSessionCreateRequest(BaseModel):
     repository_id: str | None = None
 
 
+class ChatImagePayload(BaseModel):
+    mime: str
+    data: str
+
+
+class ChatImageResponse(BaseModel):
+    mime: str
+    data: str
+
+
 class ChatMessageCreateRequest(BaseModel):
-    content: str
+    content: str = ""
     repository_id: str | None = None
+    images: list[ChatImagePayload] | None = None
 
 
 class ChatSessionDetailResponse(BaseModel):

@@ -6,6 +6,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+import pytest
 from tests.support.git_fixtures import init_git_repo
 
 from kronos_engine.application.chat import (
@@ -56,6 +57,43 @@ def test_send_message_stores_user_and_assistant_turns(tmp_path: Path) -> None:
     assert "calendar" in messages[1].content
     listed = service.list_sessions()
     assert listed[0].title.startswith("What is broken")
+
+
+def test_send_message_stores_a_pasted_image_and_shows_it_to_the_model(tmp_path: Path) -> None:
+    import base64
+
+    png_b64 = (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    completer = ScriptedCompleter(["That is a one pixel screenshot."])
+    service = ChatService(
+        SqliteChatStore(conn),
+        completer,
+        image_root=tmp_path / "chat-images",
+    )
+    session = service.create_session()
+
+    messages = service.send_message(
+        session.id,
+        "What is this?",
+        images=[{"mime": "image/png", "data": png_b64}],
+    )
+
+    assert "What is this?" in messages[0].content
+    assert "kronos-image:" in messages[0].content
+    turns, _system = completer.prompts[0]
+    assert turns[0].content == "What is this?"
+    assert turns[0].images[0].mime == "image/png"
+    assert turns[0].images[0].data == base64.b64decode(png_b64)
+
+
+def test_send_message_rejects_blank_text_without_images(tmp_path: Path) -> None:
+    service = _service(tmp_path, ["unused"])
+    session = service.create_session()
+    with pytest.raises(ValueError, match="message is required"):
+        service.send_message(session.id, "   ")
 
 
 def test_tool_round_records_search_then_final_answer(tmp_path: Path) -> None:

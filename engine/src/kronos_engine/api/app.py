@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import threading
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
@@ -27,6 +28,7 @@ from kronos_engine.api.models import (
     BackupRequest,
     ChatMessageCreateRequest,
     ChatMessageModel,
+    ChatImageResponse,
     ChatSessionCreateRequest,
     ChatSessionDetailResponse,
     ChatSessionListResponse,
@@ -396,6 +398,7 @@ def create_app(
                 ),
                 memory_conn=conn,
                 events=events,
+                image_root=settings.paths.data / "chat-images",
             )
         finally:
             conn.close()
@@ -748,6 +751,11 @@ def create_app(
                     session_id,
                     body.content,
                     repository_id=body.repository_id,
+                    images=(
+                        [{"mime": item.mime, "data": item.data} for item in body.images]
+                        if body.images
+                        else None
+                    ),
                 )
                 session, _loaded = service.get(session_id)
             except LookupError as error:
@@ -757,6 +765,22 @@ def create_app(
             return ChatSessionDetailResponse(
                 session=_chat_session_model(session),
                 messages=[_chat_message_model(item) for item in messages],
+            )
+
+    @app.get("/chat/sessions/{session_id}/images/{image_id}", response_model=ChatImageResponse)
+    def chat_image(
+        session_id: str,
+        image_id: str,
+        _: None = Depends(require_auth),
+    ) -> ChatImageResponse:
+        with chat_service() as service:
+            try:
+                loaded = service.get_chat_image(session_id, image_id)
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="chat image not found") from error
+            return ChatImageResponse(
+                mime=loaded.mime,
+                data=base64.b64encode(loaded.data).decode("ascii"),
             )
 
     @app.post("/chat/sessions/{session_id}/cancel")
