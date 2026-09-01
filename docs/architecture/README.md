@@ -14,3 +14,4 @@ File-level notes that accumulate as subsystems land.
 - [Operations and rollback](../operations.md)
 - [Threat model](../security/threat-model.md)
 - [Agent desktop](agent-desktop.md)
+- [Reference status (do not merge branch)](reference-status.md)
