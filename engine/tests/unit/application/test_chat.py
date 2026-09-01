@@ -295,3 +295,40 @@ def test_cancel_during_stream_keeps_partial_and_stops(tmp_path: Path) -> None:
     assert "Hi from the model" in assistant[-1].content
     assert "Stopped" in assistant[-1].content
     assert not any(item.role == "tool" for item in messages)
+
+
+def test_send_message_attaches_mentioned_file_to_system_prompt(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "hello.py").write_text("print('ok')\n", encoding="utf-8")
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    completer = ScriptedCompleter(["Looks fine."])
+    service = ChatService(
+        SqliteChatStore(conn),
+        completer,
+        repos=_RepoLookup(repo),
+    )
+    session = service.create_session()
+    service.send_message(session.id, "Review @hello.py", repository_id="repo_alpha")
+    _turns, system = completer.prompts[0]
+    assert "hello.py" in system
+    assert "print('ok')" in system
+
+
+def test_send_message_does_not_attach_escaped_mention(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (tmp_path / "secret.txt").write_text("nope\n", encoding="utf-8")
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    completer = ScriptedCompleter(["Denied."])
+    service = ChatService(
+        SqliteChatStore(conn),
+        completer,
+        repos=_RepoLookup(repo),
+    )
+    session = service.create_session()
+    service.send_message(session.id, "See @../secret.txt", repository_id="repo_alpha")
+    _turns, system = completer.prompts[0]
+    assert "nope" not in system

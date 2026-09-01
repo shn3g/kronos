@@ -13,6 +13,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from kronos_engine.application.chat_diff import unified_write_patch
+from kronos_engine.application.chat_mentions import mentioned_workspace_paths
 from kronos_engine.application.chat_tools import ToolCall, ToolParseError, parse_tool_call
 from kronos_engine.application.goals import GoalService
 from kronos_engine.application.repositories import RepositoryNotFound, RepositoryService
@@ -219,7 +220,7 @@ class ChatService:
             )
             try:
                 reply, streaming_id = self._stream_reply(
-                    session_id, turns, self._system_prompt(turns), cancel
+                    session_id, turns, self._system_prompt(turns, repository_id), cancel
                 )
             except ChatTurnCancelled:
                 return
@@ -457,22 +458,45 @@ class ChatService:
             return "No matching memories."
         return "\n".join(item.text[:400] for item in records)
 
-    def _system_prompt(self, turns: Sequence[ChatTurn]) -> str:
+    def _system_prompt(self, turns: Sequence[ChatTurn], repository_id: str | None) -> str:
         prompt = SYSTEM_PROMPT
-        if self._memory_conn is None:
+        query = _latest_user_text(turns)
+        if self._memory_conn is not None and query != "":
+            records = retrieve_records(self._memory_conn, query, None, limit=5)
+            if records:
+                lines = "\n".join(f"- {item.text[:400]}" for item in records)
+                prompt = f"{prompt}\n\nRelevant memories:\n{lines}"
+        mentioned = self._mentioned_file_context(query, repository_id)
+        if mentioned == "":
             return prompt
-        query = ""
-        for item in reversed(turns):
-            if item.role == "user":
-                query = item.content
-                break
-        if query == "":
-            return prompt
-        records = retrieve_records(self._memory_conn, query, None, limit=5)
-        if not records:
-            return prompt
-        lines = "\n".join(f"- {item.text[:400]}" for item in records)
-        return f"{prompt}\n\nRelevant memories:\n{lines}"
+        return f"{prompt}\n\nMentioned files:\n{mentioned}"
+
+    def _mentioned_file_context(self, query: str, repository_id: str | None) -> str:
+        if not repository_id or self._repos is None or query == "":
+            return ""
+        blocks: list[str] = []
+        for path in mentioned_workspace_paths(query):
+            text = self._workspace_file_text(repository_id, path)
+            if text is None:
+                continue
+            blocks.append(f"{path}\n{text}")
+        return "\n\n".join(blocks)
+
+    def _workspace_file_text(self, repository_id: str, rel_path: str) -> str | None:
+        if self._repos is None:
+            return None
+        try:
+            record = self._repos.get(RepositoryId(repository_id))
+        except (RepositoryNotFound, LookupError, ValueError):
+            return None
+        root = Path(record.realpath).resolve()
+        relative = Path(rel_path)
+        if relative.is_absolute() or any(part in {"..", ".git"} for part in relative.parts):
+            return None
+        target = (root / relative).resolve()
+        if not _is_inside(root, target) or not target.is_file():
+            return None
+        return target.read_text(encoding="utf-8", errors="replace")[:8000]
 
     def _create_goal(self, repository_id: str, arguments: dict[str, str]) -> str:
         if self._goals is None:
@@ -563,6 +587,13 @@ def _message_view(row: ChatMessageRow) -> ChatMessageView:
         tool_status=row.tool_status,
         created_at=row.created_at,
     )
+
+
+def _latest_user_text(turns: Sequence[ChatTurn]) -> str:
+    for item in reversed(turns):
+        if item.role == "user":
+            return item.content
+    return ""
 
 
 def _title_from(message: str, current: str) -> str:
