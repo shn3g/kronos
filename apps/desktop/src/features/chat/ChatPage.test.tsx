@@ -121,6 +121,54 @@ describe("ChatPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows run_command output as preformatted text", async () => {
+    render(
+      <ChatPage
+        chatClient={chatClient({
+          listSessions: async () => [
+            {
+              id: "chat_1",
+              title: "New chat",
+              repositoryId: null,
+              updatedAt: "t",
+            },
+          ],
+          getSession: async () => ({
+            session: {
+              id: "chat_1",
+              title: "New chat",
+              repositoryId: null,
+              updatedAt: "t",
+            },
+            messages: [
+              {
+                id: "u1",
+                role: "user",
+                content: "Run the tests.",
+                toolName: null,
+                toolStatus: null,
+              },
+              {
+                id: "t1",
+                role: "tool",
+                content: "Exit 0\n\n3 passed",
+                toolName: "run_command",
+                toolStatus: "ok",
+              },
+            ],
+          }),
+        })}
+        repositoryId="repo_alpha"
+        historyOpen={false}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByText("Run command · done")).toBeInTheDocument();
+    const output = screen.getByText(/3 passed/i);
+    expect(output.tagName).toBe("PRE");
+  });
+
   it("opens models when the composer model name is chosen", async () => {
     const user = userEvent.setup();
     const onOpenModels = vi.fn();

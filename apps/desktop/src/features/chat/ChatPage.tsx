@@ -318,7 +318,7 @@ export function ChatPage({
             <h1 className="chat-empty__title">Ask Kronos</h1>
             <p>
               {repositoryId
-                ? "Chat can search this workspace, read files, and start a longer goal when you want unattended work."
+                ? "Chat can search this workspace, read and write files, run commands, and start a longer goal when you want unattended work."
                 : "You can ask how Kronos works now. Open a git folder to index code."}
             </p>
             {repositoryId ? null : (
@@ -335,13 +335,19 @@ export function ChatPage({
                 className={`chat-bubble chat-bubble--${item.role}${item.toolStatus === "streaming" ? " chat-bubble--streaming" : ""}`}
                 data-tool={item.toolName ?? undefined}
               >
-                {item.role === "tool" ? (
-                  <p className="chat-bubble__tool">{toolCardLabel(item.toolName, item.toolStatus)}</p>
-                ) : null}
                 {item.role === "assistant" ? (
                   <ChatMarkdown source={item.content} />
                 ) : item.role === "user" ? (
                   <UserMentionText content={item.content} />
+                ) : item.role === "tool" ? (
+                  <>
+                    <p className="chat-bubble__tool">{toolCardLabel(item.toolName, item.toolStatus)}</p>
+                    {item.toolName === "run_command" ? (
+                      <pre className="chat-bubble__output">{item.content}</pre>
+                    ) : (
+                      <p>{item.content}</p>
+                    )}
+                  </>
                 ) : (
                   <p>{item.content}</p>
                 )}

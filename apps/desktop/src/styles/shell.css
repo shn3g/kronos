@@ -970,6 +970,22 @@
   font-size: 11px;
 }
 
+.chat-bubble__output {
+  margin: 0;
+  overflow: auto;
+  max-height: 16rem;
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: rgb(0 0 0 / 0.28);
+  color: var(--ink);
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .chat-bubble--streaming p::after,
 .chat-bubble--streaming .chat-md > :last-child:not(ul):not(ol)::after,
 .chat-bubble--streaming .chat-md > ul:last-child li:last-child::after,

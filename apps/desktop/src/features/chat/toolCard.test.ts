@@ -6,5 +6,6 @@ describe("toolCardLabel", () => {
     expect(toolCardLabel("search_index", "ok")).toBe("Search index · done");
     expect(toolCardLabel("read_file", "error")).toBe("Read file · failed");
     expect(toolCardLabel("create_goal", "running")).toBe("Create goal · running");
+    expect(toolCardLabel("run_command", "ok")).toBe("Run command · done");
   });
 });

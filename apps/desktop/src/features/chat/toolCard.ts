@@ -7,6 +7,7 @@ const TOOL_LABELS: Record<string, string> = {
   search_memory: "Search memory",
   create_goal: "Create goal",
   list_goals: "List goals",
+  run_command: "Run command",
 };
 
 export function toolCardLabel(name: string | null, status: string | null): string {
