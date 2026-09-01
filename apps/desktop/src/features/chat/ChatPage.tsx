@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ChatClient, ChatMessage, ChatSession } from "./client";
+import { ChatMarkdown } from "./ChatMarkdown";
 import { toolCardLabel } from "./toolCard";
 
 interface ChatPageProps {
@@ -217,7 +218,11 @@ export function ChatPage({
                 {item.role === "tool" ? (
                   <p className="chat-bubble__tool">{toolCardLabel(item.toolName, item.toolStatus)}</p>
                 ) : null}
-                <p>{item.content}</p>
+                {item.role === "assistant" ? (
+                  <ChatMarkdown source={item.content} />
+                ) : (
+                  <p>{item.content}</p>
+                )}
               </li>
             ))}
           </ol>

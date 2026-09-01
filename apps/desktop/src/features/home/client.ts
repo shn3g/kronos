@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { requestEngineJson, type EngineJsonResponse } from "../../engine/transport";
+
 export interface HomeRepository {
   id: string;
   displayName: string;
@@ -31,11 +33,6 @@ export interface HomeDashboard {
 
 export interface HomeClient {
   dashboard(): Promise<HomeDashboard>;
-}
-
-interface EngineJsonResponse {
-  status: number;
-  body: string;
 }
 
 export function createProductionHomeClient(
@@ -129,20 +126,6 @@ export function createProductionHomeClient(
     },
   };
 }
-
-async function requestEngineJson(
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<EngineJsonResponse> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<EngineJsonResponse>("engine_json", { method, path, body: body ?? null });
-  } catch {
-    return { status: 0, body: "" };
-  }
-}
-
 async function jsonRequest(
   request: (method: string, path: string, body?: unknown) => Promise<EngineJsonResponse>,
   method: string,

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { requestEngineJson, type EngineJsonResponse } from "../../../engine/transport";
+
 export type GitHubAppRole = "controller" | "reviewer";
 
 export interface GitHubAppStatus {
@@ -67,11 +69,6 @@ export interface GitHubClient {
     integrationBranch?: string;
     confirm: boolean;
   }): Promise<{ applied: boolean }>;
-}
-
-interface EngineJsonResponse {
-  status: number;
-  body: string;
 }
 
 export function createProductionGitHubClient(
@@ -160,20 +157,6 @@ export function createProductionGitHubClient(
     },
   };
 }
-
-async function requestEngineJson(
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<EngineJsonResponse> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<EngineJsonResponse>("engine_json", { method, path, body: body ?? null });
-  } catch {
-    return { status: 0, body: "" };
-  }
-}
-
 async function jsonRequest(
   request: (method: string, path: string, body?: unknown) => Promise<EngineJsonResponse>,
   method: string,

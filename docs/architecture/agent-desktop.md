@@ -15,7 +15,7 @@ Kronos is a locally installed desktop app (Tauri WebView, also previewable in a 
 
 1. If the local engine is not connected, show that fact. Do not open the 12-page dashboard.
 2. If the engine is ready and no model provider is registered, block on Connect a model. API keys go to the OS secret store through the existing provider API.
-3. A workspace folder is not required to pass the gate. Chat can explain Kronos. Opening a git folder starts indexing.
+3. A workspace folder is not required to pass the gate. Chat can explain Kronos. Opening a git folder starts indexing. The same UI can run in a browser preview while the local engine is running. The page talks through a same-origin proxy, so it never holds the engine token.
 
 ## Chat
 

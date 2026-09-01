@@ -4,7 +4,7 @@ The Tauri 2 client in `apps/desktop` locates a loopback engine through `engine_c
 
 The window is an agent desktop, not a 12-page dashboard. File / Edit / View / Help sit in a menu bar. A 48px activity bar switches Chat, Workspaces, Index, and Settings. Chat is the main stage. Conversation history is a View toggle. A right inspector holds Changes, Goals, and Health. View can hide the activity bar and the inspector.
 
-If the engine is down, the UI says so and does not open the app chrome. If the engine is ready and no planner model is assigned, Connect a model blocks the chrome. See [Agent desktop](agent-desktop.md).
+If the local engine is down, the UI says so and does not open the app chrome. If the engine is ready and no planner model is assigned, Connect a model blocks the chrome. Vite `npm run dev` can use the same UI in a browser: the dev server proxies `/kronos-engine` to the loopback engine using `engine_ready.json` plus `install.json`, so the page never holds the bearer token. `vite preview` and Playwright do not enable that proxy, so they stay engine-unavailable. See [Agent desktop](agent-desktop.md).
 
 ## Playwright
 

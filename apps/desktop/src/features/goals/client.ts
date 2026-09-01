@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { requestEngineJson, type EngineJsonResponse } from "../../engine/transport";
+
 export interface GoalRecord {
   id: string;
   repositoryId: string;
@@ -57,11 +59,6 @@ export interface GoalsClient {
   tick(): Promise<TickResult>;
   get(id: string): Promise<{ goal: GoalRecord; tasks: GoalTask[] }>;
   pollEvents(after: number): Promise<{ events: EngineEvent[]; headSeq: number }>;
-}
-
-interface EngineJsonResponse {
-  status: number;
-  body: string;
 }
 
 export function createProductionGoalsClient(
@@ -133,20 +130,6 @@ export function createProductionGoalsClient(
     },
   };
 }
-
-async function requestEngineJson(
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<EngineJsonResponse> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<EngineJsonResponse>("engine_json", { method, path, body: body ?? null });
-  } catch {
-    return { status: 0, body: "" };
-  }
-}
-
 async function jsonRequest(
   request: (method: string, path: string, body?: unknown) => Promise<EngineJsonResponse>,
   method: string,

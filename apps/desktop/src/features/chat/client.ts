@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { requestEngineJson, type EngineJsonResponse } from "../../engine/transport";
+
 export interface ChatSession {
   id: string;
   title: string;
@@ -25,11 +27,6 @@ export interface ChatClient {
     repositoryId?: string | null,
   ): Promise<{ messages: ChatMessage[] }>;
   cancelTurn(id: string): Promise<void>;
-}
-
-interface EngineJsonResponse {
-  status: number;
-  body: string;
 }
 
 export function createProductionChatClient(
@@ -71,19 +68,6 @@ export function createProductionChatClient(
       await jsonRequest(request, "POST", `/chat/sessions/${id}/cancel`, {});
     },
   };
-}
-
-async function requestEngineJson(
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<EngineJsonResponse> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<EngineJsonResponse>("engine_json", { method, path, body: body ?? null });
-  } catch {
-    return { status: 0, body: "" };
-  }
 }
 
 async function jsonRequest(

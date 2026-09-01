@@ -102,6 +102,35 @@ describe("probeEngineState", () => {
     });
     expect(state).toEqual({ status: "unavailable" });
   });
+
+  it("omits Authorization when the renderer has no token", async () => {
+    const baseUrl = await serve((req, res) => {
+      expect(req.headers.authorization).toBeUndefined();
+      if (req.url === "/health") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ status: "ok" }));
+        return;
+      }
+      if (req.url === "/version") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            engine_version: "0.1.0",
+            compatible: true,
+          }),
+        );
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+
+    const state = await probeEngineState({
+      baseUrl,
+      token: "",
+    });
+    expect(state).toEqual({ status: "ready", version: "0.1.0" });
+  });
 });
 
 describe("createProductionEngineClient", () => {

@@ -18,5 +18,10 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": [
+    "src/engine/webEngineProxy.ts",
+    "src/engine/webEngineBinding.ts",
+    "src/engine/webEngineBinding.test.ts"
+  ]
 }

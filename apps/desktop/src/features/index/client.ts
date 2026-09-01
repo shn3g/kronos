@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { requestEngineJson, type EngineJsonResponse } from "../../engine/transport";
+
 export interface IndexStatus {
   repositoryId: string;
   commit: string | null;
@@ -24,11 +26,6 @@ export interface IndexClient {
   status(repositoryId: string): Promise<IndexStatus>;
   rebuild(repositoryId: string): Promise<IndexStatus>;
   search(repositoryId: string, query: string): Promise<IndexHit[]>;
-}
-
-interface EngineJsonResponse {
-  status: number;
-  body: string;
 }
 
 export function createProductionIndexClient(
@@ -62,20 +59,6 @@ export function createProductionIndexClient(
     },
   };
 }
-
-async function requestEngineJson(
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<EngineJsonResponse> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<EngineJsonResponse>("engine_json", { method, path, body: body ?? null });
-  } catch {
-    return { status: 0, body: "" };
-  }
-}
-
 async function jsonRequest(
   request: (method: string, path: string, body?: unknown) => Promise<EngineJsonResponse>,
   method: string,

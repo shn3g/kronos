@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { requestEngineJson, type EngineJsonResponse } from "../../../engine/transport";
+
 export interface TelegramStatus {
   tokenPresent: boolean;
   allowedUserIds: number[];
@@ -20,11 +22,6 @@ export interface TelegramClient {
   status(): Promise<TelegramStatus>;
   saveAllowlist(input: TelegramAllowlistInput): Promise<{ tokenPresent: boolean }>;
   importBotToken(): Promise<{ tokenPresent: boolean }>;
-}
-
-interface EngineJsonResponse {
-  status: number;
-  body: string;
 }
 
 export function createProductionTelegramClient(
@@ -67,19 +64,6 @@ async function importTelegramBotToken(): Promise<EngineJsonResponse> {
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     return await invoke<EngineJsonResponse>("import_telegram_bot_token");
-  } catch {
-    return { status: 0, body: "" };
-  }
-}
-
-async function requestEngineJson(
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<EngineJsonResponse> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<EngineJsonResponse>("engine_json", { method, path, body: body ?? null });
   } catch {
     return { status: 0, body: "" };
   }

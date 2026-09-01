@@ -244,4 +244,37 @@ describe("ChatPage", () => {
       { timeout: 1500 },
     );
   });
+
+  it("renders assistant markdown as bold text and a code block", async () => {
+    const user = userEvent.setup();
+    render(
+      <ChatPage
+        chatClient={chatClient({
+          sendMessage: async () => ({
+            messages: [
+              { id: "u1", role: "user", content: "Show me", toolName: null, toolStatus: null },
+              {
+                id: "a1",
+                role: "assistant",
+                content: "Staff is **missing**.\n\n```ts\nconst ok = false;\n```\n",
+                toolName: null,
+                toolStatus: null,
+              },
+            ],
+          }),
+        })}
+        repositoryId={null}
+        historyOpen={false}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "Show me");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+
+    expect(await screen.findByText("missing")).toBeInTheDocument();
+    expect(screen.getByText("missing").tagName).toBe("STRONG");
+    expect(screen.getByText("const ok = false;")).toBeInTheDocument();
+  });
 });

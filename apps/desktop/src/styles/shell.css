@@ -465,10 +465,36 @@
   line-height: 1.45;
 }
 
-.chat-bubble p {
+.chat-bubble p,
+.chat-md p {
   margin: 0;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.chat-md p + p,
+.chat-md p + .chat-md__pre,
+.chat-md__pre + p {
+  margin-top: 8px;
+}
+
+.chat-md__pre {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--void);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.chat-md__inline {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 0.08);
+  font-size: 12px;
 }
 
 .chat-bubble--user {
@@ -483,7 +509,8 @@
   font-size: 11px;
 }
 
-.chat-bubble--streaming p::after {
+.chat-bubble--streaming p::after,
+.chat-bubble--streaming .chat-md p:last-child::after {
   content: "▍";
   margin-left: 2px;
   color: var(--muted);
