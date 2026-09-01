@@ -8,8 +8,10 @@ import {
   findInFileText,
   insertEditorText,
   nextFileFindIndex,
+  parseGoToLineInput,
   replaceAllInFileText,
   replaceInFileMatch,
+  selectionForLineColumn,
 } from "./fileEditor";
 
 describe("fileDraftIsDirty", () => {
@@ -109,5 +111,43 @@ describe("replaceAllInFileText", () => {
   it("does nothing when the query is empty or nothing matches", () => {
     expect(replaceAllInFileText("alpha", "  ", "x")).toEqual({ content: "alpha", count: 0 });
     expect(replaceAllInFileText("alpha", "zzz", "x")).toEqual({ content: "alpha", count: 0 });
+  });
+});
+
+describe("parseGoToLineInput", () => {
+  it("reads a 1-based line, and an optional column", () => {
+    expect(parseGoToLineInput("12")).toEqual({ line: 12, column: null });
+    expect(parseGoToLineInput(" 12:5 ")).toEqual({ line: 12, column: 5 });
+    expect(parseGoToLineInput("12,3")).toEqual({ line: 12, column: 3 });
+  });
+
+  it("rejects blank, zero, and non-numeric input", () => {
+    expect(parseGoToLineInput("")).toBeNull();
+    expect(parseGoToLineInput("0")).toBeNull();
+    expect(parseGoToLineInput("line 2")).toBeNull();
+    expect(parseGoToLineInput("2:0")).toBeNull();
+  });
+});
+
+describe("selectionForLineColumn", () => {
+  it("selects the requested line, or places a caret at the column", () => {
+    expect(selectionForLineColumn("alpha\nbeta\ngamma\n", 2, null)).toEqual({
+      start: 6,
+      end: 10,
+      line: 2,
+    });
+    expect(selectionForLineColumn("alpha\nbeta\ngamma\n", 3, 2)).toEqual({
+      start: 12,
+      end: 12,
+      line: 3,
+    });
+  });
+
+  it("clamps a line past the end of the file", () => {
+    expect(selectionForLineColumn("alpha\nbeta\n", 99, null)).toEqual({
+      start: 11,
+      end: 11,
+      line: 3,
+    });
   });
 });

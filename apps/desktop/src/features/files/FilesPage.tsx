@@ -14,12 +14,16 @@ import {
   fileFindStatusLabel,
   FIND_IN_FILE_EVENT,
   findInFileText,
+  GO_TO_LINE_EVENT,
+  goToLineStatusLabel,
   insertEditorText,
   nextFileFindIndex,
+  parseGoToLineInput,
   REPLACE_IN_FILE_EVENT,
   replaceAllInFileText,
   replaceInFileMatch,
   SAVE_FILE_EVENT,
+  selectionForLineColumn,
 } from "./fileEditor";
 import {
   fileTreeFromPaths,
@@ -82,14 +86,20 @@ export function FilesPage({
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
+  const goToLineInputRef = useRef<HTMLInputElement>(null);
   const findOpenRef = useRef(false);
+  const goToLineOpenRef = useRef(false);
   const [findOpen, setFindOpen] = useState(false);
   const [replaceOpen, setReplaceOpen] = useState(false);
+  const [goToLineOpen, setGoToLineOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [replaceText, setReplaceText] = useState("");
+  const [goToLineQuery, setGoToLineQuery] = useState("");
+  const [goToLineStatus, setGoToLineStatus] = useState("");
   const [findIndex, setFindIndex] = useState(0);
   dirtyRef.current = dirty;
   findOpenRef.current = findOpen;
+  goToLineOpenRef.current = goToLineOpen;
   const findMatches = useMemo(() => findInFileText(draft ?? "", findQuery), [draft, findQuery]);
   const activeFind =
     findMatches.length === 0 ? 0 : Math.min(findIndex, findMatches.length - 1);
@@ -128,8 +138,11 @@ export function FilesPage({
     setSearchError(null);
     setFindOpen(false);
     setReplaceOpen(false);
+    setGoToLineOpen(false);
     setFindQuery("");
     setReplaceText("");
+    setGoToLineQuery("");
+    setGoToLineStatus("");
     setFindIndex(0);
   }, [repositoryId]);
 
@@ -270,6 +283,14 @@ export function FilesPage({
   }, [findOpen, replaceOpen]);
 
   useEffect(() => {
+    if (!goToLineOpen) {
+      return;
+    }
+    goToLineInputRef.current?.focus();
+    goToLineInputRef.current?.select();
+  }, [goToLineOpen]);
+
+  useEffect(() => {
     if (!findOpen) {
       return;
     }
@@ -301,6 +322,11 @@ export function FilesPage({
       setReplaceText("");
       setFindIndex(0);
     }
+    function closeGoToLine(): void {
+      setGoToLineOpen(false);
+      setGoToLineQuery("");
+      setGoToLineStatus("");
+    }
     function onKey(event: KeyboardEvent): void {
       const modifier = event.ctrlKey || event.metaKey;
       if (event.key.toLowerCase() === "s" && modifier && !event.altKey && !event.shiftKey) {
@@ -313,6 +339,7 @@ export function FilesPage({
           return;
         }
         event.preventDefault();
+        closeGoToLine();
         setFindOpen(true);
         return;
       }
@@ -321,35 +348,58 @@ export function FilesPage({
           return;
         }
         event.preventDefault();
+        closeGoToLine();
         setFindOpen(true);
         setReplaceOpen(true);
         return;
       }
-      if (event.key === "Escape" && findOpenRef.current && !filesHidden()) {
+      if (event.key.toLowerCase() === "g" && modifier && !event.altKey && !event.shiftKey) {
+        if (filesHidden()) {
+          return;
+        }
+        event.preventDefault();
+        closeFind();
+        setGoToLineOpen(true);
+        return;
+      }
+      if (
+        event.key === "Escape" &&
+        (findOpenRef.current || goToLineOpenRef.current) &&
+        !filesHidden()
+      ) {
         event.preventDefault();
         event.stopPropagation();
         closeFind();
+        closeGoToLine();
       }
     }
     function onMenuSave(): void {
       void saveRef.current();
     }
     function onMenuFind(): void {
+      closeGoToLine();
       setFindOpen(true);
     }
     function onMenuReplace(): void {
+      closeGoToLine();
       setFindOpen(true);
       setReplaceOpen(true);
+    }
+    function onMenuGoToLine(): void {
+      closeFind();
+      setGoToLineOpen(true);
     }
     window.addEventListener("keydown", onKey, true);
     window.addEventListener(SAVE_FILE_EVENT, onMenuSave);
     window.addEventListener(FIND_IN_FILE_EVENT, onMenuFind);
     window.addEventListener(REPLACE_IN_FILE_EVENT, onMenuReplace);
+    window.addEventListener(GO_TO_LINE_EVENT, onMenuGoToLine);
     return () => {
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener(SAVE_FILE_EVENT, onMenuSave);
       window.removeEventListener(FIND_IN_FILE_EVENT, onMenuFind);
       window.removeEventListener(REPLACE_IN_FILE_EVENT, onMenuReplace);
+      window.removeEventListener(GO_TO_LINE_EVENT, onMenuGoToLine);
     };
   }, []);
 
@@ -439,6 +489,27 @@ export function FilesPage({
     const next = replaceAllInFileText(draft, findQuery, replaceText);
     setDraft(next.content);
     setFindIndex(0);
+  }
+
+  function jumpToLine(): void {
+    if (draft === null || !canEdit) {
+      setGoToLineStatus("Select a file to go to a line.");
+      return;
+    }
+    const parsed = parseGoToLineInput(goToLineQuery);
+    if (parsed === null) {
+      setGoToLineStatus("Enter a line number.");
+      return;
+    }
+    const next = selectionForLineColumn(draft, parsed.line, parsed.column);
+    setGoToLineStatus(goToLineStatusLabel(next.line, editorLineLabels(draft).length));
+    const node = editorRef.current;
+    if (node === null) {
+      return;
+    }
+    node.focus();
+    node.selectionStart = next.start;
+    node.selectionEnd = next.end;
   }
 
   return (
@@ -676,6 +747,50 @@ export function FilesPage({
                   setFindQuery("");
                   setReplaceText("");
                   setFindIndex(0);
+                }}
+              >
+                Close
+              </button>
+            </form>
+          ) : null}
+          {goToLineOpen ? (
+            <form
+              className="files-page__find"
+              onSubmit={(event) => {
+                event.preventDefault();
+                jumpToLine();
+              }}
+            >
+              <label className="files-page__filter" htmlFor="files-goto-line">
+                Go to line
+                <input
+                  ref={goToLineInputRef}
+                  id="files-goto-line"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={goToLineQuery}
+                  onChange={(event) => {
+                    setGoToLineQuery(event.target.value);
+                  }}
+                />
+              </label>
+              {goToLineStatus ? (
+                <p className="files-page__find-status" role="status">
+                  {goToLineStatus}
+                </p>
+              ) : null}
+              <button type="submit" className="btn-quiet" disabled={!canEdit}>
+                Go
+              </button>
+              <button
+                type="button"
+                className="btn-quiet"
+                onClick={() => {
+                  setGoToLineOpen(false);
+                  setGoToLineQuery("");
+                  setGoToLineStatus("");
                 }}
               >
                 Close

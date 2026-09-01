@@ -3,6 +3,7 @@
 export const SAVE_FILE_EVENT = "kronos-save-file";
 export const FIND_IN_FILE_EVENT = "kronos-find-in-file";
 export const REPLACE_IN_FILE_EVENT = "kronos-replace-in-file";
+export const GO_TO_LINE_EVENT = "kronos-go-to-line";
 
 export interface FileFindMatch {
   start: number;
@@ -101,4 +102,54 @@ export function replaceAllInFileText(
     last = match.end;
   }
   return { content: `${next}${content.slice(last)}`, count: matches.length };
+}
+
+export interface GoToLineTarget {
+  line: number;
+  column: number | null;
+}
+
+export function parseGoToLineInput(raw: string): GoToLineTarget | null {
+  const trimmed = raw.trim();
+  const match = /^(\d+)(?:[:.,](\d+))?$/.exec(trimmed);
+  if (match === null) {
+    return null;
+  }
+  const line = Number(match[1]);
+  if (!Number.isInteger(line) || line < 1) {
+    return null;
+  }
+  if (match[2] === undefined) {
+    return { line, column: null };
+  }
+  const column = Number(match[2]);
+  if (!Number.isInteger(column) || column < 1) {
+    return null;
+  }
+  return { line, column };
+}
+
+export function selectionForLineColumn(
+  content: string,
+  line: number,
+  column: number | null,
+): { start: number; end: number; line: number } {
+  const lines = content.split("\n");
+  const last = Math.max(1, lines.length);
+  const target = Math.min(Math.max(Math.trunc(line), 1), last);
+  let offset = 0;
+  for (let index = 0; index < target - 1; index += 1) {
+    offset += (lines[index] ?? "").length + 1;
+  }
+  const text = lines[target - 1] ?? "";
+  if (column === null) {
+    return { start: offset, end: offset + text.length, line: target };
+  }
+  const col = Math.min(Math.max(Math.trunc(column), 1), text.length + 1);
+  const caret = offset + (col - 1);
+  return { start: caret, end: caret, line: target };
+}
+
+export function goToLineStatusLabel(line: number, lineCount: number): string {
+  return `Line ${line} of ${lineCount}`;
 }

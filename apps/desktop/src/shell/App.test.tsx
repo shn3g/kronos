@@ -422,6 +422,7 @@ describe("App shell", () => {
     expect(screen.getByRole("menuitem", { name: /^select all$/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^find$/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^replace$/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^go to line$/i })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /^models$/i })).not.toBeInTheDocument();
   });
 

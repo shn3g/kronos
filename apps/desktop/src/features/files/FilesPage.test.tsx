@@ -569,4 +569,32 @@ describe("FilesPage", () => {
     expect(editor).toHaveValue("one\nbeta\none\n");
     expect(screen.getByText(/no matches/i)).toBeInTheDocument();
   });
+
+  it("jumps to a line in the open file", async () => {
+    const user = userEvent.setup();
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({
+          readWorkspaceFile: async () => ({
+            path: "src/app.py",
+            content: "alpha\nbeta\ngamma\n",
+            binary: false,
+          }),
+        })}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    const editor = await screen.findByRole("textbox", { name: "src/app.py" });
+    await user.keyboard("{Control>}g{/Control}");
+    await user.type(await screen.findByRole("textbox", { name: /go to line/i }), "2");
+    await user.keyboard("{Enter}");
+    expect(editor).toHaveProperty("selectionStart", 6);
+    expect(editor).toHaveProperty("selectionEnd", 10);
+    expect(screen.getByText("Line 2 of 4")).toBeInTheDocument();
+  });
 });
