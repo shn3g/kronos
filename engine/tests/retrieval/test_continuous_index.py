@@ -133,6 +133,56 @@ def test_swapping_embedder_identity_does_not_reuse_stale_vectors(tmp_path: Path)
     assert second.calls >= 1
 
 
+def test_identity_swap_on_partial_incremental_keeps_vectors_for_unchanged_paths(
+    tmp_path: Path,
+) -> None:
+    paths = kronos_paths(tmp_path)
+    root = init_git_repo(
+        tmp_path / "identity-partial",
+        files={
+            "src/alpha.py": "ALPHA_STABLE = 1\n",
+            "src/beta.py": "BETA_STABLE = 1\n",
+        },
+    )
+    policy = indexing_policy()
+    first = _CountingEmbedder()
+    service = IndexingService(
+        paths,
+        embeddings=first,
+        embedding_identity=EmbeddingIdentity(kind="openai_compatible", model_id="small"),
+    )
+    service.rebuild("repo_partial", root, policy)
+    assert first.calls >= 1
+
+    (root / "src/alpha.py").write_text("ALPHA_CHANGED = 2\n", encoding="utf-8")
+    second = _CountingEmbedder()
+    swapped = IndexingService(
+        paths,
+        embeddings=second,
+        embedding_identity=EmbeddingIdentity(kind="openai_compatible", model_id="large"),
+    )
+    swapped.incremental("repo_partial", root, policy)
+
+    store = SqliteIndexStore(paths.cache / "indexes" / "repo_partial" / "index.sqlite3")
+    try:
+        chunks = list(store.list_chunks())
+        vector_ids = {
+            str(row["chunk_id"])
+            for row in store.connection().execute("SELECT chunk_id FROM vectors")
+        }
+        paths_with_vectors = {chunk.path for chunk in chunks if chunk.chunk_id in vector_ids}
+        assert "src/alpha.py" in paths_with_vectors
+        assert "src/beta.py" in paths_with_vectors
+        assert {chunk.chunk_id for chunk in chunks} <= vector_ids
+        assert store.meta("embedding_model_id") == "large"
+    finally:
+        store.close()
+
+    joined = "\n".join(second.texts)
+    assert "ALPHA_CHANGED" in joined
+    assert "BETA_STABLE" in joined
+
+
 def test_changed_content_is_reembedded(tmp_path: Path) -> None:
     paths = kronos_paths(tmp_path)
     root = init_git_repo(

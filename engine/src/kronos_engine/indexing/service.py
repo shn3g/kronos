@@ -421,9 +421,11 @@ class IndexingService:
         return chunked
 
     def _embed_chunks(self, store: SqliteIndexStore, chunks: Sequence[IndexedChunk]) -> EmbedStats:
+        pending: Sequence[IndexedChunk] = chunks
         if self._embedding_identity is not None and self._backend_changed(store):
             drop_vectors(store.connection())
-        stats = upsert_embeddings(store.connection(), chunks, self._embeddings)
+            pending = list(store.list_chunks())
+        stats = upsert_embeddings(store.connection(), pending, self._embeddings)
         identity = self._embedding_identity
         if identity is not None:
             store.set_meta("embedding_kind", identity.kind)
