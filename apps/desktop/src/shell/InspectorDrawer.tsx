@@ -7,6 +7,7 @@ import {
   visibleInspectorChanges,
   type ChangeListScope,
 } from "./inspectWorkspaceChanges";
+import { diffLineSpokenLabel, diffLinesFromPatch } from "./inspectDiff";
 
 export type InspectorTab = "changes" | "goals" | "health";
 
@@ -254,8 +255,26 @@ function ChangeRow({
           ) : null}
         </div>
       </div>
-      {open && patch !== "" ? <pre className="inspector__diff">{patch}</pre> : null}
+      {open && patch !== "" ? <ChangeDiff patch={patch} /> : null}
     </li>
+  );
+}
+
+function ChangeDiff({ patch }: { patch: string }) {
+  const lines = diffLinesFromPatch(patch);
+  return (
+    <pre className="inspector__diff" aria-label="Diff">
+      {lines.map((line, index) => (
+        <span
+          key={`${index}:${line.kind}:${line.text}`}
+          className={`inspector__diff-line inspector__diff-line--${line.kind}`}
+          aria-label={diffLineSpokenLabel(line)}
+        >
+          {line.text}
+          {"\n"}
+        </span>
+      ))}
+    </pre>
   );
 }
 

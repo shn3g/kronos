@@ -1006,6 +1006,25 @@
   white-space: pre;
 }
 
+.inspector__diff-line {
+  display: block;
+}
+
+.inspector__diff-line--add {
+  color: var(--diff-add);
+  background: rgb(181 196 168 / 0.1);
+}
+
+.inspector__diff-line--del {
+  color: var(--diff-del);
+  background: rgb(212 168 168 / 0.1);
+}
+
+.inspector__diff-line--hunk,
+.inspector__diff-line--meta {
+  color: var(--muted);
+}
+
 .health-list {
   margin: 0;
   padding: 0;

@@ -233,7 +233,8 @@ export function MenuBar({
           Ctrl+Shift+F or Cmd+Shift+F searches the workspace index. Click a hit to open that line.
           Ctrl+H or Cmd+H replaces text in the open file. Ctrl+G or Cmd+G jumps to a line.
           Revert in Changes restores the last chat write for that file, or the last committed
-          version if chat did not write it. Commit records a local git commit. This turn lists
+          version if chat did not write it. Open a change to see added and removed lines.
+          Commit records a local git commit. This turn lists
           files chat wrote. All lists every dirty file. Kronos does not push. AGENTS.md,
           .cursorrules, and files under .cursor/rules are followed on every chat turn. Apply on a
           code block writes that file into the open folder and lists it in Changes. Retry

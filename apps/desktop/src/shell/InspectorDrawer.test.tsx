@@ -37,8 +37,8 @@ describe("InspectorDrawer", () => {
     );
     expect(screen.queryByText(/-old/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /src\/app\.tsx/i }));
-    expect(screen.getByText(/-old/)).toBeInTheDocument();
-    expect(screen.getByText(/\+new/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^removed\./i)).toHaveTextContent("-old");
+    expect(screen.getByLabelText(/^added\./i)).toHaveTextContent("+new");
   });
 
   it("reverts a chat write from the Changes list", async () => {

@@ -11,6 +11,8 @@
   --hl-keyword: #c5cdd8;
   --hl-string: #cbb89a;
   --hl-number: #b5c4a8;
+  --diff-add: #b5c4a8;
+  --diff-del: #d4a8a8;
   --radius: 10px;
   --sidebar-width: 232px;
   --font: "Segoe UI Variable", "Segoe UI", Inter, "Helvetica Neue", sans-serif;
