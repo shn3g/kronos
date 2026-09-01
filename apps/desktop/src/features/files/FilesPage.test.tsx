@@ -538,4 +538,35 @@ describe("FilesPage", () => {
     expect(keywords).toEqual(["def", "return"]);
     expect(document.querySelector(".files-page__hl--number")).toHaveTextContent("1");
   });
+
+  it("replaces the current match and can replace all remaining matches", async () => {
+    const user = userEvent.setup();
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({
+          readWorkspaceFile: async () => ({
+            path: "src/app.py",
+            content: "alpha\nbeta\nalpha\n",
+            binary: false,
+          }),
+        })}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    const editor = await screen.findByRole("textbox", { name: "src/app.py" });
+    await user.keyboard("{Control>}h{/Control}");
+    await user.type(await screen.findByRole("searchbox", { name: /find in file/i }), "alpha");
+    await user.type(screen.getByRole("textbox", { name: /replace with/i }), "one");
+    await user.click(screen.getByRole("button", { name: /^replace$/i }));
+    expect(editor).toHaveValue("one\nbeta\nalpha\n");
+    expect(screen.getByText("1 of 1")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^replace all$/i }));
+    expect(editor).toHaveValue("one\nbeta\none\n");
+    expect(screen.getByText(/no matches/i)).toBeInTheDocument();
+  });
 });

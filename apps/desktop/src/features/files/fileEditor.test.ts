@@ -8,6 +8,8 @@ import {
   findInFileText,
   insertEditorText,
   nextFileFindIndex,
+  replaceAllInFileText,
+  replaceInFileMatch,
 } from "./fileEditor";
 
 describe("fileDraftIsDirty", () => {
@@ -77,5 +79,35 @@ describe("fileFindStatusLabel", () => {
     expect(fileFindStatusLabel("", 0, 0)).toBe("");
     expect(fileFindStatusLabel("print", 0, 0)).toBe("No matches.");
     expect(fileFindStatusLabel("print", 3, 1)).toBe("2 of 3");
+  });
+});
+
+describe("replaceInFileMatch", () => {
+  it("replaces one span and places the caret after the insertion", () => {
+    expect(replaceInFileMatch("alpha beta alpha", { start: 0, end: 5 }, "one")).toEqual({
+      content: "one beta alpha",
+      caret: 3,
+    });
+  });
+
+  it("leaves the file unchanged when the span is empty or out of range", () => {
+    expect(replaceInFileMatch("alpha", { start: 9, end: 12 }, "x")).toEqual({
+      content: "alpha",
+      caret: 5,
+    });
+  });
+});
+
+describe("replaceAllInFileText", () => {
+  it("replaces every case-insensitive match", () => {
+    expect(replaceAllInFileText("Alpha\nalpha\n", "alpha", "beta")).toEqual({
+      content: "beta\nbeta\n",
+      count: 2,
+    });
+  });
+
+  it("does nothing when the query is empty or nothing matches", () => {
+    expect(replaceAllInFileText("alpha", "  ", "x")).toEqual({ content: "alpha", count: 0 });
+    expect(replaceAllInFileText("alpha", "zzz", "x")).toEqual({ content: "alpha", count: 0 });
   });
 });

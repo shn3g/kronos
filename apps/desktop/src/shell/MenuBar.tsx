@@ -14,6 +14,7 @@ interface MenuBarProps {
   onOpenWorkspace: () => void;
   onGoToFile: () => void;
   onFindInFile: () => void;
+  onReplaceInFile: () => void;
   onToggleHistory: () => void;
   onToggleActivityBar: () => void;
   onToggleInspector: () => void;
@@ -31,6 +32,7 @@ export function MenuBar({
   onOpenWorkspace,
   onGoToFile,
   onFindInFile,
+  onReplaceInFile,
   onToggleHistory,
   onToggleActivityBar,
   onToggleInspector,
@@ -150,6 +152,13 @@ export function MenuBar({
             onFindInFile();
           }}
         />
+        <MenuItem
+          label="Replace"
+          onSelect={() => {
+            setOpen(null);
+            onReplaceInFile();
+          }}
+        />
       </Menu>
       <Menu
         id={viewId}
@@ -203,6 +212,7 @@ export function MenuBar({
           In Terminal, the shell stays open. Type a line and press Enter. Up and Down recall
           previous lines. Stop, or Escape in the command box, ends the shell. Escape also
           stops the current chat turn. Ctrl+F or Cmd+F finds text in the open file.
+          Ctrl+H or Cmd+H replaces text in the open file.
           Revert in Changes restores the last chat write for that file, or the last committed
           version if chat did not write it. Commit records a local git commit. This turn lists
           files chat wrote. All lists every dirty file. Kronos does not push. AGENTS.md,

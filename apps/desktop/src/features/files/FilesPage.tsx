@@ -16,6 +16,9 @@ import {
   findInFileText,
   insertEditorText,
   nextFileFindIndex,
+  REPLACE_IN_FILE_EVENT,
+  replaceAllInFileText,
+  replaceInFileMatch,
   SAVE_FILE_EVENT,
 } from "./fileEditor";
 import {
@@ -78,9 +81,12 @@ export function FilesPage({
   const pageRef = useRef<HTMLElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
   const findOpenRef = useRef(false);
   const [findOpen, setFindOpen] = useState(false);
+  const [replaceOpen, setReplaceOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
+  const [replaceText, setReplaceText] = useState("");
   const [findIndex, setFindIndex] = useState(0);
   dirtyRef.current = dirty;
   findOpenRef.current = findOpen;
@@ -121,7 +127,9 @@ export function FilesPage({
     setSearchHits([]);
     setSearchError(null);
     setFindOpen(false);
+    setReplaceOpen(false);
     setFindQuery("");
+    setReplaceText("");
     setFindIndex(0);
   }, [repositoryId]);
 
@@ -252,9 +260,14 @@ export function FilesPage({
     if (!findOpen) {
       return;
     }
+    if (replaceOpen) {
+      replaceInputRef.current?.focus();
+      replaceInputRef.current?.select();
+      return;
+    }
     findInputRef.current?.focus();
     findInputRef.current?.select();
-  }, [findOpen]);
+  }, [findOpen, replaceOpen]);
 
   useEffect(() => {
     if (!findOpen) {
@@ -265,11 +278,15 @@ export function FilesPage({
     if (!node || match === undefined) {
       return;
     }
-    const keepFindFocus = document.activeElement === findInputRef.current;
+    const restoreFind = document.activeElement === findInputRef.current;
+    const restoreReplace = document.activeElement === replaceInputRef.current;
     node.selectionStart = match.start;
     node.selectionEnd = match.end;
-    if (keepFindFocus) {
+    if (restoreFind) {
       findInputRef.current?.focus();
+    }
+    if (restoreReplace) {
+      replaceInputRef.current?.focus();
     }
   }, [activeFind, findMatches, findOpen, draft]);
 
@@ -279,7 +296,9 @@ export function FilesPage({
     }
     function closeFind(): void {
       setFindOpen(false);
+      setReplaceOpen(false);
       setFindQuery("");
+      setReplaceText("");
       setFindIndex(0);
     }
     function onKey(event: KeyboardEvent): void {
@@ -297,6 +316,15 @@ export function FilesPage({
         setFindOpen(true);
         return;
       }
+      if (event.key.toLowerCase() === "h" && modifier && !event.altKey && !event.shiftKey) {
+        if (filesHidden()) {
+          return;
+        }
+        event.preventDefault();
+        setFindOpen(true);
+        setReplaceOpen(true);
+        return;
+      }
       if (event.key === "Escape" && findOpenRef.current && !filesHidden()) {
         event.preventDefault();
         event.stopPropagation();
@@ -309,13 +337,19 @@ export function FilesPage({
     function onMenuFind(): void {
       setFindOpen(true);
     }
+    function onMenuReplace(): void {
+      setFindOpen(true);
+      setReplaceOpen(true);
+    }
     window.addEventListener("keydown", onKey, true);
     window.addEventListener(SAVE_FILE_EVENT, onMenuSave);
     window.addEventListener(FIND_IN_FILE_EVENT, onMenuFind);
+    window.addEventListener(REPLACE_IN_FILE_EVENT, onMenuReplace);
     return () => {
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener(SAVE_FILE_EVENT, onMenuSave);
       window.removeEventListener(FIND_IN_FILE_EVENT, onMenuFind);
+      window.removeEventListener(REPLACE_IN_FILE_EVENT, onMenuReplace);
     };
   }, []);
 
@@ -384,6 +418,27 @@ export function FilesPage({
       return;
     }
     setFindIndex(nextFileFindIndex(activeFind, delta, findMatches.length));
+  }
+
+  function replaceCurrentMatch(): void {
+    if (draft === null || !canEdit) {
+      return;
+    }
+    const match = findMatches[activeFind];
+    if (match === undefined) {
+      return;
+    }
+    const next = replaceInFileMatch(draft, match, replaceText);
+    setDraft(next.content);
+  }
+
+  function replaceEveryMatch(): void {
+    if (draft === null || !canEdit) {
+      return;
+    }
+    const next = replaceAllInFileText(draft, findQuery, replaceText);
+    setDraft(next.content);
+    setFindIndex(0);
   }
 
   return (
@@ -512,6 +567,10 @@ export function FilesPage({
               className="files-page__find"
               onSubmit={(event) => {
                 event.preventDefault();
+                if (document.activeElement === replaceInputRef.current) {
+                  replaceCurrentMatch();
+                  return;
+                }
                 stepFind(1);
               }}
             >
@@ -537,6 +596,28 @@ export function FilesPage({
                   }}
                 />
               </label>
+              {replaceOpen ? (
+                <label className="files-page__filter" htmlFor="files-replace">
+                  Replace with
+                  <input
+                    ref={replaceInputRef}
+                    id="files-replace"
+                    type="text"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={replaceText}
+                    onChange={(event) => {
+                      setReplaceText(event.target.value);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        replaceCurrentMatch();
+                      }
+                    }}
+                  />
+                </label>
+              ) : null}
               {findStatus ? (
                 <p className="files-page__find-status" role="status">
                   {findStatus}
@@ -562,12 +643,38 @@ export function FilesPage({
               >
                 Previous
               </button>
+              {replaceOpen ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn-quiet"
+                    disabled={findMatches.length === 0 || !canEdit}
+                    onClick={() => {
+                      replaceCurrentMatch();
+                    }}
+                  >
+                    Replace
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-quiet"
+                    disabled={findMatches.length === 0 || !canEdit}
+                    onClick={() => {
+                      replaceEveryMatch();
+                    }}
+                  >
+                    Replace all
+                  </button>
+                </>
+              ) : null}
               <button
                 type="button"
                 className="btn-quiet"
                 onClick={() => {
                   setFindOpen(false);
+                  setReplaceOpen(false);
                   setFindQuery("");
+                  setReplaceText("");
                   setFindIndex(0);
                 }}
               >

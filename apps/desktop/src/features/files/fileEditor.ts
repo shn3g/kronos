@@ -2,6 +2,7 @@
 
 export const SAVE_FILE_EVENT = "kronos-save-file";
 export const FIND_IN_FILE_EVENT = "kronos-find-in-file";
+export const REPLACE_IN_FILE_EVENT = "kronos-replace-in-file";
 
 export interface FileFindMatch {
   start: number;
@@ -68,4 +69,36 @@ export function fileFindStatusLabel(query: string, matchCount: number, activeInd
     return "No matches.";
   }
   return `${activeIndex + 1} of ${matchCount}`;
+}
+
+export function replaceInFileMatch(
+  content: string,
+  match: FileFindMatch,
+  replacement: string,
+): { content: string; caret: number } {
+  if (match.start < 0 || match.end < match.start || match.end > content.length) {
+    return { content, caret: content.length };
+  }
+  return {
+    content: `${content.slice(0, match.start)}${replacement}${content.slice(match.end)}`,
+    caret: match.start + replacement.length,
+  };
+}
+
+export function replaceAllInFileText(
+  content: string,
+  query: string,
+  replacement: string,
+): { content: string; count: number } {
+  const matches = findInFileText(content, query);
+  if (matches.length === 0) {
+    return { content, count: 0 };
+  }
+  let next = "";
+  let last = 0;
+  for (const match of matches) {
+    next += `${content.slice(last, match.start)}${replacement}`;
+    last = match.end;
+  }
+  return { content: `${next}${content.slice(last)}`, count: matches.length };
 }

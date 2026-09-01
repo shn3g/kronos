@@ -21,7 +21,7 @@ import {
 import { plannerDisplayName } from "../features/models/plannerLabel";
 import { FilesPage } from "../features/files/FilesPage";
 import { GoToFilePalette } from "../features/files/GoToFilePalette";
-import { FIND_IN_FILE_EVENT } from "../features/files/fileEditor";
+import { FIND_IN_FILE_EVENT, REPLACE_IN_FILE_EVENT } from "../features/files/fileEditor";
 import { safeWorkspaceRelPath } from "../features/files/workspacePath";
 import { TerminalPage } from "../features/terminal/TerminalPage";
 import { createProductionIndexClient, type IndexClient } from "../features/index/client";
@@ -358,6 +358,10 @@ export function App({
         onFindInFile={() => {
           setActivity("files");
           window.dispatchEvent(new Event(FIND_IN_FILE_EVENT));
+        }}
+        onReplaceInFile={() => {
+          setActivity("files");
+          window.dispatchEvent(new Event(REPLACE_IN_FILE_EVENT));
         }}
         onToggleHistory={() => {
           setHistoryOpen((open) => !open);

@@ -449,7 +449,7 @@
 
 .files-page__find .files-page__filter {
   margin: 0;
-  min-width: 12rem;
+  min-width: 10rem;
   flex: 1;
 }
 
