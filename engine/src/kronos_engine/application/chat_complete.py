@@ -18,6 +18,19 @@ from kronos_engine.ports.secrets import ScopedSecret, SecretStore
 DEFAULT_BASE = "http://127.0.0.1:11434/v1"
 
 
+def chat_completion_messages(system: str, turns: Sequence[ChatTurn]) -> list[dict[str, str]]:
+    messages = [{"role": "system", "content": system}]
+    for turn in turns:
+        if turn.role == "assistant":
+            messages.append({"role": "assistant", "content": turn.content})
+            continue
+        if turn.role == "tool":
+            messages.append({"role": "user", "content": f"[tool]\n{turn.content}"})
+            continue
+        messages.append({"role": "user", "content": turn.content})
+    return messages
+
+
 class AssignedPlannerCompleter:
     def __init__(
         self,
@@ -68,7 +81,12 @@ class AssignedPlannerCompleter:
             billed=config.billed,
         )
         prompt = _flatten(system, turns)
-        return adapter, CompletionRequest(profile=profile, prompt=prompt), secret
+        messages = tuple(chat_completion_messages(system, turns))
+        return (
+            adapter,
+            CompletionRequest(profile=profile, prompt=prompt, messages=messages),
+            secret,
+        )
 
 
 def _consume_stream(

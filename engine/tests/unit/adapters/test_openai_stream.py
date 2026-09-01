@@ -101,6 +101,38 @@ def test_complete_stream_yields_deltas_and_sets_stream_flag() -> None:
     assert transport.posts[0]["stream"] is True
 
 
+def test_complete_stream_sends_chat_roles_when_messages_are_provided() -> None:
+    transport = _SseTransport(
+        [
+            '{"choices":[{"delta":{"content":"ok"}}]}',
+            "[DONE]",
+        ]
+    )
+    provider = OpenAICompatibleProvider(
+        base_url="http://127.0.0.1:11434/v1",
+        billed=False,
+        transport=transport,
+    )
+    list(
+        provider.complete_stream(
+            CompletionRequest(
+                profile=_profile(),
+                prompt="flattened",
+                messages=(
+                    {"role": "system", "content": "You are Kronos."},
+                    {"role": "user", "content": "Hi"},
+                ),
+            ),
+            secret=None,
+            cancel=Event(),
+        )
+    )
+    assert transport.posts[0]["messages"] == [
+        {"role": "system", "content": "You are Kronos."},
+        {"role": "user", "content": "Hi"},
+    ]
+
+
 def test_complete_stream_closes_when_cancelled() -> None:
     transport = _SseTransport(
         [

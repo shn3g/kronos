@@ -17,6 +17,7 @@ class CompletionRequest:
     prompt: str
     fallback_model_id: str | None = None
     fallback_billed: bool = False
+    messages: tuple[dict[str, str], ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)

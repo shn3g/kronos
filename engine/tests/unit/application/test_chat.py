@@ -192,6 +192,9 @@ def test_write_file_records_a_workspace_diff(tmp_path: Path) -> None:
     assert payload["path"] == "hello.py"
     assert payload["repository_id"] == "repo_alpha"
     assert "hello.py" in str(payload["summary"])
+    patch = str(payload["patch"])
+    assert "-old" in patch
+    assert "+new" in patch
 
 
 def test_active_memories_are_injected_into_the_system_prompt(tmp_path: Path) -> None:

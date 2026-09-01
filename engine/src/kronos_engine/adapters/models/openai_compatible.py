@@ -161,7 +161,9 @@ class OpenAICompatibleProvider:
             headers["Authorization"] = f"Bearer {token}"
         body: dict[str, object] = {
             "model": model,
-            "messages": [{"role": "user", "content": request.prompt}],
+            "messages": list(request.messages)
+            if request.messages
+            else [{"role": "user", "content": request.prompt}],
             "max_tokens": request.profile.limits.max_tokens,
         }
         if stream:

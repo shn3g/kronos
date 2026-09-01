@@ -157,6 +157,7 @@ def test_dashboard_surfaces_daily_dispatches_not_hardcoded_attempts(
             "path": "pkg/alpha.py",
             "summary": "+2",
             "repository_id": "repo_alpha",
+            "patch": "--- a/pkg/alpha.py\n+++ b/pkg/alpha.py\n@@ -1 +1 @@\n-old\n+new\n",
         },
     )
     snap = doctor.dashboard(client_version="0.1.0")
@@ -167,6 +168,7 @@ def test_dashboard_surfaces_daily_dispatches_not_hardcoded_attempts(
     assert meter["attempts"] == 7
     assert snap.diffs
     assert snap.diffs[0]["repository_id"] == "repo_alpha"
+    assert "-old" in str(snap.diffs[0]["patch"])
 
 
 def test_dead_letter_inspection_and_stuck_lease_recovery(tmp_path: Path) -> None:

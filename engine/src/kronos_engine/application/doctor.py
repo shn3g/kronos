@@ -577,6 +577,7 @@ class DoctorService:
                         "path": str(payload.get("path") or payload.get("url") or item.type),
                         "summary": str(payload.get("summary") or item.type),
                         "repository_id": repo_id,
+                        "patch": str(payload.get("patch") or ""),
                     }
                 )
         return diffs

@@ -12,6 +12,7 @@ from threading import Event, Lock
 from typing import Protocol
 from uuid import uuid4
 
+from kronos_engine.application.chat_diff import unified_write_patch
 from kronos_engine.application.chat_tools import ToolCall, ToolParseError, parse_tool_call
 from kronos_engine.application.goals import GoalService
 from kronos_engine.application.repositories import RepositoryNotFound, RepositoryService
@@ -406,9 +407,14 @@ class ChatService:
         target.parent.mkdir(parents=True, exist_ok=True)
         if not _is_inside(root, target.parent.resolve()):
             return "That path is outside the workspace or is not a file."
+        before = target.read_text(encoding="utf-8", errors="replace") if target.is_file() else ""
         target.write_text(content, encoding="utf-8")
         self._refresh_written_path(repository_id, root, record, as_posix)
-        self._note_write(repository_id, as_posix)
+        self._note_write(
+            repository_id,
+            as_posix,
+            unified_write_patch(path=as_posix, before=before, after=content),
+        )
         return f"Wrote {as_posix} ({len(content)} characters)."
 
     def _refresh_written_path(
@@ -427,7 +433,7 @@ class ChatService:
         except Exception:
             return
 
-    def _note_write(self, repository_id: str, path: str) -> None:
+    def _note_write(self, repository_id: str, path: str, patch: str) -> None:
         if self._events is None:
             return
         try:
@@ -437,6 +443,7 @@ class ChatService:
                     "repository_id": repository_id,
                     "path": path,
                     "summary": f"Wrote {path}",
+                    "patch": patch,
                 },
             )
         except Exception:
