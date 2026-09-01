@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from collections.abc import Sequence
@@ -27,12 +28,12 @@ class SqliteIndexStore:
         self._conn.close()
 
     def replace_all(self, chunks: Sequence[IndexedChunk], relations: Sequence[Relation]) -> None:
-        self._conn.execute("DELETE FROM vectors")
         self._conn.execute("DELETE FROM relations")
         self._conn.execute("DELETE FROM chunks_fts")
         self._conn.execute("DELETE FROM chunks")
         self.upsert(chunks)
         self.replace_relations(relations)
+        self._prune_orphan_vectors()
 
     def delete_paths(self, paths: Sequence[str]) -> None:
         for path in paths:
@@ -127,8 +128,52 @@ class SqliteIndexStore:
         return None if row is None else str(row["value"])
 
     def set_indexed_commit(self, commit: str) -> None:
+        self.set_meta("git_commit", commit)
+
+    def replace_path_chunks(self, path: str, chunks: Sequence[IndexedChunk]) -> None:
+        posix = path.replace("\\", "/")
+        keep = {chunk.chunk_id for chunk in chunks}
+        rows = self._conn.execute(
+            "SELECT chunk_id FROM chunks WHERE path = ?", (posix,)
+        ).fetchall()
+        for row in rows:
+            chunk_id = str(row["chunk_id"])
+            if chunk_id in keep:
+                continue
+            self._conn.execute("DELETE FROM chunks_fts WHERE chunk_id = ?", (chunk_id,))
+            self._conn.execute("DELETE FROM vectors WHERE chunk_id = ?", (chunk_id,))
+            self._conn.execute("DELETE FROM chunks WHERE chunk_id = ?", (chunk_id,))
+        self.upsert(chunks)
+
+    def meta(self, key: str) -> str | None:
+        row = self._conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return None if row is None else str(row["value"])
+
+    def set_meta(self, key: str, value: str) -> None:
         self._conn.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES ('git_commit', ?)", (commit,)
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value)
+        )
+        self._conn.commit()
+
+    def dirty_paths(self) -> tuple[str, ...]:
+        raw = self.meta("dirty_paths")
+        if not raw:
+            return ()
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return ()
+        if not isinstance(parsed, list):
+            return ()
+        return tuple(item.replace("\\", "/") for item in parsed if isinstance(item, str))
+
+    def set_dirty_paths(self, paths: Sequence[str]) -> None:
+        ordered = sorted({path.replace("\\", "/") for path in paths})
+        self.set_meta("dirty_paths", json.dumps(ordered, separators=(",", ":")))
+
+    def _prune_orphan_vectors(self) -> None:
+        self._conn.execute(
+            "DELETE FROM vectors WHERE chunk_id NOT IN (SELECT chunk_id FROM chunks)"
         )
         self._conn.commit()
 

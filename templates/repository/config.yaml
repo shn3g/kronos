@@ -38,3 +38,6 @@ indexing:
     - target/
     - __pycache__/
   max_file_bytes: 1048576
+  watch: true
+  debounce_ms: 500
+  extra_exclude_globs: []

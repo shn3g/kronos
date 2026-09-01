@@ -40,6 +40,43 @@ def test_unknown_indexing_fields_are_rejected() -> None:
         parse_policy(payload)
 
 
+def test_indexing_watch_fields_default_when_missing() -> None:
+    payload = _policy_dict(default_policy(integration_branch="main", protected_branch="main"))
+    indexing = dict(payload["indexing"])  # type: ignore[arg-type]
+    indexing.pop("watch", None)
+    indexing.pop("debounce_ms", None)
+    indexing.pop("extra_exclude_globs", None)
+    payload["indexing"] = indexing
+    policy = parse_policy(payload)
+    assert policy.schema_version == POLICY_SCHEMA_VERSION
+    assert policy.indexing.watch is True
+    assert policy.indexing.debounce_ms == 500
+    assert policy.indexing.extra_exclude_globs == ()
+
+
+def test_indexing_watch_fields_round_trip() -> None:
+    payload = _policy_dict(default_policy(integration_branch="main", protected_branch="main"))
+    payload["indexing"] = {
+        **dict(payload["indexing"]),  # type: ignore[dict-item]
+        "watch": False,
+        "debounce_ms": 250,
+        "extra_exclude_globs": ["*.tmp", "scratch/"],
+    }
+    policy = parse_policy(payload)
+    assert policy.indexing.watch is False
+    assert policy.indexing.debounce_ms == 250
+    assert policy.indexing.extra_exclude_globs == ("*.tmp", "scratch/")
+    serialized = _policy_dict(policy)["indexing"]
+    assert serialized == {
+        "enabled": True,
+        "exclude_prefixes": list(policy.indexing.exclude_prefixes),
+        "max_file_bytes": policy.indexing.max_file_bytes,
+        "watch": False,
+        "debounce_ms": 250,
+        "extra_exclude_globs": ["*.tmp", "scratch/"],
+    }
+
+
 def _policy_dict(policy: object) -> dict[str, object]:
     from kronos_engine.domain.policy import policy_to_dict
 

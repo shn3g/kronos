@@ -230,6 +230,17 @@ class IndexStatusResponse(BaseModel):
     index_path: str
     disk_bytes: int
     ready: bool
+    state: str
+    files_done: int
+    files_total: int
+    chunks_embedded: int
+    chunks_skipped: int
+    last_activity_at: str | None
+    watch_enabled: bool
+
+
+class IndexWatchRequest(BaseModel):
+    enabled: bool
 
 
 class IndexSearchHit(BaseModel):

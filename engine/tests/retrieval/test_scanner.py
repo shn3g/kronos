@@ -63,3 +63,62 @@ def test_scanner_source_does_not_execute_repository_files() -> None:
     assert "eval(" not in text
     assert "runpy" not in text
     assert "importlib.import_module" not in text
+
+
+def test_working_tree_overlay_indexes_uncommitted_and_untracked_files(tmp_path: Path) -> None:
+    from kronos_engine.indexing.scanner import list_dirty_paths, scan_with_working_tree
+
+    root = init_git_repo(
+        tmp_path / "dirty",
+        files={"src/mod.py": "OLD_BLOB_TOKEN = 1\n"},
+    )
+    (root / "src/mod.py").write_text("NEW_WORKING_TREE_TOKEN = 2\n", encoding="utf-8")
+    (root / "src/untracked.py").write_text("UNTRACKED_TOKEN = 3\n", encoding="utf-8")
+    blobs = {item.path: item for item in scan_repository(root, indexing_policy())}
+    assert "OLD_BLOB_TOKEN" in blobs["src/mod.py"].text
+    assert "src/untracked.py" not in blobs
+
+    dirty = set(list_dirty_paths(root))
+    assert "src/mod.py" in dirty
+    assert "src/untracked.py" in dirty
+
+    overlay = {item.path: item for item in scan_with_working_tree(root, indexing_policy())}
+    assert "NEW_WORKING_TREE_TOKEN" in overlay["src/mod.py"].text
+    assert "OLD_BLOB_TOKEN" not in overlay["src/mod.py"].text
+    assert "UNTRACKED_TOKEN" in overlay["src/untracked.py"].text
+
+
+def test_working_tree_overlay_drops_deleted_tracked_files(tmp_path: Path) -> None:
+    from kronos_engine.indexing.scanner import scan_with_working_tree
+
+    root = init_git_repo(
+        tmp_path / "gone",
+        files={
+            "src/keep.py": "KEEP_TOKEN = 1\n",
+            "src/gone.py": "GONE_TOKEN = 1\n",
+        },
+    )
+    (root / "src/gone.py").unlink()
+    overlay = {item.path: item for item in scan_with_working_tree(root, indexing_policy())}
+    assert "src/keep.py" in overlay
+    assert "src/gone.py" not in overlay
+
+
+def test_extra_exclude_globs_skip_matching_paths(tmp_path: Path) -> None:
+    root = init_git_repo(
+        tmp_path / "globs",
+        files={
+            "src/keep.py": "KEEP_TOKEN = 1\n",
+            "src/skip.tmp": "TMP_TOKEN = 1\n",
+            "scratch/notes.md": "SCRATCH_TOKEN = 1\n",
+        },
+    )
+    policy = indexing_policy()
+    policy = replace(
+        policy,
+        indexing=replace(policy.indexing, extra_exclude_globs=("*.tmp", "scratch/**")),
+    )
+    paths = {item.path for item in scan_repository(root, policy)}
+    assert "src/keep.py" in paths
+    assert "src/skip.tmp" not in paths
+    assert "scratch/notes.md" not in paths

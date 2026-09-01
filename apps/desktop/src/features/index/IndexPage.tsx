@@ -68,20 +68,32 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
         return;
       }
       setRepositories(items);
-      const initial = items[0]?.id ?? "";
-      setSelectedId(initial);
-      if (initial) {
-        void client.status(initial).then((next) => {
-          if (!cancelled) {
-            setStatus(next);
-          }
-        });
-      }
+      setSelectedId((current) => current || items[0]?.id || "");
     });
     return () => {
       cancelled = true;
     };
   }, [client, ready]);
+
+  useEffect(() => {
+    if (!ready || !selectedId) {
+      return;
+    }
+    let cancelled = false;
+    const refresh = () => {
+      void client.status(selectedId).then((next) => {
+        if (!cancelled) {
+          setStatus(next);
+        }
+      });
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [client, ready, selectedId]);
 
   if (!ready) {
     return (
@@ -106,6 +118,19 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
       setStatus(next);
     } catch {
       setError("Could not rebuild the index.");
+    }
+  }
+
+  async function onToggleWatch() {
+    if (!selectedId || !status) {
+      return;
+    }
+    setError(null);
+    try {
+      const next = await client.setWatch(selectedId, !status.watchEnabled);
+      setStatus(next);
+    } catch {
+      setError("Could not update the index watcher.");
     }
   }
 
@@ -156,6 +181,24 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
       {status ? (
         <dl className="index-page__status">
           <div>
+            <dt>State</dt>
+            <dd>{status.state}</dd>
+          </div>
+          <div>
+            <dt>Files</dt>
+            <dd>
+              {status.filesDone} / {status.filesTotal}
+            </dd>
+          </div>
+          <div>
+            <dt>Chunks embedded</dt>
+            <dd>{status.chunksEmbedded}</dd>
+          </div>
+          <div>
+            <dt>Chunks skipped</dt>
+            <dd>{status.chunksSkipped}</dd>
+          </div>
+          <div>
             <dt>Chunk count</dt>
             <dd>{status.chunkCount}</dd>
           </div>
@@ -167,7 +210,23 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
             <dt>Dense</dt>
             <dd>{status.denseAvailable ? "dense available" : "dense unavailable"}</dd>
           </div>
+          <div>
+            <dt>Last activity</dt>
+            <dd>{status.lastActivityAt ?? "none"}</dd>
+          </div>
         </dl>
+      ) : null}
+      {status ? (
+        <label className="index-page__watch">
+          <input
+            type="checkbox"
+            checked={status.watchEnabled}
+            onChange={() => {
+              void onToggleWatch();
+            }}
+          />
+          Watch working tree
+        </label>
       ) : null}
       <div className="index-page__actions">
         <button type="button" className="btn-quiet" onClick={() => void onRebuild()}>

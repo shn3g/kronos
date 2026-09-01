@@ -16,7 +16,18 @@ DEFAULT_INDEX_EXCLUDES: tuple[str, ...] = (
     "__pycache__/",
 )
 DEFAULT_MAX_FILE_BYTES = 1_048_576
-_ALLOWED_INDEXING = frozenset({"enabled", "exclude_prefixes", "max_file_bytes"})
+DEFAULT_INDEX_WATCH = True
+DEFAULT_INDEX_DEBOUNCE_MS = 500
+_ALLOWED_INDEXING = frozenset(
+    {
+        "enabled",
+        "exclude_prefixes",
+        "max_file_bytes",
+        "watch",
+        "debounce_ms",
+        "extra_exclude_globs",
+    }
+)
 
 SIZE_STEPS: tuple[str, ...] = ("XS", "XS_PLUS", "S", "M", "L")
 RISK_STEPS: tuple[str, ...] = ("low", "medium", "high", "critical")
@@ -126,6 +137,9 @@ class Indexing:
     enabled: bool
     exclude_prefixes: tuple[str, ...]
     max_file_bytes: int
+    watch: bool
+    debounce_ms: int
+    extra_exclude_globs: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +182,9 @@ def default_policy(*, integration_branch: str, protected_branch: str) -> Reposit
                 "enabled": True,
                 "exclude_prefixes": list(DEFAULT_INDEX_EXCLUDES),
                 "max_file_bytes": DEFAULT_MAX_FILE_BYTES,
+                "watch": DEFAULT_INDEX_WATCH,
+                "debounce_ms": DEFAULT_INDEX_DEBOUNCE_MS,
+                "extra_exclude_globs": [],
             },
         }
     )
@@ -239,6 +256,11 @@ def parse_policy(raw: Mapping[str, object]) -> RepositoryPolicy:
             enabled=_require_bool(indexing, "enabled"),
             exclude_prefixes=_require_str_tuple(indexing, "exclude_prefixes"),
             max_file_bytes=_require_positive_int(indexing, "max_file_bytes"),
+            watch=_optional_bool(indexing, "watch", DEFAULT_INDEX_WATCH),
+            debounce_ms=_optional_non_negative_int(
+                indexing, "debounce_ms", DEFAULT_INDEX_DEBOUNCE_MS
+            ),
+            extra_exclude_globs=_optional_str_tuple(indexing, "extra_exclude_globs"),
         ),
     )
 
@@ -276,6 +298,9 @@ def policy_to_dict(policy: RepositoryPolicy) -> dict[str, object]:
             "enabled": policy.indexing.enabled,
             "exclude_prefixes": list(policy.indexing.exclude_prefixes),
             "max_file_bytes": policy.indexing.max_file_bytes,
+            "watch": policy.indexing.watch,
+            "debounce_ms": policy.indexing.debounce_ms,
+            "extra_exclude_globs": list(policy.indexing.extra_exclude_globs),
         },
     }
 
@@ -387,6 +412,27 @@ def _require_bool(raw: Mapping[str, object], key: str) -> bool:
     if not isinstance(value, bool):
         raise PolicyError(f"{key} must be a boolean")
     return value
+
+
+def _optional_bool(raw: Mapping[str, object], key: str, default: bool) -> bool:
+    if key not in raw:
+        return default
+    return _require_bool(raw, key)
+
+
+def _optional_non_negative_int(raw: Mapping[str, object], key: str, default: int) -> int:
+    if key not in raw:
+        return default
+    value = _require_int(raw, key)
+    if value < 0:
+        raise PolicyError(f"{key} must be >= 0")
+    return value
+
+
+def _optional_str_tuple(raw: Mapping[str, object], key: str) -> tuple[str, ...]:
+    if key not in raw:
+        return ()
+    return _require_str_tuple(raw, key)
 
 
 def _require_int(raw: Mapping[str, object], key: str) -> int:

@@ -8,6 +8,7 @@ import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from pathlib import Path
 
 from kronos_engine.domain.policy import RepositoryPolicy
@@ -99,25 +100,100 @@ def scan_repository(
     sha = commit or _git_text(root, "rev-parse", "HEAD").strip()
     found: list[ScannedFile] = []
     for relative in _tracked_paths(root, sha):
-        posix = relative.replace("\\", "/")
-        if _should_skip_path(posix, policy.indexing.exclude_prefixes):
-            continue
-        size = _blob_size(root, sha, posix)
-        if size is None or size > policy.indexing.max_file_bytes:
-            continue
-        payload = _blob_bytes(root, sha, posix)
-        if payload is None or b"\x00" in payload[:8192]:
-            continue
-        try:
-            text = payload.decode("utf-8")
-        except UnicodeDecodeError:
-            continue
-        if _looks_secret(posix, text):
-            continue
-        found.append(
-            ScannedFile(path=posix, text=text, language=detect_language(posix))
-        )
+        scanned = scan_blob_path(root, policy, relative, commit=sha)
+        if scanned is not None:
+            found.append(scanned)
     return tuple(found)
+
+
+def scan_with_working_tree(
+    git_root: Path,
+    policy: RepositoryPolicy,
+    *,
+    commit: str | None = None,
+) -> tuple[ScannedFile, ...]:
+    """HEAD blobs, overlaid with dirty working-tree files (including untracked)."""
+    root = git_root.resolve()
+    if not policy.indexing.enabled:
+        return ()
+    sha = commit or _git_text(root, "rev-parse", "HEAD").strip()
+    files = {item.path: item for item in scan_repository(root, policy, commit=sha)}
+    for posix in list_dirty_paths(root):
+        scanned = scan_working_tree_path(root, policy, posix)
+        if scanned is None:
+            files.pop(posix, None)
+            continue
+        files[posix] = scanned
+    return tuple(files.values())
+
+
+def scan_blob_path(
+    git_root: Path,
+    policy: RepositoryPolicy,
+    posix: str,
+    *,
+    commit: str,
+) -> ScannedFile | None:
+    normalized = posix.replace("\\", "/")
+    if should_skip_path(normalized, policy):
+        return None
+    size = _blob_size(git_root, commit, normalized)
+    if size is None or size > policy.indexing.max_file_bytes:
+        return None
+    payload = _blob_bytes(git_root, commit, normalized)
+    return _scanned_from_bytes(normalized, payload)
+
+
+def scan_working_tree_path(
+    git_root: Path,
+    policy: RepositoryPolicy,
+    posix: str,
+) -> ScannedFile | None:
+    normalized = posix.replace("\\", "/")
+    if should_skip_path(normalized, policy):
+        return None
+    path = _safe_repo_file(git_root.resolve(), normalized)
+    if path is None or not path.is_file():
+        return None
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return None
+    if size > policy.indexing.max_file_bytes:
+        return None
+    try:
+        payload = path.read_bytes()
+    except OSError:
+        return None
+    return _scanned_from_bytes(normalized, payload)
+
+
+def list_dirty_paths(git_root: Path) -> tuple[str, ...]:
+    """Unstaged, staged, and untracked paths relative to HEAD (gitignore-aware)."""
+    root = git_root.resolve()
+    found: list[str] = []
+    seen: set[str] = set()
+    raw = _git_bytes(root, "diff", "--name-status", "--find-renames", "-z", "HEAD")
+    for _status, path, renamed_from in _parse_name_status(raw):
+        for item in (path, renamed_from):
+            if item and item not in seen:
+                seen.add(item)
+                found.append(item)
+    untracked = _git_bytes(root, "ls-files", "-o", "--exclude-standard", "-z")
+    for entry in untracked.split(b"\0"):
+        if not entry:
+            continue
+        posix = entry.decode("utf-8").replace("\\", "/")
+        if posix not in seen:
+            seen.add(posix)
+            found.append(posix)
+    return tuple(found)
+
+
+def should_skip_path(posix: str, policy: RepositoryPolicy) -> bool:
+    if _should_skip_path(posix, policy.indexing.exclude_prefixes):
+        return True
+    return any(_matches_extra_glob(posix, glob) for glob in policy.indexing.extra_exclude_globs)
 
 
 def head_commit(git_root: Path) -> str:
@@ -137,21 +213,24 @@ def diff_paths(
         old_commit,
         new_commit,
     )
+    return _parse_name_status(raw)
+
+
+def _parse_name_status(raw: bytes) -> tuple[tuple[str, str, str], ...]:
     parts = [item.decode("utf-8") for item in raw.split(b"\0") if item]
     changes: list[tuple[str, str, str]] = []
     index = 0
     while index < len(parts):
         status = parts[index]
         index += 1
-        if status.startswith("R"):
+        if status.startswith("R") or status.startswith("C"):
             old = parts[index].replace("\\", "/")
             new = parts[index + 1].replace("\\", "/")
             index += 2
-            changes.append(("R", new, old))
-        elif status.startswith("C"):
-            new = parts[index + 1].replace("\\", "/")
-            index += 2
-            changes.append(("A", new, ""))
+            if status.startswith("R"):
+                changes.append(("R", new, old))
+            else:
+                changes.append(("A", new, ""))
         else:
             path = parts[index].replace("\\", "/")
             index += 1
@@ -194,6 +273,39 @@ def _matches_prefix(posix: str, prefix: str) -> bool:
     if posix == stripped:
         return True
     return posix.startswith(stripped + "/")
+
+
+def _matches_extra_glob(posix: str, glob: str) -> bool:
+    normalized = glob.replace("\\", "/").lstrip("/")
+    if not normalized:
+        return False
+    if normalized.endswith("/") or normalized.endswith("/**"):
+        return _matches_prefix(posix, normalized.removesuffix("**"))
+    name = posix.rsplit("/", 1)[-1]
+    return fnmatch(posix, normalized) or fnmatch(name, normalized)
+
+
+def _scanned_from_bytes(posix: str, payload: bytes | None) -> ScannedFile | None:
+    if payload is None or b"\x00" in payload[:8192]:
+        return None
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if _looks_secret(posix, text):
+        return None
+    return ScannedFile(path=posix, text=text, language=detect_language(posix))
+
+
+def _safe_repo_file(root: Path, posix: str) -> Path | None:
+    if posix.startswith("/") or any(part == ".." for part in posix.split("/")):
+        return None
+    candidate = (root / posix).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    return candidate
 
 
 def _tracked_paths(root: Path, commit: str) -> tuple[str, ...]:

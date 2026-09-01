@@ -378,6 +378,7 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
                     | ("GET", Some("index/map"))
                     | ("POST", Some("index/rebuild"))
                     | ("POST", Some("index/refresh"))
+                    | ("POST", Some("index/watch"))
                     | ("POST", Some("pause" | "disable" | "remove" | "re-enrol" | "resume"))
             )
         }
@@ -886,6 +887,7 @@ mod tests {
         ));
         assert!(engine_path_allowed("POST", "/repositories/repo_alpha/index/rebuild"));
         assert!(engine_path_allowed("POST", "/repositories/repo_alpha/index/refresh"));
+        assert!(engine_path_allowed("POST", "/repositories/repo_alpha/index/watch"));
         assert!(engine_path_allowed("GET", "/repositories/repo_alpha/index/map"));
         assert!(!engine_path_allowed("DELETE", "/repositories/repo_alpha/index"));
         assert!(engine_path_allowed("GET", "/goals"));

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -48,6 +48,7 @@ from kronos_engine.api.models import (
     IndexSearchHit,
     IndexSearchResponse,
     IndexStatusResponse,
+    IndexWatchRequest,
     InspectResponse,
     LessonImportRequest,
     ModelsSnapshotResponse,
@@ -116,6 +117,7 @@ from kronos_engine.domain.tasks import SchemaError, WipExceeded
 from kronos_engine.domain.version import client_is_compatible
 from kronos_engine.domain.workflow import UnresolvedEvidence
 from kronos_engine.indexing.service import IndexingService, IndexStatus
+from kronos_engine.indexing.watcher import IndexWatcher
 from kronos_engine.memory.procedural import backfill_memory_vectors
 from kronos_engine.memory.promotion import PromotionBlocked, activate_promoted
 from kronos_engine.memory.records import MemoryRecord, MemoryRejected
@@ -189,6 +191,17 @@ def create_app(
             hook()
         stop_polling = threading.Event()
         worker: threading.Thread | None = None
+        watcher: IndexWatcher | None = None
+        try:
+            watcher = IndexWatcher(
+                list_repos=_list_watched_repos,
+                indexer_factory=_live_indexer,
+            )
+            watcher.start()
+        except Exception:
+            logging.getLogger("kronos.engine").exception("index watcher failed to start")
+            watcher = None
+        _app.state.index_watcher = watcher
         if telegram_auto_poll:
             poller = TelegramPoller(store, telegram_connector)
 
@@ -202,6 +215,8 @@ def create_app(
         stop_polling.set()
         if worker is not None:
             worker.join(timeout=2.0)
+        if watcher is not None:
+            watcher.stop()
 
     app = FastAPI(title="Kronos Engine", version=settings.engine_version, lifespan=lifespan)
 
@@ -273,8 +288,22 @@ def create_app(
             settings.paths.cache / "models",
         )
 
+    def _emit_index_event(kind: str, payload: Mapping[str, object]) -> None:
+        try:
+            conn = database.connect()
+            try:
+                Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn)).emit(kind, payload)
+            finally:
+                conn.close()
+        except Exception:
+            logging.getLogger("kronos.engine").exception("index event emit failed")
+
     def _indexing_service(conn: object) -> IndexingService:
-        return IndexingService(settings.paths, embeddings=_resolve_embedder(conn).adapter)
+        return IndexingService(
+            settings.paths,
+            embeddings=_resolve_embedder(conn).adapter,
+            emit_event=_emit_index_event,
+        )
 
     def _current_embedder() -> ResolvedEmbedder:
         conn = database.connect()
@@ -284,7 +313,21 @@ def create_app(
             conn.close()
 
     def _live_indexer() -> IndexingService:
-        return IndexingService(settings.paths, embeddings=_current_embedder().adapter)
+        return IndexingService(
+            settings.paths,
+            embeddings=_current_embedder().adapter,
+            emit_event=_emit_index_event,
+        )
+
+    def _list_watched_repos() -> tuple[EnrolledRepository, ...]:
+        conn = database.connect()
+        try:
+            return tuple(SqliteRepositoryRegistry(conn).list())
+        except Exception:
+            logging.getLogger("kronos.engine").exception("index watch list failed")
+            return ()
+        finally:
+            conn.close()
 
     def _warm_embeddings() -> None:
         try:
@@ -654,7 +697,7 @@ def create_app(
     def index_status(repository_id: str, _: None = Depends(require_auth)) -> IndexStatusResponse:
         with repository_service() as repos:
             record = _load(repos, repository_id)
-            status = _live_indexer().status(record.id.value)
+            status = _live_indexer().status(record.id.value, policy=record.policy)
             return _index_status(status)
 
     @app.post("/repositories/{repository_id}/index/rebuild", response_model=IndexStatusResponse)
@@ -676,6 +719,19 @@ def create_app(
             record = _load(repos, repository_id)
             status = _live_indexer().incremental(
                 record.id.value, Path(record.realpath), record.policy
+            )
+            return _index_status(status)
+
+    @app.post("/repositories/{repository_id}/index/watch", response_model=IndexStatusResponse)
+    def index_watch(
+        repository_id: str,
+        body: IndexWatchRequest,
+        _: None = Depends(require_auth),
+    ) -> IndexStatusResponse:
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+            status = _live_indexer().set_watch_enabled(
+                record.id.value, body.enabled, policy=record.policy
             )
             return _index_status(status)
 
@@ -1517,6 +1573,13 @@ def _index_status(status: IndexStatus) -> IndexStatusResponse:
         index_path=status.index_path,
         disk_bytes=status.disk_bytes,
         ready=status.ready,
+        state=status.state,
+        files_done=status.files_done,
+        files_total=status.files_total,
+        chunks_embedded=status.chunks_embedded,
+        chunks_skipped=status.chunks_skipped,
+        last_activity_at=status.last_activity_at,
+        watch_enabled=status.watch_enabled,
     )
 
 

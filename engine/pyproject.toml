@@ -12,6 +12,7 @@ dependencies = [
     "pydantic>=2.9",
     "uvicorn>=0.32",
     "keyring>=25",
+    "watchfiles>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -80,5 +81,6 @@ module = [
     "tokenizers",
     "onnxruntime",
     "numpy",
+    "watchfiles",
 ]
 ignore_missing_imports = true
