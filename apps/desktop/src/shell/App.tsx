@@ -86,7 +86,7 @@ export function App({
   const goals = goalsClient ?? productionGoals;
   const settings = settingsClient ?? productionSettings;
   const [engineState, setEngineState] = useState<EngineConnectionState>({
-    status: "unavailable",
+    status: "starting",
   });
   const [modelReady, setModelReady] = useState(false);
   const [modelKnown, setModelKnown] = useState(false);
@@ -104,11 +104,18 @@ export function App({
   useEffect(() => {
     let cancelled = false;
     const apply = () => {
-      void engine.getState().then((next) => {
-        if (!cancelled) {
-          setEngineState(next);
-        }
-      });
+      void engine.getState().then(
+        (next) => {
+          if (!cancelled) {
+            setEngineState(next);
+          }
+        },
+        () => {
+          if (!cancelled) {
+            setEngineState({ status: "unavailable" });
+          }
+        },
+      );
     };
     apply();
     const interval = window.setInterval(apply, 1500);
@@ -205,7 +212,7 @@ export function App({
         <a className="skip-link" href="#main">
           Skip to main content
         </a>
-        <EngineStatus client={engine} />
+        <EngineStatus state={engineState} />
         <main id="main" tabIndex={-1}>
           <EngineGate starting={engineState.status === "starting"} />
         </main>
@@ -219,7 +226,7 @@ export function App({
         <a className="skip-link" href="#main">
           Skip to main content
         </a>
-        <EngineStatus client={engine} />
+        <EngineStatus state={engineState} />
         <main id="main" tabIndex={-1}>
           <ConnectModelGate
             modelsClient={models}
@@ -235,7 +242,7 @@ export function App({
   if (!modelKnown) {
     return (
       <div className="app-shell app-shell--gate">
-        <EngineStatus client={engine} />
+        <EngineStatus state={engineState} />
         <main id="main">
           <CheckingModelGate />
         </main>
@@ -280,7 +287,7 @@ export function App({
                 setActivity("workspaces");
               }}
             />
-            <EngineStatus client={engine} />
+            <EngineStatus state={engineState} />
           </header>
           <div
             className="app-columns"

@@ -7,10 +7,15 @@ export type ChatMarkdownSpan =
 
 export type ChatMarkdownBlock =
   | { type: "paragraph"; spans: ChatMarkdownSpan[] }
+  | { type: "heading"; level: 1 | 2 | 3 | 4 | 5 | 6; spans: ChatMarkdownSpan[] }
+  | { type: "list"; ordered: boolean; items: ChatMarkdownSpan[][] }
   | { type: "code"; language: string; text: string };
 
 const FENCE = /```(\w*)\n([\s\S]*?)```/g;
 const INLINE = /(\*\*([^*]+)\*\*|`([^`]+)`)/g;
+const HEADING = /^(#{1,6}) (.+)$/;
+const UNORDERED = /^[-*] (.+)$/;
+const ORDERED = /^\d+\. (.+)$/;
 
 export function renderChatMarkdown(source: string): ChatMarkdownBlock[] {
   const blocks: ChatMarkdownBlock[] = [];
@@ -18,7 +23,7 @@ export function renderChatMarkdown(source: string): ChatMarkdownBlock[] {
   const fence = new RegExp(FENCE.source, "g");
   let match = fence.exec(source);
   while (match !== null) {
-    pushParagraphs(blocks, source.slice(last, match.index));
+    pushBlocks(blocks, source.slice(last, match.index));
     blocks.push({
       type: "code",
       language: match[1] ?? "",
@@ -27,22 +32,79 @@ export function renderChatMarkdown(source: string): ChatMarkdownBlock[] {
     last = match.index + match[0].length;
     match = fence.exec(source);
   }
-  pushParagraphs(blocks, source.slice(last));
+  pushBlocks(blocks, source.slice(last));
   if (blocks.length === 0) {
     return [{ type: "paragraph", spans: [{ type: "text", text: source }] }];
   }
   return blocks;
 }
 
-function pushParagraphs(blocks: ChatMarkdownBlock[], chunk: string): void {
+function pushBlocks(blocks: ChatMarkdownBlock[], chunk: string): void {
   const parts = chunk.split(/\n{2,}/);
   for (const part of parts) {
     const text = part.replace(/^\n+/, "").replace(/\n+$/, "");
     if (text === "") {
       continue;
     }
-    blocks.push({ type: "paragraph", spans: parseSpans(text) });
+    pushChunkLines(blocks, text.split("\n"));
   }
+}
+
+function pushChunkLines(blocks: ChatMarkdownBlock[], lines: string[]): void {
+  let index = 0;
+  while (index < lines.length) {
+    const heading = HEADING.exec(lines[index] ?? "");
+    if (heading) {
+      const marks = heading[1] ?? "#";
+      const level = Math.min(6, Math.max(1, marks.length)) as 1 | 2 | 3 | 4 | 5 | 6;
+      blocks.push({
+        type: "heading",
+        level,
+        spans: parseSpans(heading[2] ?? ""),
+      });
+      index += 1;
+      continue;
+    }
+    const list = listItem(lines[index] ?? "");
+    if (list) {
+      const items: ChatMarkdownSpan[][] = [];
+      const ordered = list.ordered;
+      while (index < lines.length) {
+        const item = listItem(lines[index] ?? "");
+        if (!item || item.ordered !== ordered) {
+          break;
+        }
+        items.push(parseSpans(item.text));
+        index += 1;
+      }
+      blocks.push({ type: "list", ordered, items });
+      continue;
+    }
+    const paragraph: string[] = [];
+    while (index < lines.length) {
+      const line = lines[index] ?? "";
+      if (HEADING.test(line) || listItem(line)) {
+        break;
+      }
+      paragraph.push(line);
+      index += 1;
+    }
+    if (paragraph.length > 0) {
+      blocks.push({ type: "paragraph", spans: parseSpans(paragraph.join("\n")) });
+    }
+  }
+}
+
+function listItem(line: string): { ordered: boolean; text: string } | null {
+  const unordered = UNORDERED.exec(line);
+  if (unordered) {
+    return { ordered: false, text: unordered[1] ?? "" };
+  }
+  const ordered = ORDERED.exec(line);
+  if (ordered) {
+    return { ordered: true, text: ordered[1] ?? "" };
+  }
+  return null;
 }
 
 function parseSpans(text: string): ChatMarkdownSpan[] {

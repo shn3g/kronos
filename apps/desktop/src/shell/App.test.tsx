@@ -208,7 +208,7 @@ describe("App shell", () => {
   it("shows engine unavailable by default without an injected client", async () => {
     render(<App />);
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Engine unavailable");
+    expect(await screen.findByText(/engine unavailable/i)).toBeInTheDocument();
     expect(screen.queryByText("Engine ready")).not.toBeInTheDocument();
     expect(screen.queryByText(/engineering OS/i)).not.toBeInTheDocument();
   });
@@ -225,6 +225,55 @@ describe("App shell", () => {
     expect(await screen.findByRole("heading", { name: /local engine is not running/i })).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: /ask kronos/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /^Home$/ })).not.toBeInTheDocument();
+  });
+
+  it("does not say the engine is not running before the first probe returns", async () => {
+    let release!: (state: EngineConnectionState) => void;
+    render(
+      <App
+        engineClient={{
+          getState: () =>
+            new Promise<EngineConnectionState>((resolve) => {
+              release = resolve;
+            }),
+        }}
+        modelsClient={emptyModels()}
+        chatClient={quietChat()}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: /starting kronos/i })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Engine starting");
+    expect(
+      screen.queryByRole("heading", { name: /local engine is not running/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Engine ready")).not.toBeInTheDocument();
+    release({ status: "unavailable" });
+    expect(
+      await screen.findByRole("heading", { name: /local engine is not running/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Engine unavailable");
+    expect(screen.queryByText("Engine ready")).not.toBeInTheDocument();
+  });
+
+  it("treats a rejecting engine client as unavailable", async () => {
+    render(
+      <App
+        engineClient={{
+          getState: async () => {
+            throw new Error("engine probe failed");
+          },
+        }}
+        modelsClient={emptyModels()}
+        chatClient={quietChat()}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: /local engine is not running/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Engine unavailable");
+    expect(screen.queryByText("Engine ready")).not.toBeInTheDocument();
   });
 
   it("blocks on connect a model before the chat chrome when no provider is assigned", async () => {

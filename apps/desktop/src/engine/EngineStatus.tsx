@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useEffect, useState } from "react";
-import type { EngineClient, EngineConnectionState } from "./client";
+import type { EngineConnectionState } from "./client";
 
 interface EngineStatusProps {
-  client: EngineClient;
+  state: EngineConnectionState;
 }
 
 function labelFor(state: EngineConnectionState): string {
@@ -20,35 +19,7 @@ function labelFor(state: EngineConnectionState): string {
   }
 }
 
-export function EngineStatus({ client }: EngineStatusProps) {
-  const [state, setState] = useState<EngineConnectionState>({
-    status: "unavailable",
-  });
-
-  useEffect(() => {
-    let cancelled = false;
-    const apply = () => {
-      void client
-        .getState()
-        .then((next) => {
-          if (!cancelled) {
-            setState(next);
-          }
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setState({ status: "unavailable" });
-          }
-        });
-    };
-    apply();
-    const interval = window.setInterval(apply, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [client]);
-
+export function EngineStatus({ state }: EngineStatusProps) {
   return (
     <div
       className="engine-status"

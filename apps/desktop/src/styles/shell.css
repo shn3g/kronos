@@ -41,6 +41,18 @@
   gap: 16px;
 }
 
+.app-shell--gate .engine-status,
+.app-shell--gate main {
+  width: 100%;
+  max-width: 28rem;
+  margin-inline: auto;
+}
+
+.app-shell--gate .engine-status {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .app-body {
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr);
@@ -370,6 +382,58 @@
   margin-top: 8px;
 }
 
+.gate__found,
+.gate__note {
+  margin-top: 20px;
+  padding: 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--void-raised);
+}
+
+.gate__found p,
+.gate__note p {
+  margin: 0;
+  color: var(--body);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.gate__found .btn-primary {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.gate__note p + p {
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.gate__form-title {
+  margin: 16px 0 8px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.gate__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+
+.gate__presets .btn-quiet {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.gate__presets .btn-quiet[aria-pressed="true"] {
+  color: var(--ink);
+  border-color: var(--hairline-strong);
+  background: rgb(255 255 255 / 0.06);
+}
+
 .chat-layout {
   display: flex;
   min-height: 0;
@@ -474,8 +538,33 @@
 
 .chat-md p + p,
 .chat-md p + .chat-md__pre,
-.chat-md__pre + p {
+.chat-md__pre + p,
+.chat-md__h + p,
+.chat-md p + .chat-md__h,
+.chat-md__list + p,
+.chat-md p + .chat-md__list,
+.chat-md__h + .chat-md__list,
+.chat-md__pre + .chat-md__list {
   margin-top: 8px;
+}
+
+.chat-md__h {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.35;
+}
+
+.chat-md__list {
+  margin: 8px 0 0;
+  padding-left: 1.15rem;
+  color: var(--body);
+}
+
+.chat-md__list li + li {
+  margin-top: 4px;
 }
 
 .chat-md__pre {
@@ -510,7 +599,9 @@
 }
 
 .chat-bubble--streaming p::after,
-.chat-bubble--streaming .chat-md p:last-child::after {
+.chat-bubble--streaming .chat-md > :last-child:not(ul):not(ol)::after,
+.chat-bubble--streaming .chat-md > ul:last-child li:last-child::after,
+.chat-bubble--streaming .chat-md > ol:last-child li:last-child::after {
   content: "▍";
   margin-left: 2px;
   color: var(--muted);

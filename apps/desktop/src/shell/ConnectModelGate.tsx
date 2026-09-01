@@ -1,7 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useState } from "react";
-import type { ModelsClient } from "../features/models/client";
+import { useEffect, useState } from "react";
+import type { DetectedTool, ModelsClient, ProviderDraft } from "../features/models/client";
+import {
+  assignmentsFromCreatedProfiles,
+  billedFromBaseUrl,
+  cursorCliDetected,
+  displayNameFromEndpointLabel,
+  hostedApiNeedsKey,
+  localOpenAiProviderDraft,
+  MODEL_URL_PRESETS,
+  pickLocalOpenAiEndpoint,
+} from "./connectModel";
 
 interface ConnectModelGateProps {
   modelsClient: ModelsClient;
@@ -14,33 +24,48 @@ export function ConnectModelGate({ modelsClient, onConnected }: ConnectModelGate
   const [apiKey, setApiKey] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [detected, setDetected] = useState<DetectedTool[] | null>(null);
 
-  async function onSubmit() {
+  useEffect(() => {
+    let cancelled = false;
+    void modelsClient.snapshot().then(
+      (snapshot) => {
+        if (cancelled) {
+          return;
+        }
+        setDetected(snapshot.detected);
+        const local = pickLocalOpenAiEndpoint(snapshot.detected);
+        if (local) {
+          setBaseUrl(local.label);
+          setDisplayName(displayNameFromEndpointLabel(local.label));
+        }
+      },
+      () => {
+        if (!cancelled) {
+          setDetected([]);
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [modelsClient]);
+
+  const localEndpoint = pickLocalOpenAiEndpoint(detected ?? []);
+  const showCursorCliNote =
+    detected !== null && cursorCliDetected(detected) && localEndpoint === null;
+
+  async function registerProvider(draft: ProviderDraft): Promise<void> {
     setError(null);
     setBusy(true);
     try {
-      const created = await modelsClient.createProvider({
-        kind: "openai_compatible",
-        displayName: displayName.trim() || "Local model",
-        baseUrl: baseUrl.trim() || null,
-        billed: false,
-        apiKey: apiKey.trim() ? apiKey.trim() : null,
-      });
-      const byRole = Object.fromEntries(
-        created.profiles.map((profile) => [profile.role, profile.id]),
-      );
-      const planner = byRole.planner ?? created.profiles[0]?.id;
-      const coder = byRole.coder ?? planner;
-      const reviewer = byRole.reviewer ?? planner;
-      const embedding = byRole.embedding ?? planner;
-      if (!planner || !coder || !reviewer || !embedding) {
+      const created = await modelsClient.createProvider(draft);
+      const assignments = assignmentsFromCreatedProfiles(created.profiles);
+      if (!assignments) {
         setError("The provider did not create model roles. Try again.");
         return;
       }
-      await modelsClient.assign(
-        { planner, coder, reviewer, embedding },
-        { confirmSharedRoles: true },
-      );
+      await modelsClient.assign(assignments, { confirmSharedRoles: true });
       onConnected();
     } catch {
       setError("Could not save the model. Check the URL and key, then try again.");
@@ -56,13 +81,69 @@ export function ConnectModelGate({ modelsClient, onConnected }: ConnectModelGate
         Kronos needs one model before it can chat. The key is stored by the operating system, not
         in this window.
       </p>
+      {detected === null ? (
+        <p className="gate__hint">Looking for a local model server.</p>
+      ) : null}
+      {localEndpoint ? (
+        <div className="gate__found">
+          <p>Found a local model server on this machine.</p>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={busy}
+            onClick={() => {
+              void registerProvider(localOpenAiProviderDraft(localEndpoint));
+            }}
+          >
+            Use {localEndpoint.label}
+          </button>
+        </div>
+      ) : null}
+      {showCursorCliNote ? (
+        <div className="gate__note">
+          <p>Cursor CLI is on this machine. It can run unattended goals later.</p>
+          <p>
+            Chat still needs a model API such as Ollama, LM Studio, or a hosted OpenAI-compatible
+            key.
+          </p>
+        </div>
+      ) : null}
       <form
         className="gate__form"
         onSubmit={(event) => {
           event.preventDefault();
-          void onSubmit();
+          if (hostedApiNeedsKey(baseUrl, apiKey)) {
+            setError("A hosted API needs a key.");
+            return;
+          }
+          void registerProvider({
+            kind: "openai_compatible",
+            displayName: displayName.trim() || "Local model",
+            baseUrl: baseUrl.trim() || null,
+            billed: false,
+            apiKey: apiKey.trim() ? apiKey.trim() : null,
+          });
         }}
       >
+        <p className="gate__form-title">{localEndpoint ? "Or enter a different URL" : "Model API"}</p>
+        <div className="gate__presets" role="group" aria-label="Common model APIs">
+          {MODEL_URL_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              className="btn-quiet"
+              aria-pressed={baseUrl === preset.url}
+              disabled={busy}
+              onClick={() => {
+                setDisplayName(preset.label);
+                setBaseUrl(preset.url);
+                setError(null);
+              }}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
         <label className="wizard__label" htmlFor="model-name">
           Name
           <input
@@ -86,7 +167,7 @@ export function ConnectModelGate({ modelsClient, onConnected }: ConnectModelGate
           />
         </label>
         <label className="wizard__label" htmlFor="model-key">
-          API key (optional for local servers)
+          API key{billedFromBaseUrl(baseUrl) ? "" : " (optional for local servers)"}
           <input
             id="model-key"
             className="wizard__input"
@@ -102,7 +183,11 @@ export function ConnectModelGate({ modelsClient, onConnected }: ConnectModelGate
         <button type="submit" className="btn-primary" disabled={busy}>
           Continue
         </button>
-        <p className="gate__hint">Cursor CLI is optional. You can add it later in Settings.</p>
+        {showCursorCliNote ? null : (
+          <p className="gate__hint">
+            Typical local URLs are Ollama on port 11434 and LM Studio on port 1234.
+          </p>
+        )}
       </form>
     </section>
   );
