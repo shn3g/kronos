@@ -35,6 +35,7 @@ export function ChatPage({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mentionPaths, setMentionPaths] = useState<string[]>([]);
+  const [mentionHighlight, setMentionHighlight] = useState(0);
   const inflightSessionId = useRef<string | null>(null);
   const threadRef = useRef<HTMLOListElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -106,12 +107,14 @@ export function ChatPage({
   useEffect(() => {
     if (!indexClient || !repositoryId) {
       setMentionPaths([]);
+      setMentionHighlight(0);
       return;
     }
     const cursor = composerRef.current?.selectionStart ?? draft.length;
     const mention = mentionQueryAtCursor(draft, cursor);
     if (!mention || mention.query === "") {
       setMentionPaths([]);
+      setMentionHighlight(0);
       return;
     }
     let cancelled = false;
@@ -119,11 +122,13 @@ export function ChatPage({
       (hits) => {
         if (!cancelled) {
           setMentionPaths(uniqueMentionPaths(hits).slice(0, 8));
+          setMentionHighlight(0);
         }
       },
       () => {
         if (!cancelled) {
           setMentionPaths([]);
+          setMentionHighlight(0);
         }
       },
     );
@@ -150,6 +155,7 @@ export function ChatPage({
     setDraft("");
     setError(null);
     setMentionPaths([]);
+    setMentionHighlight(0);
   }
 
   async function onSend() {
@@ -168,6 +174,7 @@ export function ChatPage({
     setError(null);
     setDraft("");
     setMentionPaths([]);
+    setMentionHighlight(0);
     setMessages((current) => [...current, pending]);
     if (activeId) {
       inflightSessionId.current = activeId;
@@ -198,6 +205,7 @@ export function ChatPage({
     const next = insertMention(draft, mention.start, mention.query, path);
     setDraft(next);
     setMentionPaths([]);
+    setMentionHighlight(0);
     requestAnimationFrame(() => {
       const node = composerRef.current;
       if (!node) {
@@ -298,12 +306,14 @@ export function ChatPage({
         <div className="chat-composer-wrap">
           {mentionPaths.length > 0 ? (
             <ul className="chat-mentions" id="chat-mentions" role="listbox" aria-label="Workspace files">
-              {mentionPaths.map((path) => (
+              {mentionPaths.map((path, index) => (
                 <li key={path} role="presentation">
                   <button
                     type="button"
+                    id={`chat-mention-${index}`}
                     className="chat-mentions__item"
                     role="option"
+                    aria-selected={index === mentionHighlight}
                     title={path}
                     onMouseDown={(event) => {
                       event.preventDefault();
@@ -327,6 +337,9 @@ export function ChatPage({
               aria-autocomplete="list"
               aria-expanded={mentionPaths.length > 0}
               aria-controls={mentionPaths.length > 0 ? "chat-mentions" : undefined}
+              aria-activedescendant={
+                mentionPaths.length > 0 ? `chat-mention-${mentionHighlight}` : undefined
+              }
               rows={2}
               onChange={(event) => {
                 setDraft(event.target.value);
@@ -338,13 +351,24 @@ export function ChatPage({
                 if (event.key === "Escape" && mentionPaths.length > 0) {
                   event.preventDefault();
                   setMentionPaths([]);
+                  setMentionHighlight(0);
+                  return;
+                }
+                if (event.key === "ArrowDown" && mentionPaths.length > 0) {
+                  event.preventDefault();
+                  setMentionHighlight((current) => Math.min(mentionPaths.length - 1, current + 1));
+                  return;
+                }
+                if (event.key === "ArrowUp" && mentionPaths.length > 0) {
+                  event.preventDefault();
+                  setMentionHighlight((current) => Math.max(0, current - 1));
                   return;
                 }
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
-                  const firstPath = mentionPaths[0];
-                  if (firstPath) {
-                    applyMention(firstPath);
+                  const chosen = mentionPaths[mentionHighlight] ?? mentionPaths[0];
+                  if (chosen) {
+                    applyMention(chosen);
                     return;
                   }
                   void onSend();

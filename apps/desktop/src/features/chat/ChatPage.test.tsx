@@ -396,4 +396,45 @@ describe("ChatPage", () => {
     expect(box).toHaveValue("Fix @src/App.tsx ");
     expect(sendMessage).not.toHaveBeenCalled();
   });
+
+  it("moves the mention highlight with arrow keys before inserting", async () => {
+    const user = userEvent.setup();
+    const search = vi.fn(async () => [
+      {
+        path: "src/App.tsx",
+        startLine: 1,
+        endLine: 20,
+        commit: "abc",
+        symbol: null,
+        rankSources: ["fts"],
+        trust: "ok",
+        text: "export function App",
+      },
+      {
+        path: "src/main.tsx",
+        startLine: 1,
+        endLine: 10,
+        commit: "abc",
+        symbol: null,
+        rankSources: ["fts"],
+        trust: "ok",
+        text: "import App",
+      },
+    ]);
+    render(
+      <ChatPage
+        chatClient={chatClient()}
+        repositoryId="repo_alpha"
+        historyOpen={false}
+        indexClient={indexClient(search)}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "Fix @ap");
+    await screen.findByRole("option", { name: "src/main.tsx" });
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(box).toHaveValue("Fix @src/main.tsx ");
+  });
 });

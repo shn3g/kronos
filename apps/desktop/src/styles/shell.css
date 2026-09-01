@@ -681,7 +681,8 @@
 }
 
 .chat-mentions__item:hover,
-.chat-mentions__item:focus-visible {
+.chat-mentions__item:focus-visible,
+.chat-mentions__item[aria-selected="true"] {
   background: rgb(255 255 255 / 0.06);
 }
 
