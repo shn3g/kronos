@@ -197,6 +197,75 @@ def test_write_file_records_a_workspace_diff(tmp_path: Path) -> None:
     assert "+new" in patch
 
 
+def test_revert_write_restores_previous_file_contents(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "hello.py").write_text("old\n", encoding="utf-8")
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    events = _WriteEvents()
+    service = ChatService(
+        SqliteChatStore(conn),
+        ScriptedCompleter(
+            [
+                '```tool\n{"name": "write_file", "path": "hello.py", "content": "new\\n"}\n```',
+                "Updated hello.py.",
+            ]
+        ),
+        repos=_RepoLookup(repo),
+        events=events,
+    )
+    session = service.create_session()
+    service.send_message(session.id, "Patch hello.py", repository_id="repo_alpha")
+    assert (repo / "hello.py").read_text(encoding="utf-8") == "new\n"
+    service.revert_write("repo_alpha", "hello.py")
+    assert (repo / "hello.py").read_text(encoding="utf-8") == "old\n"
+    assert events.items[-1][0] == "git.reverted"
+    assert events.items[-1][1]["path"] == "hello.py"
+
+
+def test_revert_write_deletes_a_file_created_by_chat(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    service = ChatService(
+        SqliteChatStore(conn),
+        ScriptedCompleter(
+            [
+                '```tool\n{"name": "write_file", "path": "fresh.py", "content": "hi\\n"}\n```',
+                "Created fresh.py.",
+            ]
+        ),
+        repos=_RepoLookup(repo),
+        events=_WriteEvents(),
+    )
+    session = service.create_session()
+    service.send_message(session.id, "Add fresh.py", repository_id="repo_alpha")
+    assert (repo / "fresh.py").is_file()
+    service.revert_write("repo_alpha", "fresh.py")
+    assert not (repo / "fresh.py").exists()
+
+
+def test_revert_write_rejects_unknown_paths(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    service = ChatService(
+        SqliteChatStore(conn),
+        ScriptedCompleter(["ok"]),
+        repos=_RepoLookup(repo),
+        events=_WriteEvents(),
+    )
+    try:
+        service.revert_write("repo_alpha", "missing.py")
+    except ValueError as error:
+        assert "revert" in str(error).lower() or "write" in str(error).lower()
+    else:
+        raise AssertionError("expected revert of an unknown path to fail")
+
+
 def test_active_memories_are_injected_into_the_system_prompt(tmp_path: Path) -> None:
     database = Database(tmp_path / "kronos.sqlite3")
     conn = database.connect()

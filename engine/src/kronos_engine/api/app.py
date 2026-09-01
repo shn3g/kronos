@@ -744,6 +744,26 @@ def create_app(
         request_cancel(session_id)
         return {"ok": True, "session_id": session_id}
 
+    @app.post("/repositories/{repository_id}/writes/revert")
+    def revert_chat_write(
+        repository_id: str,
+        body: PathRequest,
+        _: None = Depends(require_auth),
+    ) -> dict[str, object]:
+        rel = body.path.strip()
+        if rel == "":
+            raise HTTPException(status_code=400, detail="path is required")
+        with repository_service() as repos:
+            _load(repos, repository_id)
+        with chat_service() as service:
+            try:
+                service.revert_write(repository_id, rel)
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            except ValueError as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+        return {"ok": True, "path": rel}
+
     @app.get("/repositories/{repository_id}/index", response_model=IndexStatusResponse)
     def index_status(repository_id: str, _: None = Depends(require_auth)) -> IndexStatusResponse:
         with repository_service() as repos:

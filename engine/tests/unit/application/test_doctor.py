@@ -170,6 +170,13 @@ def test_dashboard_surfaces_daily_dispatches_not_hardcoded_attempts(
     assert snap.diffs[0]["repository_id"] == "repo_alpha"
     assert "-old" in str(snap.diffs[0]["patch"])
 
+    doctor._recorder.emit(
+        "git.reverted",
+        {"path": "pkg/alpha.py", "repository_id": "repo_alpha", "summary": "Reverted pkg/alpha.py"},
+    )
+    after_revert = doctor.dashboard(client_version="0.1.0")
+    assert not any(item["path"] == "pkg/alpha.py" for item in after_revert.diffs)
+
 
 def test_dead_letter_inspection_and_stuck_lease_recovery(tmp_path: Path) -> None:
     secrets = InMemorySecretStore()

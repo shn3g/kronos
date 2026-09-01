@@ -409,6 +409,7 @@ class ChatService:
         if not _is_inside(root, target.parent.resolve()):
             return "That path is outside the workspace or is not a file."
         before = target.read_text(encoding="utf-8", errors="replace") if target.is_file() else ""
+        self._store.save_file_backup(repository_id, as_posix, before, self._now())
         target.write_text(content, encoding="utf-8")
         self._refresh_written_path(repository_id, root, record, as_posix)
         self._note_write(
@@ -445,6 +446,51 @@ class ChatService:
                     "path": path,
                     "summary": f"Wrote {path}",
                     "patch": patch,
+                },
+            )
+        except Exception:
+            return
+
+    def revert_write(self, repository_id: str, rel_path: str) -> None:
+        if self._repos is None:
+            raise ValueError("Workspace is not available.")
+        relative = Path(rel_path)
+        if rel_path.strip() == "" or relative.is_absolute() or any(
+            part in {"..", ".git"} for part in relative.parts
+        ):
+            raise ValueError("That path is outside the workspace or is not a file.")
+        as_posix = relative.as_posix()
+        before = self._store.get_file_backup(repository_id, as_posix)
+        if before is None:
+            raise ValueError("No chat write to revert for that file.")
+        try:
+            record = self._repos.get(RepositoryId(repository_id))
+        except (RepositoryNotFound, LookupError, ValueError) as error:
+            raise LookupError("Workspace was not found.") from error
+        root = Path(record.realpath).resolve()
+        target = (root / relative).resolve()
+        if not _is_inside(root, target):
+            raise ValueError("That path is outside the workspace or is not a file.")
+        if before == "":
+            if target.is_file():
+                target.unlink()
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(before, encoding="utf-8")
+        self._store.delete_file_backup(repository_id, as_posix)
+        self._refresh_written_path(repository_id, root, record, as_posix)
+        self._note_revert(repository_id, as_posix)
+
+    def _note_revert(self, repository_id: str, path: str) -> None:
+        if self._events is None:
+            return
+        try:
+            self._events.emit(
+                "git.reverted",
+                {
+                    "repository_id": repository_id,
+                    "path": path,
+                    "summary": f"Reverted {path}",
                 },
             )
         except Exception:

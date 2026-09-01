@@ -15,6 +15,7 @@ from typing import Any
 from kronos_engine.adapters.git.detection import ManifestStackDetector
 from kronos_engine.adapters.git.repository import FilesystemGitInspector
 from kronos_engine.adapters.git.worktrees import CacheRuntimeLayout
+from kronos_engine.application.chat_revert import fold_workspace_diffs
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import RepositoryService
 from kronos_engine.config.settings import Settings
@@ -565,19 +566,11 @@ class DoctorService:
 
     def _diffs_from_events(self) -> list[dict[str, object]]:
         events = SqliteEventStore(self._conn).list_after(0)
-        diffs: list[dict[str, object]] = []
+        pairs: list[tuple[str, dict[str, object]]] = []
         for item in events:
-            if item.type in {"git.wrote", "external.wrote"}:
-                payload = dict(item.payload)
-                repo_id = str(payload.get("repository_id") or "")
-                if not repo_id and payload.get("task_id"):
-                    repo_id = self._repository_id_for_task(payload.get("task_id"))
-                diffs.append(
-                    {
-                        "path": str(payload.get("path") or payload.get("url") or item.type),
-                        "summary": str(payload.get("summary") or item.type),
-                        "repository_id": repo_id,
-                        "patch": str(payload.get("patch") or ""),
-                    }
-                )
-        return diffs
+            payload = dict(item.payload)
+            repo_id = str(payload.get("repository_id") or "")
+            if not repo_id and payload.get("task_id"):
+                payload["repository_id"] = self._repository_id_for_task(payload.get("task_id"))
+            pairs.append((item.type, payload))
+        return fold_workspace_diffs(pairs)

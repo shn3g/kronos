@@ -341,6 +341,18 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         CREATE INDEX chat_messages_session_seq ON chat_messages(session_id, seq);
         """,
     ),
+    (
+        11,
+        """
+        CREATE TABLE chat_file_backups (
+            repository_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            before TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (repository_id, path)
+        );
+        """,
+    ),
 )
 
 

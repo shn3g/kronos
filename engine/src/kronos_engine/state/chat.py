@@ -113,6 +113,35 @@ class SqliteChatStore:
         current = int(row[0]) if row is not None else 0
         return current + 1
 
+    def save_file_backup(self, repository_id: str, path: str, before: str, created_at: str) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO chat_file_backups(repository_id, path, before, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(repository_id, path) DO UPDATE SET
+                before = excluded.before,
+                created_at = excluded.created_at
+            """,
+            (repository_id, path, before, created_at),
+        )
+        self._conn.commit()
+
+    def get_file_backup(self, repository_id: str, path: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT before FROM chat_file_backups WHERE repository_id = ? AND path = ?",
+            (repository_id, path),
+        ).fetchone()
+        if row is None:
+            return None
+        return str(row["before"])
+
+    def delete_file_backup(self, repository_id: str, path: str) -> None:
+        self._conn.execute(
+            "DELETE FROM chat_file_backups WHERE repository_id = ? AND path = ?",
+            (repository_id, path),
+        )
+        self._conn.commit()
+
 
 def _session_from_row(row: sqlite3.Row) -> ChatSessionRow:
     return ChatSessionRow(

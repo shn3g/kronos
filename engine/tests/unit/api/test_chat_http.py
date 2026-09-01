@@ -98,3 +98,76 @@ async def test_chat_endpoints_fail_closed_and_round_trip(
     cancelled = await http.post(f"/chat/sessions/{session_id}/cancel", headers=headers)
     assert cancelled.status_code == 200
     assert cancelled.json()["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_revert_write_restores_file_and_fails_closed(
+    tmp_path: Path,
+) -> None:
+    from tests.support.git_fixtures import init_git_repo
+    from tests.support.secrets import InMemorySecretStore
+
+    repo = init_git_repo(tmp_path / "alpha", files={"hello.py": "old\n"})
+    database = Database(tmp_path / "data" / "kronos.sqlite3")
+    app = create_app(
+        _settings(tmp_path),
+        database,
+        secret_store=InMemorySecretStore(),
+        chat_completer=ScriptedCompleter(
+            [
+                '```tool\n{"name": "write_file", "path": "hello.py", "content": "new\\n"}\n```',
+                "Updated hello.py.",
+            ]
+        ),
+    )
+    http = AsyncClient(
+        transport=ASGITransport(app=app, client=("127.0.0.1", 50000)),
+        base_url="http://127.0.0.1",
+    )
+    headers = {"Authorization": "Bearer install-token"}
+    try:
+        enrolled = await http.post("/repositories", headers=headers, json={"path": str(repo)})
+        assert enrolled.status_code == 200
+        repo_id = enrolled.json()["repository"]["id"]
+        created = await http.post(
+            "/chat/sessions", headers=headers, json={"repository_id": repo_id}
+        )
+        session_id = created.json()["session"]["id"]
+        sent = await http.post(
+            f"/chat/sessions/{session_id}/messages",
+            headers=headers,
+            json={"content": "Patch hello.py", "repository_id": repo_id},
+        )
+        assert sent.status_code == 200
+        assert (repo / "hello.py").read_text(encoding="utf-8") == "new\n"
+        before_dash = await http.get("/ops/dashboard", headers=headers)
+        assert any(item.get("path") == "hello.py" for item in before_dash.json()["diffs"])
+
+        unauth = await http.post(f"/repositories/{repo_id}/writes/revert", json={"path": "hello.py"})
+        assert unauth.status_code == 401
+
+        missing = await http.post(
+            "/repositories/repo_missing/writes/revert",
+            headers=headers,
+            json={"path": "hello.py"},
+        )
+        assert missing.status_code == 404
+
+        unknown = await http.post(
+            f"/repositories/{repo_id}/writes/revert",
+            headers=headers,
+            json={"path": "nope.py"},
+        )
+        assert unknown.status_code == 409
+
+        reverted = await http.post(
+            f"/repositories/{repo_id}/writes/revert",
+            headers=headers,
+            json={"path": "hello.py"},
+        )
+        assert reverted.status_code == 200
+        assert (repo / "hello.py").read_text(encoding="utf-8") == "old\n"
+        after_dash = await http.get("/ops/dashboard", headers=headers)
+        assert not any(item.get("path") == "hello.py" for item in after_dash.json()["diffs"])
+    finally:
+        await http.aclose()
