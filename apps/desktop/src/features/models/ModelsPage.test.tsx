@@ -5,13 +5,37 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineClient } from "../../engine/client";
 import { ModelsPage, type ModelsClient } from "./ModelsPage";
-import type { ModelRole } from "./client";
+import type { ModelProfileOption, ModelRole, ProfileUpdate, ResourceLimits } from "./client";
+
+const DEFAULT_LIMITS: ResourceLimits = {
+  maxTokens: 4096,
+  maxAttempts: 3,
+  timeoutSeconds: 120,
+  costCeiling: 0,
+};
 
 function engine(status: "unavailable" | "starting" | "ready"): EngineClient {
   if (status === "ready") {
     return { getState: async () => ({ status: "ready", version: "0.1.0" }) };
   }
   return { getState: async () => ({ status }) };
+}
+
+function profile(
+  id: string,
+  displayName: string,
+  role: string,
+  extras: Partial<ModelProfileOption> = {},
+): ModelProfileOption {
+  return {
+    id,
+    displayName,
+    role,
+    billed: false,
+    modelId: "local-model",
+    limits: DEFAULT_LIMITS,
+    ...extras,
+  };
 }
 
 function modelsClient(overrides: Partial<ModelsClient> = {}): ModelsClient {
@@ -26,8 +50,8 @@ function modelsClient(overrides: Partial<ModelsClient> = {}): ModelsClient {
         },
       ],
       profiles: [
-        { id: "prof_local", displayName: "Local llama3", role: "coder", billed: false },
-        { id: "prof_embed", displayName: "Local embed", role: "embedding", billed: false },
+        profile("prof_local", "Local llama3", "coder"),
+        profile("prof_embed", "Local embed", "embedding"),
       ],
       assignments: {
         orchestrator: "prof_local",
@@ -117,16 +141,11 @@ describe("ModelsPage", () => {
   it("registers a detected local endpoint on an empty ready engine then assigns", async () => {
     const user = userEvent.setup();
     const profiles = [
-      {
-        id: "prof_orchestrator",
-        displayName: "Local (orchestrator)",
-        role: "orchestrator",
-        billed: false,
-      },
-      { id: "prof_planner", displayName: "Local (planner)", role: "planner", billed: false },
-      { id: "prof_coder", displayName: "Local (coder)", role: "coder", billed: false },
-      { id: "prof_reviewer", displayName: "Local (reviewer)", role: "reviewer", billed: false },
-      { id: "prof_embedding", displayName: "Local (embedding)", role: "embedding", billed: false },
+      profile("prof_orchestrator", "Local (orchestrator)", "orchestrator"),
+      profile("prof_planner", "Local (planner)", "planner"),
+      profile("prof_coder", "Local (coder)", "coder"),
+      profile("prof_reviewer", "Local (reviewer)", "reviewer"),
+      profile("prof_embedding", "Local (embedding)", "embedding"),
     ];
     let registered = false;
     const createProvider = vi.fn(async () => {
@@ -206,8 +225,8 @@ describe("ModelsPage", () => {
     const snapshot = vi.fn(async () => ({
       detected: [],
       profiles: [
-        { id: "prof_local", displayName: "Local llama3", role: "coder", billed: false },
-        { id: "prof_embed", displayName: "Remote embed", role: "embedding", billed: false },
+        profile("prof_local", "Local llama3", "coder"),
+        profile("prof_embed", "Remote embed", "embedding"),
       ],
       assignments: {
         orchestrator: "prof_local",
@@ -307,14 +326,14 @@ describe("ModelsPage", () => {
 
   it("shows editable cost ceiling and max tokens for a profile", async () => {
     const user = userEvent.setup();
-    const updateProfile = vi.fn(async (id: string, patch: { modelId: string; limits: object }) => ({
-      id,
-      displayName: "Local llama3",
-      role: "coder",
-      billed: false,
-      modelId: patch.modelId,
-      limits: patch.limits,
-    }));
+    const updateProfile = vi.fn(async (id: string, patch: ProfileUpdate) =>
+      profile("prof_local", "Local llama3", "coder", {
+        id,
+        billed: true,
+        modelId: patch.modelId,
+        limits: patch.limits,
+      }),
+    );
     render(
       <ModelsPage
         engineClient={engine("ready")}

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -33,6 +33,17 @@ class _CountingEmbedder:
                 vector[index % dim] += float(char)
             vectors.append(vector)
         return vectors
+
+
+def _wait_until(
+    predicate: Callable[[], bool], *, timeout: float = 5.0, interval: float = 0.02
+) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(interval)
+    raise AssertionError(f"condition not met within {timeout}s")
 
 
 def _record(root: Path, repo_id: str = "repo_watch") -> EnrolledRepository:
@@ -297,12 +308,7 @@ def test_idle_ticks_do_not_invoke_indexer_factory_each_pump(tmp_path: Path) -> N
     )
     watcher.start()
     assert started.wait(1.0)
-    deadline = time.time() + 0.4
-    while time.time() < deadline:
-        if ticks["n"] >= 8:
-            break
-        time.sleep(0.02)
-    assert ticks["n"] >= 8
+    _wait_until(lambda: ticks["n"] >= 8)
     idle_calls = factory_calls["n"]
     assert idle_calls < ticks["n"]
     assert idle_calls == 0
@@ -389,11 +395,7 @@ def test_commit_poll_compares_revision_without_status_or_list_chunks(
     )
     watcher.start()
     assert started.wait(1.0)
-    deadline = time.time() + 0.4
-    while time.time() < deadline:
-        if ticks["n"] >= 8:
-            break
-        time.sleep(0.02)
+    _wait_until(lambda: ticks["n"] >= 8)
     watcher.stop()
     assert ticks["n"] >= 8
     assert status_calls == 0

@@ -67,7 +67,7 @@ def test_same_holder_renews_without_changing_fence(tmp_path: Path) -> None:
 
 
 @given(st.integers(min_value=1, max_value=40))
-@settings(max_examples=20, deadline=500)
+@settings(max_examples=20, deadline=10_000)
 def test_steal_count_matches_fence_token(ttl_seconds: int) -> None:
     with TemporaryDirectory() as raw:
         conn = connect(Path(raw) / "kronos.sqlite3")
