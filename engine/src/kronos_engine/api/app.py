@@ -31,6 +31,7 @@ from kronos_engine.api.models import (
     ChatSessionDetailResponse,
     ChatSessionListResponse,
     ChatSessionModel,
+    CommitRequest,
     DetectedToolModel,
     EventItem,
     EventListResponse,
@@ -106,6 +107,10 @@ from kronos_engine.application.repositories import (
     RepositoryService,
 )
 from kronos_engine.application.verification import GateRunner
+from kronos_engine.application.workspace_changes import (
+    commit_working_tree,
+    list_working_tree_changes,
+)
 from kronos_engine.config.repository import (
     EnrolmentPreview,
     github_owner,
@@ -763,6 +768,35 @@ def create_app(
             except ValueError as error:
                 raise HTTPException(status_code=409, detail=str(error)) from error
         return {"ok": True, "path": rel}
+
+    @app.get("/repositories/{repository_id}/changes")
+    def list_working_changes(
+        repository_id: str,
+        _: None = Depends(require_auth),
+    ) -> dict[str, object]:
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+        return {"changes": list_working_tree_changes(Path(record.realpath))}
+
+    @app.post("/repositories/{repository_id}/commits")
+    def commit_working_changes(
+        repository_id: str,
+        body: CommitRequest,
+        _: None = Depends(require_auth),
+    ) -> dict[str, object]:
+        message = body.message.strip()
+        if message == "":
+            raise HTTPException(status_code=400, detail="A commit message is required.")
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+        try:
+            result = commit_working_tree(Path(record.realpath), message, body.paths)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        committed = [str(item) for item in result["paths"]]
+        with chat_service() as service:
+            service.forget_file_backups(repository_id, committed)
+        return result
 
     @app.get("/repositories/{repository_id}/index", response_model=IndexStatusResponse)
     def index_status(repository_id: str, _: None = Depends(require_auth)) -> IndexStatusResponse:

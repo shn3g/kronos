@@ -4,6 +4,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
+from tests.support.git_fixtures import init_git_repo
+
 from kronos_engine.application.chat import (
     ChatService,
     ChatTurn,
@@ -264,6 +266,23 @@ def test_revert_write_rejects_unknown_paths(tmp_path: Path) -> None:
         assert "revert" in str(error).lower() or "write" in str(error).lower()
     else:
         raise AssertionError("expected revert of an unknown path to fail")
+
+
+def test_revert_write_restores_head_when_there_is_no_chat_backup(tmp_path: Path) -> None:
+    repo = init_git_repo(tmp_path / "alpha", files={"hello.py": "old\n"})
+    (repo / "hello.py").write_text("local\n", encoding="utf-8")
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    service = ChatService(
+        SqliteChatStore(conn),
+        ScriptedCompleter(["ok"]),
+        repos=_RepoLookup(repo),
+        events=_WriteEvents(),
+    )
+
+    service.revert_write("repo_alpha", "hello.py")
+
+    assert (repo / "hello.py").read_text(encoding="utf-8") == "old\n"
 
 
 def test_active_memories_are_injected_into_the_system_prompt(tmp_path: Path) -> None:

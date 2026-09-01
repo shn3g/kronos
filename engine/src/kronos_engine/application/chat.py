@@ -17,6 +17,7 @@ from kronos_engine.application.chat_mentions import mentioned_workspace_paths
 from kronos_engine.application.chat_tools import ToolCall, ToolParseError, parse_tool_call
 from kronos_engine.application.goals import GoalService
 from kronos_engine.application.repositories import RepositoryNotFound, RepositoryService
+from kronos_engine.application.workspace_changes import restore_working_path
 from kronos_engine.domain.entities import RepositoryId
 from kronos_engine.domain.goals import GoalSource, GoalSpec
 from kronos_engine.indexing.service import IndexingService
@@ -460,9 +461,6 @@ class ChatService:
         ):
             raise ValueError("That path is outside the workspace or is not a file.")
         as_posix = relative.as_posix()
-        before = self._store.get_file_backup(repository_id, as_posix)
-        if before is None:
-            raise ValueError("No chat write to revert for that file.")
         try:
             record = self._repos.get(RepositoryId(repository_id))
         except (RepositoryNotFound, LookupError, ValueError) as error:
@@ -471,6 +469,12 @@ class ChatService:
         target = (root / relative).resolve()
         if not _is_inside(root, target):
             raise ValueError("That path is outside the workspace or is not a file.")
+        before = self._store.get_file_backup(repository_id, as_posix)
+        if before is None:
+            restore_working_path(root, as_posix)
+            self._refresh_written_path(repository_id, root, record, as_posix)
+            self._note_revert(repository_id, as_posix)
+            return
         if before == "":
             if target.is_file():
                 target.unlink()
@@ -480,6 +484,10 @@ class ChatService:
         self._store.delete_file_backup(repository_id, as_posix)
         self._refresh_written_path(repository_id, root, record, as_posix)
         self._note_revert(repository_id, as_posix)
+
+    def forget_file_backups(self, repository_id: str, paths: Sequence[str]) -> None:
+        for rel_path in paths:
+            self._store.delete_file_backup(repository_id, Path(rel_path).as_posix())
 
     def _note_revert(self, repository_id: str, path: str) -> None:
         if self._events is None:

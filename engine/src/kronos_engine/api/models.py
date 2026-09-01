@@ -35,6 +35,11 @@ class PathRequest(BaseModel):
     policy: dict[str, Any] | None = None
 
 
+class CommitRequest(BaseModel):
+    message: str
+    paths: list[str] | None = None
+
+
 class PreviewFileModel(BaseModel):
     path: str
     action: str
