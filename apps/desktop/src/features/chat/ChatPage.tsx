@@ -10,6 +10,7 @@ interface ChatPageProps {
   repositoryId: string | null;
   historyOpen: boolean;
   newChatRequest?: number;
+  plannerName?: string | null;
   onOpenWorkspace: () => void;
 }
 
@@ -18,6 +19,7 @@ export function ChatPage({
   repositoryId,
   historyOpen,
   newChatRequest = 0,
+  plannerName = null,
   onOpenWorkspace,
 }: ChatPageProps) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -256,6 +258,7 @@ export function ChatPage({
             }}
           />
           <span className="chat-composer__toolbar">
+            {plannerName ? <span className="chat-composer__model">{plannerName}</span> : null}
             <button
               type="button"
               className={busy ? "btn-quiet" : "btn-primary"}

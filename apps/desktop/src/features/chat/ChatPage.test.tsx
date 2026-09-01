@@ -42,6 +42,20 @@ function chatClient(overrides: Partial<ChatClient> = {}): ChatClient {
 }
 
 describe("ChatPage", () => {
+  it("names the assigned model in the composer", async () => {
+    render(
+      <ChatPage
+        chatClient={chatClient()}
+        repositoryId={null}
+        historyOpen={false}
+        plannerName="Local llama"
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByText("Local llama")).toBeInTheDocument();
+  });
+
   it("keeps Send disabled until the composer has text", async () => {
     render(
       <ChatPage

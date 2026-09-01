@@ -306,6 +306,34 @@
   font-weight: 600;
 }
 
+.inspector__change {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.inspector__diff {
+  margin: 6px 0 0;
+  padding: 8px;
+  overflow: auto;
+  max-height: 12rem;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--void);
+  color: var(--body);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre;
+}
+
 .health-list {
   margin: 0;
   padding: 0;
@@ -649,7 +677,14 @@
 .chat-composer__toolbar {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: 8px;
+}
+
+.chat-composer__model {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .engine-status {

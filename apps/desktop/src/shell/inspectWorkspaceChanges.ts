@@ -5,6 +5,7 @@ import type { InspectorChange } from "./InspectorDrawer";
 export interface WorkspaceDiff {
   path: string;
   summary: string;
+  patch?: string;
   repositoryId?: string;
 }
 
@@ -23,7 +24,7 @@ export function inspectWorkspaceChanges(
       continue;
     }
     seen.add(item.path);
-    changes.push({ path: item.path, summary: item.summary });
+    changes.push({ path: item.path, summary: item.summary, patch: item.patch ?? "" });
   }
   return changes;
 }

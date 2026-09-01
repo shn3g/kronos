@@ -21,7 +21,7 @@ export interface HomeDashboard {
     breakerOpen: boolean;
   }>;
   runs: Array<{ id: string; status: string; evidence: string; repositoryId?: string }>;
-  diffs: Array<{ path: string; summary: string; repositoryId?: string }>;
+  diffs: Array<{ path: string; summary: string; patch?: string; repositoryId?: string }>;
   tests: Array<{ name: string; passed: boolean; repositoryId?: string }>;
   index: Array<{
     repositoryId: string;
@@ -102,6 +102,7 @@ export function createProductionHomeClient(
           return {
             path: stringField(row, "path"),
             summary: stringField(row, "summary"),
+            patch: stringField(row, "patch"),
             repositoryId: stringField(row, "repository_id"),
           };
         }),

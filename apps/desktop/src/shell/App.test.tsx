@@ -332,6 +332,7 @@ describe("App shell", () => {
     );
 
     expect(await screen.findByRole("textbox", { name: /ask kronos/i })).toBeInTheDocument();
+    expect(screen.getByText("Local llama")).toBeInTheDocument();
     expect(screen.getByRole("menubar", { name: /application/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^File$/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^Edit$/ })).toBeInTheDocument();

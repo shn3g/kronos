@@ -8,14 +8,24 @@ describe("inspectWorkspaceChanges", () => {
     const changes = inspectWorkspaceChanges(
       [
         { path: "src/old.py", summary: "Wrote src/old.py", repositoryId: "repo_alpha" },
-        { path: "src/app.py", summary: "Wrote src/app.py first", repositoryId: "repo_alpha" },
-        { path: "src/app.py", summary: "Wrote src/app.py", repositoryId: "repo_alpha" },
+        {
+          path: "src/app.py",
+          summary: "Wrote src/app.py first",
+          patch: "+first\n",
+          repositoryId: "repo_alpha",
+        },
+        {
+          path: "src/app.py",
+          summary: "Wrote src/app.py",
+          patch: "--- a\n+++ b\n+second\n",
+          repositoryId: "repo_alpha",
+        },
       ],
       "repo_alpha",
     );
     expect(changes).toEqual([
-      { path: "src/app.py", summary: "Wrote src/app.py" },
-      { path: "src/old.py", summary: "Wrote src/old.py" },
+      { path: "src/app.py", summary: "Wrote src/app.py", patch: "--- a\n+++ b\n+second\n" },
+      { path: "src/old.py", summary: "Wrote src/old.py", patch: "" },
     ]);
   });
 
@@ -27,6 +37,6 @@ describe("inspectWorkspaceChanges", () => {
       ],
       "repo_alpha",
     );
-    expect(changes).toEqual([{ path: "a.py", summary: "Wrote a.py" }]);
+    expect(changes).toEqual([{ path: "a.py", summary: "Wrote a.py", patch: "" }]);
   });
 });

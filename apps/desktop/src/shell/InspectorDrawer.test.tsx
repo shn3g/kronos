@@ -18,6 +18,29 @@ function Harness() {
 }
 
 describe("InspectorDrawer", () => {
+  it("expands a change to show the unified diff", async () => {
+    const user = userEvent.setup();
+    render(
+      <InspectorDrawer
+        tab="changes"
+        onTab={() => undefined}
+        changes={[
+          {
+            path: "src/App.tsx",
+            summary: "Wrote src/App.tsx",
+            patch: "--- a/src/App.tsx\n+++ b/src/App.tsx\n-old\n+new\n",
+          },
+        ]}
+        goals={[]}
+        checks={[]}
+      />,
+    );
+    expect(screen.queryByText(/-old/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /src\/app\.tsx/i }));
+    expect(screen.getByText(/-old/)).toBeInTheDocument();
+    expect(screen.getByText(/\+new/)).toBeInTheDocument();
+  });
+
   it("lists workspace diffs and goal titles with text status", async () => {
     const user = userEvent.setup();
     render(<Harness />);

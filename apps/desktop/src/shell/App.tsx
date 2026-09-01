@@ -18,6 +18,7 @@ import {
   createProductionModelsClient,
   type ModelsClient,
 } from "../features/models/client";
+import { plannerDisplayName } from "../features/models/plannerLabel";
 import { IndexPage } from "../features/index/IndexPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import {
@@ -90,6 +91,7 @@ export function App({
   });
   const [modelReady, setModelReady] = useState(false);
   const [modelKnown, setModelKnown] = useState(false);
+  const [plannerName, setPlannerName] = useState<string | null>(null);
   const [activity, setActivity] = useState<ActivityId>("chat");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("changes");
@@ -131,6 +133,7 @@ export function App({
     if (!engineReady) {
       setModelReady(false);
       setModelKnown(false);
+      setPlannerName(null);
       return;
     }
     let cancelled = false;
@@ -139,6 +142,7 @@ export function App({
         return;
       }
       setModelReady(Boolean(snapshot.assignments.planner));
+      setPlannerName(plannerDisplayName(snapshot));
       setModelKnown(true);
     });
     return () => {
@@ -300,6 +304,7 @@ export function App({
                   repositoryId={session.workspaceId}
                   historyOpen={historyOpen}
                   newChatRequest={newChatRequest}
+                  plannerName={plannerName}
                   onOpenWorkspace={() => {
                     setActivity("workspaces");
                   }}

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { useState } from "react";
 import type { HealthCheck } from "../features/health/checks";
 import { HealthList } from "../features/health/HealthList";
 
@@ -8,6 +9,7 @@ export type InspectorTab = "changes" | "goals" | "health";
 export interface InspectorChange {
   path: string;
   summary: string;
+  patch?: string;
 }
 
 interface InspectorDrawerProps {
@@ -39,10 +41,7 @@ export function InspectorDrawer({ tab, onTab, changes, goals, checks }: Inspecto
           ) : (
             <ul className="inspector__list">
               {changes.map((item) => (
-                <li key={`${item.path}:${item.summary}`}>
-                  <strong>{item.path}</strong>
-                  <span>{item.summary}</span>
-                </li>
+                <ChangeRow key={`${item.path}:${item.summary}`} item={item} />
               ))}
             </ul>
           )
@@ -66,6 +65,35 @@ export function InspectorDrawer({ tab, onTab, changes, goals, checks }: Inspecto
         {tab === "health" ? <HealthList checks={checks} /> : null}
       </div>
     </aside>
+  );
+}
+
+function ChangeRow({ item }: { item: InspectorChange }) {
+  const [open, setOpen] = useState(false);
+  const patch = item.patch ?? "";
+  if (patch === "") {
+    return (
+      <li>
+        <strong>{item.path}</strong>
+        <span>{item.summary}</span>
+      </li>
+    );
+  }
+  return (
+    <li>
+      <button
+        type="button"
+        className="inspector__change"
+        aria-expanded={open}
+        onClick={() => {
+          setOpen((current) => !current);
+        }}
+      >
+        <strong>{item.path}</strong>
+        <span>{item.summary}</span>
+      </button>
+      {open ? <pre className="inspector__diff">{patch}</pre> : null}
+    </li>
   );
 }
 
