@@ -76,6 +76,8 @@ from kronos_engine.api.models import (
     TelegramAllowlistRequest,
     TelegramStatusResponse,
     TelegramTokenRequest,
+    TerminalRunRequest,
+    TerminalRunResponse,
     VersionResponse,
     WorkspaceFileContentsResponse,
     WorkspaceFileItem,
@@ -116,6 +118,7 @@ from kronos_engine.application.workspace_changes import (
     mark_chat_writes,
 )
 from kronos_engine.application.workspace_files import list_workspace_files, read_workspace_file
+from kronos_engine.application.workspace_terminal import run_workspace_command
 from kronos_engine.config.repository import (
     EnrolmentPreview,
     github_owner,
@@ -840,6 +843,28 @@ def create_app(
             path=payload["path"],
             content=payload["content"],
             binary=payload["binary"],
+        )
+
+    @app.post(
+        "/repositories/{repository_id}/terminal/runs",
+        response_model=TerminalRunResponse,
+    )
+    def run_repository_terminal(
+        repository_id: str,
+        body: TerminalRunRequest,
+        _: None = Depends(require_auth),
+    ) -> TerminalRunResponse:
+        command = body.command.strip()
+        if command == "":
+            raise HTTPException(status_code=400, detail="A command is required.")
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+        result = run_workspace_command(Path(record.realpath), command)
+        return TerminalRunResponse(
+            command=result["command"],
+            exit_code=result["exit_code"],
+            timed_out=result["timed_out"],
+            output=result["output"],
         )
 
     @app.get("/repositories/{repository_id}/index", response_model=IndexStatusResponse)

@@ -40,6 +40,17 @@ class CommitRequest(BaseModel):
     paths: list[str] | None = None
 
 
+class TerminalRunRequest(BaseModel):
+    command: str
+
+
+class TerminalRunResponse(BaseModel):
+    command: str
+    exit_code: int | None
+    timed_out: bool
+    output: str
+
+
 class WorkspaceFileItem(BaseModel):
     path: str
 

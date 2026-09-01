@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 from __future__ import annotations
 
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -146,3 +147,45 @@ async def test_workspace_files_list_and_read_fail_closed(
     assert payload["path"] == "src/app.py"
     assert payload["content"] == "print(1)\n"
     assert payload["binary"] is False
+
+
+@pytest.mark.asyncio
+async def test_workspace_terminal_run_fail_closed(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    http, headers, repo = client
+    enrolled = await http.post("/repositories", headers=headers, json={"path": str(repo)})
+    assert enrolled.status_code == 200
+    repo_id = enrolled.json()["repository"]["id"]
+
+    unauth = await http.post(f"/repositories/{repo_id}/terminal/runs", json={"command": "echo hi"})
+    assert unauth.status_code == 401
+
+    missing = await http.post(
+        "/repositories/repo_missing/terminal/runs",
+        headers=headers,
+        json={"command": "echo hi"},
+    )
+    assert missing.status_code == 404
+
+    empty = await http.post(
+        f"/repositories/{repo_id}/terminal/runs",
+        headers=headers,
+        json={"command": "   "},
+    )
+    assert empty.status_code == 400
+
+    (repo / "probe.py").write_text(
+        "from pathlib import Path\nprint(Path('hello.py').read_text())\n",
+        encoding="utf-8",
+    )
+    ran = await http.post(
+        f"/repositories/{repo_id}/terminal/runs",
+        headers=headers,
+        json={"command": f'"{sys.executable}" probe.py'},
+    )
+    assert ran.status_code == 200
+    payload = ran.json()
+    assert payload["exit_code"] == 0
+    assert payload["timed_out"] is False
+    assert "old" in payload["output"]
