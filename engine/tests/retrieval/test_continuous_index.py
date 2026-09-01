@@ -7,6 +7,7 @@ import pytest
 from tests.retrieval.support import indexing_policy, kronos_paths, write_and_commit
 from tests.support.git_fixtures import init_git_repo
 
+from kronos_engine.indexing.scanner import list_dirty_paths
 from kronos_engine.indexing.service import IndexingService
 from kronos_engine.indexing.sparse import SqliteIndexStore
 from kronos_engine.ports.embedding import EmbeddingPort
@@ -193,6 +194,58 @@ def test_incremental_exception_resets_state_to_idle(tmp_path: Path) -> None:
     assert status.state == "idle"
     assert status.last_activity_at
     assert status.last_activity_at != first.last_activity_at
+
+
+def test_targeted_incremental_leaves_other_dirty_paths_pending(tmp_path: Path) -> None:
+    paths = kronos_paths(tmp_path)
+    root = init_git_repo(
+        tmp_path / "targeted-dirty",
+        files={
+            "src/alpha.py": "ALPHA_OLD_TOKEN = 1\n",
+            "src/beta.py": "BETA_OLD_TOKEN = 1\n",
+        },
+    )
+    service = IndexingService(paths, embeddings=_CountingEmbedder())
+    policy = indexing_policy()
+    service.rebuild("repo_targeted", root, policy)
+    (root / "src/alpha.py").write_text("ALPHA_NEW_TOKEN = 2\n", encoding="utf-8")
+    (root / "src/beta.py").write_text("BETA_NEW_TOKEN = 2\n", encoding="utf-8")
+    service.incremental("repo_targeted", root, policy, paths=["src/alpha.py"])
+
+    assert service.search("repo_targeted", "ALPHA_NEW_TOKEN", mode="sparse").items
+    assert service.search("repo_targeted", "BETA_NEW_TOKEN", mode="sparse").items == ()
+    assert service.search("repo_targeted", "BETA_OLD_TOKEN", mode="sparse").items
+    _commit, indexed_dirty = service.indexed_revision("repo_targeted")
+    assert "src/alpha.py" in indexed_dirty
+    assert "src/beta.py" not in indexed_dirty
+
+    remaining = sorted(set(list_dirty_paths(root)) - set(indexed_dirty))
+    assert remaining == ["src/beta.py"]
+    service.incremental("repo_targeted", root, policy, paths=remaining)
+    assert service.search("repo_targeted", "BETA_NEW_TOKEN", mode="sparse").items
+    assert service.search("repo_targeted", "BETA_OLD_TOKEN", mode="sparse").items == ()
+    _commit, indexed_dirty = service.indexed_revision("repo_targeted")
+    assert set(indexed_dirty) == {"src/alpha.py", "src/beta.py"}
+
+
+def test_full_incremental_records_all_current_dirty_paths(tmp_path: Path) -> None:
+    paths = kronos_paths(tmp_path)
+    root = init_git_repo(
+        tmp_path / "full-dirty",
+        files={
+            "src/alpha.py": "ALPHA_OLD_TOKEN = 1\n",
+            "src/beta.py": "BETA_OLD_TOKEN = 1\n",
+        },
+    )
+    service = IndexingService(paths, embeddings=_CountingEmbedder())
+    policy = indexing_policy()
+    service.rebuild("repo_full_dirty", root, policy)
+    (root / "src/alpha.py").write_text("ALPHA_NEW_TOKEN = 2\n", encoding="utf-8")
+    (root / "src/beta.py").write_text("BETA_NEW_TOKEN = 2\n", encoding="utf-8")
+    service.incremental("repo_full_dirty", root, policy)
+    _commit, indexed_dirty = service.indexed_revision("repo_full_dirty")
+    assert set(indexed_dirty) == set(list_dirty_paths(root))
+    assert set(indexed_dirty) == {"src/alpha.py", "src/beta.py"}
 
 
 def test_watch_override_persists_outside_the_enrolled_tree(tmp_path: Path) -> None:

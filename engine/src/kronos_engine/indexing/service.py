@@ -355,7 +355,13 @@ class IndexingService:
                 )
                 stats = upsert_embeddings(store.connection(), changed_chunks, self._embeddings)
                 store.set_indexed_commit(new)
-                store.set_dirty_paths(current_dirty)
+                if targeted:
+                    refreshed = set(refresh)
+                    store.set_dirty_paths(
+                        sorted((set(stored_dirty) - refreshed) | (refreshed & set(current_dirty)))
+                    )
+                else:
+                    store.set_dirty_paths(current_dirty)
                 self._mark(
                     store,
                     repo_id,
