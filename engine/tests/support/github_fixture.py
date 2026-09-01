@@ -71,6 +71,8 @@ class GitHubFixture:
     _issues: list[dict[str, Any]] = field(default_factory=list)
     _comments: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     _labels: dict[int, list[str]] = field(default_factory=dict)
+    _repo_labels: set[str] = field(default_factory=set)
+    reject_unknown_issue_labels: bool = False
     _discussions: list[dict[str, Any]] = field(default_factory=list)
     _pulls: list[dict[str, Any]] = field(default_factory=list)
     _rulesets: list[dict[str, Any]] = field(default_factory=list)
@@ -146,9 +148,7 @@ class GitHubFixture:
             headers["X-RateLimit-Remaining"] = remaining
         return HttpResponse(status=status, headers=headers, body=b"{}")
 
-    def _route(
-        self, method: str, path: str, query: str, request: HttpRequest
-    ) -> HttpResponse:
+    def _route(self, method: str, path: str, query: str, request: HttpRequest) -> HttpResponse:
         if method == "POST" and path.endswith("/access_tokens"):
             return self._mint_token(path, request)
         if method == "POST" and "/app-manifests/" in path and path.endswith("/conversions"):
@@ -162,6 +162,11 @@ class GitHubFixture:
             return HttpResponse(404, {}, b"{}")
         rest = path[len(prefix) :]
         params = {key: values[-1] for key, values in parse_qs(query).items()}
+        if rest == "/labels" or rest == "/labels/":
+            if method == "POST":
+                return self._create_repo_label(request)
+            if method == "GET":
+                return self._json([{"name": name} for name in sorted(self._repo_labels)])
         if rest == "/issues" or rest == "/issues/":
             if method == "GET":
                 return self._list_issues(params, request)
@@ -189,9 +194,7 @@ class GitHubFixture:
             sha = self._branches.get(name)
             if sha is None:
                 return HttpResponse(404, {}, b"{}")
-            return self._maybe_etag(
-                {"ref": f"refs/heads/{name}", "object": {"sha": sha}}, request
-            )
+            return self._maybe_etag({"ref": f"refs/heads/{name}", "object": {"sha": sha}}, request)
         if rest == "/git/refs" and method == "POST":
             return self._create_ref(request)
         if rest == "/rulesets":
@@ -215,9 +218,7 @@ class GitHubFixture:
             if text is None:
                 return HttpResponse(404, {}, b"{}")
             encoded = base64.b64encode(text.encode()).decode()
-            return self._json(
-                {"content": encoded, "encoding": "base64", "path": file_path}
-            )
+            return self._json({"content": encoded, "encoding": "base64", "path": file_path})
         if rest == "/check-runs" and method == "POST":
             return self._create_check_run(request)
         if rest.startswith("/commits/") and rest.endswith("/check-runs") and method == "GET":
@@ -381,6 +382,14 @@ class GitHubFixture:
         number = self._next_issue
         self._next_issue += 1
         labels = [str(item) for item in payload.get("labels") or []]
+        if self.reject_unknown_issue_labels and any(
+            name not in self._repo_labels for name in labels
+        ):
+            return HttpResponse(
+                422,
+                {},
+                b'{"message":"Validation Failed","errors":[{"resource":"Label","code":"invalid"}]}',
+            )
         issue = {
             "number": number,
             "title": payload.get("title"),
@@ -392,6 +401,32 @@ class GitHubFixture:
         self._labels[number] = labels
         self._logical.append("create_issue")
         return self._json(issue)
+
+    def _create_repo_label(self, request: HttpRequest) -> HttpResponse:
+        payload = json.loads(request.body.decode() if request.body else "{}")
+        name = str(payload.get("name") or "")
+        if not name:
+            return HttpResponse(422, {}, b'{"message":"Validation Failed"}')
+        if name in self._repo_labels:
+            return HttpResponse(
+                422,
+                {},
+                json.dumps(
+                    {
+                        "message": "Validation Failed",
+                        "errors": [
+                            {"resource": "Label", "code": "already_exists", "field": "name"}
+                        ],
+                    }
+                ).encode(),
+            )
+        self._repo_labels.add(name)
+        self._logical.append("create_label")
+        return HttpResponse(
+            201,
+            {},
+            json.dumps({"name": name, "color": str(payload.get("color") or "ededed")}).encode(),
+        )
 
     def _create_comment(self, number: int, request: HttpRequest) -> HttpResponse:
         payload = json.loads(request.body.decode() if request.body else "{}")
@@ -457,9 +492,7 @@ class GitHubFixture:
             return HttpResponse(422, {}, b'{"message":"protected"}')
         self._branches[name] = sha
         self._ref_writes.append(name)
-        source = (
-            self.integration_branch if sha == self.integration_sha else self.default_branch
-        )
+        source = self.integration_branch if sha == self.integration_sha else self.default_branch
         self._branch_source[name] = source
         self._logical.append("create_feature_branch")
         return self._json({"ref": ref, "object": {"sha": sha}})
@@ -789,9 +822,7 @@ def controller_stack(
         store.put("github:reviewer:private_key", TEST_REVIEWER_PEM)
     fixture = GitHubFixture()
     apps = {
-        "controller": AppCredentials(
-            app_id=1001, installation_id=2001, role="controller"
-        ),
+        "controller": AppCredentials(app_id=1001, installation_id=2001, role="controller"),
         "reviewer": AppCredentials(app_id=1002, installation_id=2002, role="reviewer"),
     }
     slept: list[float] = []

@@ -30,7 +30,9 @@ from kronos_engine.application.verification import GateRunner, VerificationServi
 from kronos_engine.config.repository import github_owner_repo
 from kronos_engine.config.settings import Settings
 from kronos_engine.domain.attestations import ATTESTATION_HMAC_KEY_REF, ATTESTATION_VERIFY_KEY_REF
+from kronos_engine.domain.entities import EnrolledRepository
 from kronos_engine.indexing.service import IndexingService
+from kronos_engine.ports.embedding import EmbeddingPort
 from kronos_engine.ports.executor import Executor, ExecutorRequest, ExecutorResult
 from kronos_engine.ports.forge import ForgeAuthError, ForgeTarget
 from kronos_engine.ports.sandbox import Sandbox
@@ -72,6 +74,8 @@ def build_goal_engine(
         settings.paths.cache / "models",
     ).adapter
     indexer = IndexingService(settings.paths, embeddings=embeddings)
+    forge_for = make_forge_for(conn, settings, secrets, github_http, override=forge)
+    apps = SqliteGithubAppStore(conn)  # type: ignore[arg-type]
     repos = RepositoryService(
         SqliteRepositoryRegistry(conn),  # type: ignore[arg-type]
         settings.paths,
@@ -79,6 +83,8 @@ def build_goal_engine(
         ManifestStackDetector(),
         CacheRuntimeLayout(),
         indexer=indexer,
+        apps=apps,
+        forge_for=forge_for,
     )
     goals = GoalService(store, repos, recorder, notifications=notifications)
     indexed = IndexedPlanner(indexer)
@@ -92,11 +98,7 @@ def build_goal_engine(
     chosen_planner = planner or LlmPlanner(registry, secrets, indexed, retrieve=skills.retrieve)
     chosen_executor = executor or RepositoryPolicyExecutor(repos)
     chosen_gates = gates or ProcessGateRunner()
-    chosen_forge = (
-        forge
-        if forge is not None
-        else _controller_forge(conn, settings, secrets, github_http, repos)
-    )
+    chosen_forge: object = forge if forge is not None else UnavailableForge()
     merge = MergeService(
         chosen_forge,  # type: ignore[arg-type]
         attestation_key=_attestation_key(secrets),
@@ -104,7 +106,12 @@ def build_goal_engine(
         expected_controller_app_id=_app_id(conn, "controller"),
     )
     planning = PlanningService(
-        store, repos, recorder, chosen_planner, clock=tick, forge=chosen_forge
+        store,
+        repos,
+        recorder,
+        chosen_planner,
+        clock=tick,
+        forge_for=forge_for,
     )
     dispatch = DispatchService(
         store,
@@ -127,6 +134,7 @@ def build_goal_engine(
         chosen_gates,
         leases,
         clock=tick,
+        forge_for=forge_for,
     )
     recovery = RecoveryService(store, recorder)
     scheduler = GoalScheduler(store, goals, leases, clock=tick)
@@ -175,23 +183,55 @@ def _app_id(conn: object, role: str) -> int:
     return int(record.app_id)
 
 
-def _controller_forge(
+def compose_llm_planner(
+    conn: object,
+    settings: Settings,
+    secrets: SecretStore,
+    indexer: object,
+    embeddings: EmbeddingPort | None,
+    *,
+    planner: Planner | None = None,
+) -> Planner:
+    registry = SqliteModelRegistry(conn)  # type: ignore[arg-type]
+    indexed = IndexedPlanner(indexer)
+    skills = SkillCatalog(
+        conn,  # type: ignore[arg-type]
+        skills_root=bundled_skills_root(),
+        store_dir=settings.paths.cache / "skills",
+        embeddings=embeddings,
+    )
+    skills.load_core()
+    return planner or LlmPlanner(registry, secrets, indexed, retrieve=skills.retrieve)
+
+
+def make_forge_for(
     conn: object,
     settings: Settings,
     secrets: SecretStore,
     github_http: object,
-    repos: RepositoryService,
+    *,
+    override: object | None = None,
+) -> Callable[[EnrolledRepository], object]:
+    def forge_for(record: EnrolledRepository) -> object:
+        if override is not None:
+            return override
+        return controller_forge_for_record(conn, settings, secrets, github_http, record)
+
+    return forge_for
+
+
+def controller_forge_for_record(
+    conn: object,
+    settings: Settings,
+    secrets: SecretStore,
+    github_http: object,
+    record: EnrolledRepository,
 ) -> object:
     _ = settings
-    enrolled = None
-    for record in repos.list():
-        parsed = github_owner_repo(record.origin)
-        if parsed is not None:
-            enrolled = (record, parsed)
-            break
-    if enrolled is None:
+    parsed = github_owner_repo(record.origin)
+    if parsed is None:
         return UnavailableForge()
-    record, (owner, name) = enrolled
+    owner, name = parsed
     try:
         setup = GitHubSetupService(SqliteGithubAppStore(conn), secrets, github_http)  # type: ignore[arg-type]
         return setup.forge(

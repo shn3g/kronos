@@ -181,6 +181,11 @@ def test_composition_wires_llm_planner_around_indexed_fallback() -> None:
     assert "LlmPlanner" in composition
     assert "IndexedPlanner" in composition
     assert "select_executor" in composition
+    assert "retrieve=skills.retrieve" in composition
+    assert "controller_forge_for_record" in composition
+    app_src = (engine_src / "api" / "app.py").read_text(encoding="utf-8")
+    assert "compose_llm_planner" in app_src
+    assert "make_forge_for" in app_src
 
 
 def planner_scope_path(planned: object) -> str:

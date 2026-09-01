@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from kronos_engine.application.safety import (
+    SafetyChecker,
     SafetyElevationRefused,
     SafetyReport,
     evaluate_repository_safety,
@@ -76,6 +77,7 @@ class RepositoryService:
         *,
         apps: GithubAppStore | None = None,
         forge_for: Callable[[EnrolledRepository], object | None] | None = None,
+        safety: SafetyChecker | None = None,
     ) -> None:
         self._registry = registry
         self._paths = paths
@@ -85,6 +87,7 @@ class RepositoryService:
         self._indexer = indexer if indexer is not None else IndexingService(paths)
         self._apps = apps
         self._forge_for = forge_for
+        self._safety = safety
 
     def inspect(self, path: str) -> InspectResult:
         snapshot = self._inspector.inspect(Path(path))
@@ -138,6 +141,7 @@ class RepositoryService:
             policy=policy,
             enrolled_at=enrolled_at,
         )
+        self.require_pr_write_safety(record)
         self._registry.save(record)
         self._ensure_runtime(record.id, record.realpath)
         try:
@@ -225,7 +229,18 @@ class RepositoryService:
         return record
 
     def safety(self, repo_id: RepositoryId) -> SafetyReport:
-        record = self.get(repo_id)
+        return self._safety_report(self.get(repo_id))
+
+    def require_pr_write_safety(self, record: EnrolledRepository) -> None:
+        if not requires_pr_safety(record.policy.autonomy.mode):
+            return
+        report = self._safety_report(record)
+        if not report.ok:
+            raise SafetyElevationRefused(report)
+
+    def _safety_report(self, record: EnrolledRepository) -> SafetyReport:
+        if self._safety is not None:
+            return self._safety.check(record)
         forge = self._forge_for(record) if self._forge_for is not None else None
         reviewer = self._apps.get("reviewer") if self._apps is not None else None
         return evaluate_repository_safety(record, forge=forge, reviewer=reviewer)
@@ -240,10 +255,11 @@ class RepositoryService:
         if mode not in OPERATION_MODES:
             raise PolicyError("unknown operation mode")
         record = self.get(repo_id)
-        if requires_pr_safety(mode):
-            report = self.safety(repo_id)
-            if not report.ok:
-                raise SafetyElevationRefused(report)
+        probe = replace(
+            record,
+            policy=replace(record.policy, autonomy=replace(record.policy.autonomy, mode=mode)),
+        )
+        self.require_pr_write_safety(probe)
         autonomy = replace(record.policy.autonomy, mode=mode)
         if freeze is not None:
             autonomy = replace(autonomy, freeze=freeze)

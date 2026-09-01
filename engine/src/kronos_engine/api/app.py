@@ -90,7 +90,11 @@ from kronos_engine.application.chat import (
     ConversationDetail,
     OrchestratorNotConfigured,
 )
-from kronos_engine.application.composition import build_goal_engine
+from kronos_engine.application.composition import (
+    build_goal_engine,
+    compose_llm_planner,
+    make_forge_for,
+)
 from kronos_engine.application.doctor import DoctorService, OpsSettings
 from kronos_engine.application.embeddings import ResolvedEmbedder, resolve_embedder
 from kronos_engine.application.event_query import EventQuery
@@ -103,7 +107,7 @@ from kronos_engine.application.model_profiles import (
     RoleAssignmentError,
 )
 from kronos_engine.application.notifications import NotificationService
-from kronos_engine.application.planning import IndexedPlanner, LlmPlanner, Planner, PlanningService
+from kronos_engine.application.planning import Planner, PlanningService
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import (
     InspectResult,
@@ -554,20 +558,33 @@ def create_app(
                 recorder,
                 notifications=_notifications_for(conn),
             )
-            registry = SqliteModelRegistry(conn)
-            indexed = IndexedPlanner(_live_indexer())
-            chosen_planner = planner or LlmPlanner(registry, store, indexed)
-            planning = PlanningService(SqliteGoalStore(conn), repos, recorder, chosen_planner)
+            embeddings = _resolve_embedder(conn).adapter
+            chosen_planner = compose_llm_planner(
+                conn,
+                settings,
+                store,
+                _live_indexer(),
+                embeddings,
+                planner=planner,
+            )
+            forge_for = make_forge_for(conn, settings, store, github_http, override=goal_forge)
+            planning = PlanningService(
+                SqliteGoalStore(conn),
+                repos,
+                recorder,
+                chosen_planner,
+                forge_for=forge_for,
+            )
             yield ChatService(
                 conn,
                 repos,
                 goals,
                 planning,
                 _live_indexer(),
-                registry,
+                SqliteModelRegistry(conn),
                 store,
                 SqliteEventStore(conn),
-                embeddings=_resolve_embedder(conn).adapter,
+                embeddings=embeddings,
             )
         finally:
             conn.close()
@@ -619,9 +636,7 @@ def create_app(
             )
 
     @app.post("/repositories/inspect", response_model=InspectResponse)
-    def inspect_repository(
-        body: PathRequest, _: None = Depends(require_auth)
-    ) -> InspectResponse:
+    def inspect_repository(body: PathRequest, _: None = Depends(require_auth)) -> InspectResponse:
         with repository_service() as service:
             try:
                 result = service.inspect(body.path)
@@ -636,6 +651,8 @@ def create_app(
         with repository_service() as service:
             try:
                 record = service.enrol(body.path, body.policy)
+            except SafetyElevationRefused as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
             except (GitError, PolicyError, RuntimeInsideEnrolledTree) as error:
                 raise HTTPException(status_code=400, detail=str(error)) from error
             return _detail_response(service, record, include_preview=True)
@@ -649,9 +666,7 @@ def create_app(
             return _detail_response(service, record)
 
     @app.get("/repositories/{repository_id}/preview", response_model=InspectResponse)
-    def preview_repository(
-        repository_id: str, _: None = Depends(require_auth)
-    ) -> InspectResponse:
+    def preview_repository(repository_id: str, _: None = Depends(require_auth)) -> InspectResponse:
         with repository_service() as service:
             record = _load(service, repository_id)
             try:
@@ -711,6 +726,8 @@ def create_app(
         with repository_service() as service:
             try:
                 record = service.reenrol(repo_id=_parse_id(repository_id), redetect=redetect)
+            except SafetyElevationRefused as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
             except (RepositoryNotFound, IdentifierError, GitError) as error:
                 status = 404 if isinstance(error, (RepositoryNotFound, IdentifierError)) else 400
                 raise HTTPException(status_code=status, detail=str(error)) from error
@@ -777,9 +794,7 @@ def create_app(
                     model_id=body.model_id,
                 )
             )
-            profiles = [
-                item for item in service.list_profiles() if item.provider_id == provider.id
-            ]
+            profiles = [item for item in service.list_profiles() if item.provider_id == provider.id]
             if not profiles:
                 raise HTTPException(status_code=500, detail="provider profile was not created")
             coder = next((item for item in profiles if item.role == "coder"), profiles[0])
@@ -837,20 +852,14 @@ def create_app(
             return _index_status(status)
 
     @app.post("/repositories/{repository_id}/index/rebuild", response_model=IndexStatusResponse)
-    def index_rebuild(
-        repository_id: str, _: None = Depends(require_auth)
-    ) -> IndexStatusResponse:
+    def index_rebuild(repository_id: str, _: None = Depends(require_auth)) -> IndexStatusResponse:
         with repository_service() as repos:
             record = _load(repos, repository_id)
-            status = _live_indexer().rebuild(
-                record.id.value, Path(record.realpath), record.policy
-            )
+            status = _live_indexer().rebuild(record.id.value, Path(record.realpath), record.policy)
             return _index_status(status)
 
     @app.post("/repositories/{repository_id}/index/refresh", response_model=IndexStatusResponse)
-    def index_refresh(
-        repository_id: str, _: None = Depends(require_auth)
-    ) -> IndexStatusResponse:
+    def index_refresh(repository_id: str, _: None = Depends(require_auth)) -> IndexStatusResponse:
         with repository_service() as repos:
             record = _load(repos, repository_id)
             status = _live_indexer().incremental(

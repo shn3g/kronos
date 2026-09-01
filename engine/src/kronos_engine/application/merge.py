@@ -135,6 +135,14 @@ class MergeService:
         self._expected_reviewer_app_id = expected_reviewer_app_id
         self._expected_controller_app_id = expected_controller_app_id
 
+    def rebind(self, forge: MergePort) -> MergeService:
+        return MergeService(
+            forge,
+            attestation_key=self._attestation_key,
+            expected_reviewer_app_id=self._expected_reviewer_app_id,
+            expected_controller_app_id=self._expected_controller_app_id,
+        )
+
     def consider(self, evidence: MergeEvidence) -> MergeDecision:
         return evaluate_merge_policy(evidence, attestation_key=self._attestation_key)
 
@@ -144,12 +152,8 @@ class MergeService:
         if not decision.allowed:
             raise MergeRefused(decision.reason)
         if evidence.base_branch == evidence.protected_branch:
-            raise DefaultBranchWriteRefused(
-                "never auto-merge the protected default branch"
-            )
-        self._forge.merge_pull(
-            number, sha=evidence.pr_head_sha, dest=evidence.integration_branch
-        )
+            raise DefaultBranchWriteRefused("never auto-merge the protected default branch")
+        self._forge.merge_pull(number, sha=evidence.pr_head_sha, dest=evidence.integration_branch)
         return decision
 
     def open_promotion_pr(
@@ -208,8 +212,7 @@ class MergeService:
         rerun = False
         if attestation is not None:
             rerun = all(
-                command.exit_code == 0 and command.sandbox_fresh
-                for command in attestation.commands
+                command.exit_code == 0 and command.sandbox_fresh for command in attestation.commands
             ) and bool(attestation.commands)
         return MergeEvidence(
             pr_head_sha=pull.head_sha,

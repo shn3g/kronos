@@ -28,6 +28,7 @@ from kronos_engine.application.planning import PlanningService
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.recovery import RecoveryService
 from kronos_engine.application.repositories import RepositoryService
+from kronos_engine.application.safety import PermissiveSafetyChecker
 from kronos_engine.application.verification import VerificationService
 from kronos_engine.config.paths import resolve_paths
 from kronos_engine.domain.attestations import ATTESTATION_SCHEMA_VERSION
@@ -321,6 +322,7 @@ class GoalHarness:
             ManifestStackDetector(),
             CacheRuntimeLayout(),
             indexer=IndexingService(self.paths),
+            safety=PermissiveSafetyChecker(),
         )
         merge_forge = self.forge
         self.merge = MergeService(
@@ -352,9 +354,7 @@ class GoalHarness:
             clock=lambda: self.now,
         )
         self.recovery = RecoveryService(self.store, self.recorder)
-        self.scheduler = GoalScheduler(
-            self.store, self.goals, self.leases, clock=lambda: self.now
-        )
+        self.scheduler = GoalScheduler(self.store, self.goals, self.leases, clock=lambda: self.now)
         self.engine = GoalEngine(
             self.store,
             self.planning,

@@ -12,9 +12,7 @@ from kronos_engine.ports.forge import IdempotencyKey
 def test_replaying_every_controller_command_is_idempotent_and_skips_default_branch() -> None:
     forge, fixture, _auth = controller_stack()
     commands = (
-        lambda: forge.create_issue(
-            "Ticket", "Body", ("bug",), IdempotencyKey("issue:replay")
-        ),
+        lambda: forge.create_issue("Ticket", "Body", ("bug",), IdempotencyKey("issue:replay")),
         lambda: forge.add_issue_comment(1, "Note", IdempotencyKey("comment:replay")),
         lambda: forge.add_labels(1, ("intake-ready",), IdempotencyKey("labels:replay")),
         lambda: forge.create_discussion("Topic", "Body", IdempotencyKey("discussion:replay")),
@@ -30,6 +28,7 @@ def test_replaying_every_controller_command_is_idempotent_and_skips_default_bran
     first_results = [command() for command in commands]
     replayed = [command() for command in commands]
     assert fixture.logical_action_kinds() == (
+        "create_label",
         "create_issue",
         "add_issue_comment",
         "add_labels",

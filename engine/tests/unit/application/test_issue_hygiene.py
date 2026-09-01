@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tests.e2e.test_goal_to_integration_pr import POLICY_OVERRIDE, GoalHarness
+from tests.support.git_fixtures import init_git_repo
 
 from kronos_engine.application.planning import PlanningService
 from kronos_engine.config.repository import TEMPLATES_ROOT
@@ -115,3 +116,70 @@ def test_xs_planned_goal_does_not_create_issue_in_write_issues(tmp_path: Path) -
     planning.plan(goal.id)
     assert "create_issue" not in harness.fixture.logical_action_kinds()
     assert harness.fixture.count_issues() == 0
+
+
+def test_issue_created_against_goal_repository_forge(tmp_path: Path) -> None:
+    from kronos_engine.ports.forge import IssueRef
+
+    class _NamedForge:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.titles: list[str] = []
+
+        def create_issue(self, title: str, body: str, labels: object, key: object) -> IssueRef:
+            _ = body, labels, key
+            self.titles.append(title)
+            return IssueRef(number=1, url=f"https://example.test/{self.name}", created=True)
+
+    harness = GoalHarness(tmp_path, "happy")
+    other_root = init_git_repo(
+        tmp_path / "other",
+        origin="https://github.com/acme/other.git",
+        files={"pkg/math.py": "def add(a, b):\n    return a\n", "pkg/__init__.py": ""},
+    )
+    first = harness.repos.enrol(
+        str(harness.repo_root),
+        {
+            **POLICY_OVERRIDE,
+            "autonomy": {
+                "freeze": False,
+                "invent_issues": False,
+                "refill_enabled": False,
+                "mode": "write_issues",
+            },
+        },
+    )
+    second = harness.repos.enrol(
+        str(other_root),
+        {
+            **POLICY_OVERRIDE,
+            "autonomy": {
+                "freeze": False,
+                "invent_issues": False,
+                "refill_enabled": False,
+                "mode": "write_issues",
+            },
+        },
+    )
+    forges = {first.id: _NamedForge("first"), second.id: _NamedForge("second")}
+    goal = harness.goals.create(
+        GoalSpec(
+            repository_id=second.id,
+            title="Add feature for other",
+            success_criteria="add(1, 1) == 2",
+            non_goals="do not rewrite packaging",
+            risk_ceiling="medium",
+            source=GoalSource.DESKTOP,
+            max_attempts=3,
+        )
+    )
+    planning = PlanningService(
+        harness.store,
+        harness.repos,
+        harness.recorder,
+        _SizedPlanner("M"),
+        forge_for=lambda repo: forges[repo.id],
+    )
+    planning.plan(goal.id)
+    assert forges[second.id].titles == ["Add feature for other"]
+    assert forges[first.id].titles == []

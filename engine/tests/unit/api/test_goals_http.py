@@ -133,7 +133,7 @@ POLICY_LIVE = {
         "freeze": False,
         "invent_issues": False,
         "refill_enabled": False,
-        "mode": "merge_integration",
+        "mode": "write_issues",
     },
     "paths": {"locked_prefixes": []},
     "risk": {"floor": "low"},

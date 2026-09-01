@@ -74,6 +74,7 @@ class PlanningService:
         *,
         clock: Callable[[], datetime] | None = None,
         forge: object | None = None,
+        forge_for: Callable[[EnrolledRepository], object | None] | None = None,
     ) -> None:
         self._store = store
         self._repos = repos
@@ -81,6 +82,7 @@ class PlanningService:
         self._planner = planner
         self._clock = clock or (lambda: datetime.now(tz=UTC))
         self._forge = forge
+        self._forge_for = forge_for
 
     def plan(self, goal_id: GoalId) -> TaskGraph:
         goal = self._store.get_goal(goal_id)
@@ -167,10 +169,18 @@ class PlanningService:
         self._maybe_create_issue(goal, bound, repo)
         return bound
 
+    def _resolved_forge(self, repo: EnrolledRepository) -> object | None:
+        if self._forge_for is not None:
+            resolved = self._forge_for(repo)
+            if resolved is not None:
+                return resolved
+        return self._forge
+
     def _maybe_create_issue(
         self, goal: GoalRecord, graph: TaskGraph, repo: EnrolledRepository
     ) -> None:
-        if self._forge is None or not graph.nodes:
+        forge = self._resolved_forge(repo)
+        if forge is None or not graph.nodes:
             return
         largest = max(graph.nodes, key=lambda node: SIZE_STEPS.index(node.size))
         if not effort_for_size(repo.policy, largest.size).create_issue:
@@ -179,7 +189,7 @@ class PlanningService:
             refuse_mode_write(repo.policy.autonomy.mode, "create_issue")
         except ModeWriteRefused:
             return
-        create_issue = getattr(self._forge, "create_issue", None)
+        create_issue = getattr(forge, "create_issue", None)
         if not callable(create_issue):
             return
         labels = issue_labels(
@@ -193,7 +203,7 @@ class PlanningService:
             labels,
             IdempotencyKey(f"issue:{goal.id.value}"),
         )
-        add_labels = getattr(self._forge, "add_labels", None)
+        add_labels = getattr(forge, "add_labels", None)
         number = getattr(created, "number", None)
         if callable(add_labels) and isinstance(number, int):
             add_labels(number, labels, IdempotencyKey(f"labels:{goal.id.value}"))

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from kronos_engine.application.unavailable_forge import UnavailableForge
 from kronos_engine.domain.entities import EnrolledRepository
@@ -24,6 +25,24 @@ class SafetyElevationRefused(RuntimeError):
     def __init__(self, report: SafetyReport) -> None:
         self.report = report
         super().__init__("repository safety checks refuse write elevation")
+
+
+class SafetyChecker(Protocol):
+    def check(self, record: EnrolledRepository) -> SafetyReport: ...
+
+
+class PermissiveSafetyChecker:
+    """Always-ok checker for harnesses that enrol write modes without live GitHub protections."""
+
+    def check(self, record: EnrolledRepository) -> SafetyReport:
+        _ = record
+        return SafetyReport(
+            ok=True,
+            checks=tuple(
+                SafetyCheck(id=check_id, ok=True, detail="permissive")
+                for check_id in SAFETY_CHECK_IDS
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)

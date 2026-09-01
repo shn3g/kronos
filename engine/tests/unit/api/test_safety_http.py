@@ -98,3 +98,21 @@ async def test_safety_get_and_elevation_refused_without_protection(
     assert issues.status_code == 200
     assert issues.json()["policy"]["autonomy"]["mode"] == "write_issues"
     assert issues.json()["policy"]["autonomy"]["freeze"] is False
+
+
+@pytest.mark.asyncio
+async def test_enrol_write_draft_prs_returns_409_without_protection(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    http, headers, tmp_path = client
+    repo = init_git_repo(
+        tmp_path / "shop",
+        origin="https://github.com/widgets/shop.git",
+        files={"README.md": "shop\n"},
+    )
+    refused = await http.post(
+        "/repositories",
+        headers=headers,
+        json={"path": str(repo), "policy": {"autonomy": {"mode": "write_draft_prs"}}},
+    )
+    assert refused.status_code == 409
