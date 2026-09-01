@@ -29,6 +29,9 @@ export function TerminalPage({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [run, setRun] = useState<WorkspaceTerminalRun | null>(null);
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const [historyStash, setHistoryStash] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +57,9 @@ export function TerminalPage({
     }
     setBusy(true);
     setError(null);
+    setHistory((current) => rememberCommand(current, command));
+    setHistoryIndex(null);
+    setHistoryStash("");
     try {
       const next = await client.runWorkspaceCommand(repositoryId, command);
       setRun(next);
@@ -117,6 +123,22 @@ export function TerminalPage({
               setDraft(event.target.value);
             }}
             onKeyDown={(event) => {
+              if (event.key === "ArrowUp") {
+                event.preventDefault();
+                const older = recallOlderCommand(history, historyIndex, draft, historyStash);
+                setDraft(older.draft);
+                setHistoryIndex(older.index);
+                setHistoryStash(older.stash);
+                return;
+              }
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                const newer = recallNewerCommand(history, historyIndex, draft, historyStash);
+                setDraft(newer.draft);
+                setHistoryIndex(newer.index);
+                setHistoryStash(newer.stash);
+                return;
+              }
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
                 void onRun();
@@ -156,4 +178,58 @@ function runStatus(run: WorkspaceTerminalRun | null, busy: boolean): string | nu
     return "Finished.";
   }
   return `Exit ${run.exitCode}`;
+}
+
+const MAX_TERMINAL_HISTORY = 50;
+
+function rememberCommand(history: string[], command: string): string[] {
+  if (history[history.length - 1] === command) {
+    return history;
+  }
+  const next = [...history, command];
+  if (next.length <= MAX_TERMINAL_HISTORY) {
+    return next;
+  }
+  return next.slice(next.length - MAX_TERMINAL_HISTORY);
+}
+
+interface HistoryRecall {
+  draft: string;
+  index: number | null;
+  stash: string;
+}
+
+function recallOlderCommand(
+  history: string[],
+  index: number | null,
+  draft: string,
+  stash: string,
+): HistoryRecall {
+  if (history.length === 0) {
+    return { draft, index, stash };
+  }
+  if (index === null) {
+    return { draft: history[history.length - 1] ?? draft, index: history.length - 1, stash: draft };
+  }
+  if (index <= 0) {
+    return { draft: history[0] ?? draft, index: 0, stash };
+  }
+  const next = index - 1;
+  return { draft: history[next] ?? draft, index: next, stash };
+}
+
+function recallNewerCommand(
+  history: string[],
+  index: number | null,
+  draft: string,
+  stash: string,
+): HistoryRecall {
+  if (index === null) {
+    return { draft, index, stash };
+  }
+  if (index >= history.length - 1) {
+    return { draft: stash, index: null, stash: "" };
+  }
+  const next = index + 1;
+  return { draft: history[next] ?? draft, index: next, stash };
 }

@@ -164,4 +164,42 @@ describe("TerminalPage", () => {
 
     expect(await screen.findByRole("button", { name: /^run$/i })).toBeDisabled();
   });
+
+  it("recalls previous commands with the arrow keys", async () => {
+    const user = userEvent.setup();
+    const runWorkspaceCommand = vi.fn(async (_id: string, command: string) => ({
+      command,
+      exitCode: 0,
+      timedOut: false,
+      output: `${command} ok\n`,
+    }));
+    render(
+      <TerminalPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({ runWorkspaceCommand })}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    const input = await screen.findByRole("textbox", { name: /command/i });
+    await user.type(input, "python probe.py");
+    await user.click(screen.getByRole("button", { name: /^run$/i }));
+    expect(await screen.findByText("python probe.py ok")).toBeInTheDocument();
+
+    await user.clear(input);
+    await user.type(input, "echo later");
+    await user.click(screen.getByRole("button", { name: /^run$/i }));
+    expect(await screen.findByText("echo later ok")).toBeInTheDocument();
+
+    await user.clear(input);
+    await user.keyboard("{ArrowUp}");
+    expect(input).toHaveValue("echo later");
+    await user.keyboard("{ArrowUp}");
+    expect(input).toHaveValue("python probe.py");
+    await user.keyboard("{ArrowDown}");
+    expect(input).toHaveValue("echo later");
+    await user.keyboard("{ArrowDown}");
+    expect(input).toHaveValue("");
+  });
 });
