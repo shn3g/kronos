@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatClient, ChatMessage, ChatSession } from "./client";
 import { ChatMarkdown } from "./ChatMarkdown";
+import { insertMention, mentionQueryAtCursor, uniqueMentionPaths } from "./mentionQuery";
 import { toolCardLabel } from "./toolCard";
+import type { IndexClient } from "../index/client";
 
 interface ChatPageProps {
   chatClient: ChatClient;
@@ -11,7 +13,9 @@ interface ChatPageProps {
   historyOpen: boolean;
   newChatRequest?: number;
   plannerName?: string | null;
+  indexClient?: IndexClient;
   onOpenWorkspace: () => void;
+  onOpenModels?: () => void;
 }
 
 export function ChatPage({
@@ -20,7 +24,9 @@ export function ChatPage({
   historyOpen,
   newChatRequest = 0,
   plannerName = null,
+  indexClient,
   onOpenWorkspace,
+  onOpenModels,
 }: ChatPageProps) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -28,6 +34,7 @@ export function ChatPage({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mentionPaths, setMentionPaths] = useState<string[]>([]);
   const inflightSessionId = useRef<string | null>(null);
   const threadRef = useRef<HTMLOListElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -96,6 +103,35 @@ export function ChatPage({
     composerRef.current?.focus();
   }, [chatClient]);
 
+  useEffect(() => {
+    if (!indexClient || !repositoryId) {
+      setMentionPaths([]);
+      return;
+    }
+    const cursor = composerRef.current?.selectionStart ?? draft.length;
+    const mention = mentionQueryAtCursor(draft, cursor);
+    if (!mention || mention.query === "") {
+      setMentionPaths([]);
+      return;
+    }
+    let cancelled = false;
+    void indexClient.search(repositoryId, mention.query).then(
+      (hits) => {
+        if (!cancelled) {
+          setMentionPaths(uniqueMentionPaths(hits).slice(0, 8));
+        }
+      },
+      () => {
+        if (!cancelled) {
+          setMentionPaths([]);
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [draft, indexClient, repositoryId]);
+
   async function ensureSession(): Promise<string> {
     if (activeId) {
       return activeId;
@@ -113,6 +149,7 @@ export function ChatPage({
     setMessages([]);
     setDraft("");
     setError(null);
+    setMentionPaths([]);
   }
 
   async function onSend() {
@@ -130,6 +167,7 @@ export function ChatPage({
     setBusy(true);
     setError(null);
     setDraft("");
+    setMentionPaths([]);
     setMessages((current) => [...current, pending]);
     if (activeId) {
       inflightSessionId.current = activeId;
@@ -149,6 +187,28 @@ export function ChatPage({
       inflightSessionId.current = null;
       setBusy(false);
     }
+  }
+
+  function applyMention(path: string): void {
+    const cursor = composerRef.current?.selectionStart ?? draft.length;
+    const mention = mentionQueryAtCursor(draft, cursor);
+    if (!mention) {
+      return;
+    }
+    const next = insertMention(draft, mention.start, mention.query, path);
+    setDraft(next);
+    setMentionPaths([]);
+    requestAnimationFrame(() => {
+      const node = composerRef.current;
+      if (!node) {
+        return;
+      }
+      const caret = mention.start + 1 + path.length + 1;
+      node.focus();
+      node.setSelectionRange(caret, caret);
+      node.style.height = "auto";
+      node.style.height = `${Math.min(200, Math.max(44, node.scrollHeight))}px`;
+    });
   }
 
   async function onStop() {
@@ -235,45 +295,88 @@ export function ChatPage({
           </p>
         ) : null}
         {error ? <p className="wizard__error">{error}</p> : null}
-        <label className="chat-composer">
-          <span className="visually-hidden">Ask Kronos</span>
-          <textarea
-            ref={composerRef}
-            className="chat-composer__input"
-            value={draft}
-            placeholder="Ask Kronos"
-            aria-label="Ask Kronos"
-            rows={2}
-            onChange={(event) => {
-              setDraft(event.target.value);
-              const node = event.target;
-              node.style.height = "auto";
-              node.style.height = `${Math.min(200, Math.max(44, node.scrollHeight))}px`;
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                void onSend();
-              }
-            }}
-          />
-          <span className="chat-composer__toolbar">
-            {plannerName ? <span className="chat-composer__model">{plannerName}</span> : null}
-            <button
-              type="button"
-              className={busy ? "btn-quiet" : "btn-primary"}
-              disabled={busy || draft.trim() === ""}
-              onClick={() => void onSend()}
-            >
-              {busy ? "Working" : "Send"}
-            </button>
-            {busy ? (
-              <button type="button" className="btn-primary" onClick={() => void onStop()}>
-                Stop
+        <div className="chat-composer-wrap">
+          {mentionPaths.length > 0 ? (
+            <ul className="chat-mentions" id="chat-mentions" role="listbox" aria-label="Workspace files">
+              {mentionPaths.map((path) => (
+                <li key={path} role="presentation">
+                  <button
+                    type="button"
+                    className="chat-mentions__item"
+                    role="option"
+                    title={path}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      applyMention(path);
+                    }}
+                  >
+                    {path}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <label className="chat-composer">
+            <span className="visually-hidden">Ask Kronos</span>
+            <textarea
+              ref={composerRef}
+              className="chat-composer__input"
+              value={draft}
+              placeholder={repositoryId ? "Ask Kronos. Type @ to mention a file." : "Ask Kronos"}
+              aria-label="Ask Kronos"
+              aria-autocomplete="list"
+              aria-expanded={mentionPaths.length > 0}
+              aria-controls={mentionPaths.length > 0 ? "chat-mentions" : undefined}
+              rows={2}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                const node = event.target;
+                node.style.height = "auto";
+                node.style.height = `${Math.min(200, Math.max(44, node.scrollHeight))}px`;
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && mentionPaths.length > 0) {
+                  event.preventDefault();
+                  setMentionPaths([]);
+                  return;
+                }
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  const firstPath = mentionPaths[0];
+                  if (firstPath) {
+                    applyMention(firstPath);
+                    return;
+                  }
+                  void onSend();
+                }
+              }}
+            />
+            <span className="chat-composer__toolbar">
+              {plannerName ? (
+                onOpenModels ? (
+                  <button type="button" className="chat-composer__model" onClick={onOpenModels}>
+                    {plannerName}
+                  </button>
+                ) : (
+                  <span className="chat-composer__model">{plannerName}</span>
+                )
+              ) : null}
+              <button
+                type="button"
+                className={busy ? "btn-quiet" : "btn-primary"}
+                disabled={busy || draft.trim() === ""}
+                onClick={() => void onSend()}
+              >
+                {busy ? "Working" : "Send"}
               </button>
-            ) : null}
-          </span>
-        </label>
+              {busy ? (
+                <button type="button" className="btn-primary" onClick={() => void onStop()}>
+                  Stop
+                </button>
+              ) : null}
+            </span>
+          </label>
+        </div>
       </section>
     </div>
   );

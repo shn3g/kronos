@@ -432,4 +432,23 @@ describe("App shell", () => {
     expect(screen.getAllByText("Ready").length).toBeGreaterThanOrEqual(4);
     expect(screen.getByText(/the local engine is running/i)).toBeInTheDocument();
   });
+
+  it("opens Models from the composer model name", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        engineClient={clientOf({ status: "ready", version: "0.1.0" })}
+        modelsClient={assignedModels()}
+        chatClient={quietChat()}
+        repositoriesClient={quietRepos()}
+        homeClient={quietHome()}
+        goalsClient={quietGoals()}
+        settingsClient={quietSettings()}
+      />,
+    );
+
+    await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.click(screen.getByRole("button", { name: "Local llama" }));
+    expect(await screen.findByRole("heading", { name: /^models$/i })).toBeInTheDocument();
+  });
 });

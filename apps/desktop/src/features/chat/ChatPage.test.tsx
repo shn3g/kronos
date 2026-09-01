@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ChatPage } from "./ChatPage";
 import type { ChatClient } from "./client";
+import type { IndexClient } from "../index/client";
 
 function chatClient(overrides: Partial<ChatClient> = {}): ChatClient {
   return {
@@ -41,6 +42,28 @@ function chatClient(overrides: Partial<ChatClient> = {}): ChatClient {
   };
 }
 
+function indexClient(search: IndexClient["search"]): IndexClient {
+  return {
+    status: async () => ({
+      repositoryId: "repo_alpha",
+      commit: "abc",
+      chunkCount: 4,
+      denseAvailable: false,
+      indexPath: "/tmp/index",
+      ready: true,
+    }),
+    rebuild: async () => ({
+      repositoryId: "repo_alpha",
+      commit: "abc",
+      chunkCount: 4,
+      denseAvailable: false,
+      indexPath: "/tmp/index",
+      ready: true,
+    }),
+    search,
+  };
+}
+
 describe("ChatPage", () => {
   it("names the assigned model in the composer", async () => {
     render(
@@ -54,6 +77,24 @@ describe("ChatPage", () => {
     );
 
     expect(await screen.findByText("Local llama")).toBeInTheDocument();
+  });
+
+  it("opens models when the composer model name is chosen", async () => {
+    const user = userEvent.setup();
+    const onOpenModels = vi.fn();
+    render(
+      <ChatPage
+        chatClient={chatClient()}
+        repositoryId={null}
+        historyOpen={false}
+        plannerName="Local llama"
+        onOpenWorkspace={() => undefined}
+        onOpenModels={onOpenModels}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Local llama" }));
+    expect(onOpenModels).toHaveBeenCalled();
   });
 
   it("keeps Send disabled until the composer has text", async () => {
@@ -290,5 +331,69 @@ describe("ChatPage", () => {
     expect(await screen.findByText("missing")).toBeInTheDocument();
     expect(screen.getByText("missing").tagName).toBe("STRONG");
     expect(screen.getByText("const ok = false;")).toBeInTheDocument();
+  });
+
+  it("inserts an indexed file path when an @ mention is chosen", async () => {
+    const user = userEvent.setup();
+    const search = vi.fn(async () => [
+      {
+        path: "src/App.tsx",
+        startLine: 1,
+        endLine: 20,
+        commit: "abc",
+        symbol: null,
+        rankSources: ["fts"],
+        trust: "ok",
+        text: "export function App",
+      },
+    ]);
+    render(
+      <ChatPage
+        chatClient={chatClient()}
+        repositoryId="repo_alpha"
+        historyOpen={false}
+        indexClient={indexClient(search)}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "Fix @app");
+    await user.click(await screen.findByRole("option", { name: "src/App.tsx" }));
+    expect(box).toHaveValue("Fix @src/App.tsx ");
+    expect(search).toHaveBeenCalledWith("repo_alpha", "app");
+  });
+
+  it("inserts the first mention on Enter instead of sending", async () => {
+    const user = userEvent.setup();
+    const sendMessage = vi.fn();
+    const search = vi.fn(async () => [
+      {
+        path: "src/App.tsx",
+        startLine: 1,
+        endLine: 20,
+        commit: "abc",
+        symbol: null,
+        rankSources: ["fts"],
+        trust: "ok",
+        text: "export function App",
+      },
+    ]);
+    render(
+      <ChatPage
+        chatClient={chatClient({ sendMessage })}
+        repositoryId="repo_alpha"
+        historyOpen={false}
+        indexClient={indexClient(search)}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "Fix @app");
+    await screen.findByRole("option", { name: "src/App.tsx" });
+    await user.keyboard("{Enter}");
+    expect(box).toHaveValue("Fix @src/App.tsx ");
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 });

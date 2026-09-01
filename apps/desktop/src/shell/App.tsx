@@ -20,6 +20,7 @@ import {
 } from "../features/models/client";
 import { plannerDisplayName } from "../features/models/plannerLabel";
 import { IndexPage } from "../features/index/IndexPage";
+import { createProductionIndexClient, type IndexClient } from "../features/index/client";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import {
   createProductionSettingsClient,
@@ -46,6 +47,7 @@ const productionRepos = createProductionRepositoriesClient();
 const productionHome = createProductionHomeClient();
 const productionGoals = createProductionGoalsClient();
 const productionSettings = createProductionSettingsClient();
+const productionIndex = createProductionIndexClient();
 const ACTIVITY_BAR_STORAGE_KEY = "kronos.activityBarCollapsed";
 const INSPECTOR_STORAGE_KEY = "kronos.inspectorCollapsed";
 
@@ -68,6 +70,7 @@ interface AppProps {
   homeClient?: HomeClient;
   goalsClient?: GoalsClient;
   settingsClient?: SettingsPageClients;
+  indexClient?: IndexClient;
 }
 
 export function App({
@@ -78,6 +81,7 @@ export function App({
   homeClient,
   goalsClient,
   settingsClient,
+  indexClient,
 }: AppProps) {
   const engine = engineClient ?? productionEngine;
   const models = modelsClient ?? productionModels;
@@ -86,6 +90,7 @@ export function App({
   const home = homeClient ?? productionHome;
   const goals = goalsClient ?? productionGoals;
   const settings = settingsClient ?? productionSettings;
+  const index = indexClient ?? productionIndex;
   const [engineState, setEngineState] = useState<EngineConnectionState>({
     status: "starting",
   });
@@ -305,8 +310,12 @@ export function App({
                   historyOpen={historyOpen}
                   newChatRequest={newChatRequest}
                   plannerName={plannerName}
+                  indexClient={index}
                   onOpenWorkspace={() => {
                     setActivity("workspaces");
+                  }}
+                  onOpenModels={() => {
+                    setActivity("settings");
                   }}
                 />
               </div>
