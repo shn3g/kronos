@@ -15,6 +15,7 @@ from kronos_engine.application.doctor import DoctorService
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.config.paths import resolve_paths
 from kronos_engine.config.settings import Settings
+from kronos_engine.ports.secrets import SecretStore
 from kronos_engine.state.database import Database
 from kronos_engine.state.event_store import SqliteEventStore
 from kronos_engine.state.leases import SqliteLeases
@@ -48,7 +49,7 @@ def _settings(tmp_path: Path) -> Settings:
     )
 
 
-def _doctor(tmp_path: Path, secrets: InMemorySecretStore | OsSecretStore) -> DoctorService:
+def _doctor(tmp_path: Path, secrets: SecretStore) -> DoctorService:
     settings = _settings(tmp_path)
     database = Database(settings.paths.database)
     conn = database.connect()
@@ -224,6 +225,27 @@ def test_doctor_output_never_contains_os_secrets(tmp_path: Path) -> None:
     blob = b"".join(p.read_bytes() for p in Path(archive.path).rglob("*") if p.is_file())
     assert BOT.encode() not in blob
     assert b"BEGIN RSA" not in blob
+
+
+class _BrokenSecretStore:
+    def put(self, name: str, value: str) -> None:
+        raise RuntimeError(name)
+
+    def get(self, name: str) -> str | None:
+        raise RuntimeError("plaintext keyring leak")
+
+    def delete(self, name: str) -> None:
+        raise RuntimeError(name)
+
+
+def test_doctor_marks_secrets_unhealthy_when_store_cannot_be_read(tmp_path: Path) -> None:
+    doctor = _doctor(tmp_path, _BrokenSecretStore())
+    report = doctor.check(client_version="0.1.0")
+    secrets = next(item for item in report.checks if item.id == "secrets")
+    assert secrets.ok is False
+    assert "not available" in secrets.detail.lower()
+    assert "plaintext" not in secrets.detail.lower()
+    assert "leak" not in secrets.detail.lower()
 
 
 def test_doctor_exposes_named_health_checks(tmp_path: Path) -> None:

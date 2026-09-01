@@ -484,6 +484,7 @@ class DoctorService:
         repo_row = self._conn.execute("SELECT COUNT(*) FROM repositories").fetchone()
         repo_count = int(repo_row[0]) if repo_row is not None else 0
         model_ok = planner is not None and not model_degraded
+        secrets_ok, secrets_detail = self._secrets_health()
         return (
             HealthCheck(
                 id="engine",
@@ -528,10 +529,17 @@ class DoctorService:
             HealthCheck(
                 id="secrets",
                 label="Secrets",
-                ok=True,
-                detail="API keys stay in the operating system secret store.",
+                ok=secrets_ok,
+                detail=secrets_detail,
             ),
         )
+
+    def _secrets_health(self) -> tuple[bool, str]:
+        try:
+            self._secrets.get("kronos:health-probe")
+        except Exception:
+            return False, "The operating system secret store is not available."
+        return True, "The operating system secret store is reachable. API keys stay there."
 
     def _degradation_findings(self) -> list[Finding]:
         rows = self._conn.execute("SELECT kind, target, detail FROM ops_degradation").fetchall()
