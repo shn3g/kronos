@@ -26,6 +26,8 @@ export function ChatPage({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inflightSessionId = useRef<string | null>(null);
+  const threadRef = useRef<HTMLOListElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,6 +81,17 @@ export function ChatPage({
     }
     void startNewChat();
   }, [newChatRequest]);
+
+  useEffect(() => {
+    const node = threadRef.current;
+    if (node) {
+      node.scrollTop = node.scrollHeight;
+    }
+  }, [messages, busy]);
+
+  useEffect(() => {
+    composerRef.current?.focus();
+  }, [chatClient]);
 
   async function ensureSession(): Promise<string> {
     if (activeId) {
@@ -194,7 +207,7 @@ export function ChatPage({
             )}
           </div>
         ) : (
-          <ol className="chat-thread">
+          <ol className="chat-thread" ref={threadRef} aria-live="polite">
             {messages.map((item) => (
               <li
                 key={item.id}
@@ -218,6 +231,7 @@ export function ChatPage({
         <label className="chat-composer">
           <span className="visually-hidden">Ask Kronos</span>
           <textarea
+            ref={composerRef}
             className="chat-composer__input"
             value={draft}
             placeholder="Ask Kronos…"
@@ -233,11 +247,16 @@ export function ChatPage({
               }
             }}
           />
-          <button type="button" className="btn-primary" disabled={busy} onClick={() => void onSend()}>
+          <button
+            type="button"
+            className={busy ? "btn-quiet" : "btn-primary"}
+            disabled={busy}
+            onClick={() => void onSend()}
+          >
             {busy ? "Working" : "Send"}
           </button>
           {busy ? (
-            <button type="button" className="btn-quiet" onClick={() => void onStop()}>
+            <button type="button" className="btn-primary" onClick={() => void onStop()}>
               Stop
             </button>
           ) : null}

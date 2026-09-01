@@ -31,7 +31,7 @@ import { createProductionGoalsClient, type GoalsClient } from "../features/goals
 import { MemoryPage } from "../features/memory/MemoryPage";
 import { ActivityBar, type ActivityId } from "./ActivityBar";
 import { ConnectModelGate } from "./ConnectModelGate";
-import { EngineGate } from "./EngineGate";
+import { CheckingModelGate, EngineGate } from "./EngineGate";
 import { InspectorDrawer, type InspectorTab } from "./InspectorDrawer";
 import { MenuBar } from "./MenuBar";
 import { useSessionContext } from "./useSessionContext";
@@ -110,7 +110,7 @@ export function App({
   useEffect(() => {
     if (!engineReady) {
       setModelReady(false);
-      setModelKnown(engineState.status !== "starting");
+      setModelKnown(false);
       return;
     }
     let cancelled = false;
@@ -173,7 +173,7 @@ export function App({
       <div className="app-shell app-shell--gate">
         <EngineStatus client={engine} />
         <main id="main">
-          <EngineGate starting />
+          <CheckingModelGate />
         </main>
       </div>
     );
@@ -227,7 +227,7 @@ export function App({
           </header>
           <div className="app-columns">
             <main id="main" className="app-main" tabIndex={-1}>
-              <div hidden={activity !== "chat"}>
+              <div hidden={activity !== "chat"} className="app-main__panel app-main__panel--chat">
                 <ChatPage
                   chatClient={chat}
                   repositoryId={session.workspaceId}
@@ -239,19 +239,25 @@ export function App({
                 />
               </div>
               {activity === "workspaces" ? (
-                <WorkspacesPage
-                  engineClient={engine}
-                  repositoriesClient={repos}
-                  pickFolder={pickRepositoryFolder}
-                />
+                <div className="app-main__panel">
+                  <WorkspacesPage
+                    engineClient={engine}
+                    repositoriesClient={repos}
+                    pickFolder={pickRepositoryFolder}
+                  />
+                </div>
               ) : null}
-              {activity === "index" ? <IndexPage engineClient={engine} /> : null}
+              {activity === "index" ? (
+                <div className="app-main__panel">
+                  <IndexPage engineClient={engine} />
+                </div>
+              ) : null}
               {activity === "settings" ? (
-                <>
+                <div className="app-main__panel">
                   <SettingsPage engineClient={engine} settingsClient={settings} />
                   <MemoryPage engineClient={engine} />
                   <ModelsPage engineClient={engine} modelsClient={models} />
-                </>
+                </div>
               ) : null}
             </main>
             <InspectorDrawer

@@ -244,6 +244,29 @@ describe("App shell", () => {
     expect(screen.queryByText(/engineering OS/i)).not.toBeInTheDocument();
   });
 
+  it("does not say the engine is starting while the model snapshot loads", async () => {
+    render(
+      <App
+        engineClient={clientOf({ status: "ready", version: "0.1.0" })}
+        modelsClient={{
+          ...emptyModels(),
+          snapshot: () => new Promise(() => undefined),
+        }}
+        chatClient={quietChat()}
+        repositoriesClient={quietRepos()}
+        homeClient={quietHome()}
+        goalsClient={quietGoals()}
+        settingsClient={quietSettings()}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: /checking the model connection/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/starting kronos/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /ask kronos/i })).not.toBeInTheDocument();
+  });
+
   it("opens a desktop frame with menus, chat, and inspector tabs once a model is assigned", async () => {
     const user = userEvent.setup();
     render(

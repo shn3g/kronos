@@ -7,6 +7,7 @@ import type { HomeClient, HomeDashboard } from "../features/home/client";
 import type { SettingsPageClients } from "../features/settings/client";
 import type { EnrolledRepository, RepositoriesClient } from "../features/workspaces/client";
 import type { InspectorChange } from "./InspectorDrawer";
+import { inspectWorkspaceChanges } from "./inspectWorkspaceChanges";
 import {
   readStoredWorkspaceId,
   resolveActiveWorkspaceId,
@@ -23,9 +24,7 @@ interface SessionContextInput {
 }
 
 function changesForWorkspace(dashboard: HomeDashboard, workspaceId: string | null): InspectorChange[] {
-  return dashboard.diffs
-    .filter((item) => !workspaceId || !item.repositoryId || item.repositoryId === workspaceId)
-    .map((item) => ({ path: item.path, summary: item.summary }));
+  return inspectWorkspaceChanges(dashboard.diffs, workspaceId);
 }
 
 function goalsForWorkspace(

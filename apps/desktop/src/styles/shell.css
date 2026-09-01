@@ -63,9 +63,27 @@
 }
 
 .app-main {
+  display: flex;
   min-width: 0;
   min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app-main__panel {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
+}
+
+.app-main__panel--chat {
+  display: flex;
+  overflow: hidden;
+  flex-direction: column;
+}
+
+.app-main__panel[hidden] {
+  display: none;
 }
 
 .menu-bar {
@@ -335,8 +353,9 @@
 
 .chat-layout {
   display: flex;
-  height: 100%;
   min-height: 0;
+  flex: 1;
+  height: 100%;
 }
 
 .chat-history {
@@ -374,6 +393,7 @@
 .chat-stage {
   display: flex;
   min-width: 0;
+  min-height: 0;
   flex: 1;
   flex-direction: column;
   padding: 16px;
@@ -416,6 +436,8 @@
 
 .chat-bubble p {
   margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .chat-bubble--user {

@@ -23,3 +23,12 @@ export function EngineGate({ starting }: EngineGateProps) {
     </section>
   );
 }
+
+export function CheckingModelGate() {
+  return (
+    <section className="gate">
+      <h1 className="gate__title">Checking the model connection</h1>
+      <p className="gate__body">The local engine is ready. Looking up the assigned model.</p>
+    </section>
+  );
+}
