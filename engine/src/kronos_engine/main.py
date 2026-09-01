@@ -8,6 +8,7 @@ import socket
 import uvicorn
 
 from kronos_engine.api.app import create_app
+from kronos_engine.config.ready_file import write_engine_ready
 from kronos_engine.config.settings import load_settings
 from kronos_engine.observability.logging import configure_logging
 from kronos_engine.state.database import Database
@@ -28,6 +29,7 @@ def main() -> None:
     sock = _bind_loopback(settings.bind_host, settings.bind_port)
     host, port = sock.getsockname()[:2]
     ready_url = f"http://[{host}]:{port}" if ":" in str(host) else f"http://{host}:{port}"
+    write_engine_ready(settings.paths, ready_url)
     app = create_app(settings, database, telegram_auto_poll=True)
     config = uvicorn.Config(app, host=host, port=port, log_config=None)
     server = _ReadyServer(config, ready_url)
