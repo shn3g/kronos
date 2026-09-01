@@ -91,6 +91,7 @@ from kronos_engine.application.event_query import EventQuery
 from kronos_engine.application.github_setup import GitHubSetupService
 from kronos_engine.application.goal_engine import GoalEngine
 from kronos_engine.application.goals import GoalService
+from kronos_engine.application.index_sync import INDEX_SYNC_INTERVAL_SECONDS, sync_enrolled_indexes
 from kronos_engine.application.model_profiles import (
     ModelProfileService,
     ProviderDraft,
@@ -197,7 +198,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         stop_polling = threading.Event()
-        worker: threading.Thread | None = None
+        workers: list[threading.Thread] = []
         if telegram_auto_poll:
             poller = TelegramPoller(store, telegram_connector)
 
@@ -207,9 +208,20 @@ def create_app(
 
             worker = threading.Thread(target=_poll, daemon=True, name="kronos-telegram")
             worker.start()
+            workers.append(worker)
+
+        def _index_watch() -> None:
+            while not stop_polling.wait(INDEX_SYNC_INTERVAL_SECONDS):
+                sync_enrolled_indexes(database, settings.paths)
+
+        index_worker = threading.Thread(
+            target=_index_watch, daemon=True, name="kronos-index-watch"
+        )
+        index_worker.start()
+        workers.append(index_worker)
         yield
         stop_polling.set()
-        if worker is not None:
+        for worker in workers:
             worker.join(timeout=2.0)
 
     app = FastAPI(title="Kronos Engine", version=settings.engine_version, lifespan=lifespan)
@@ -715,7 +727,7 @@ def create_app(
                     body.content,
                     repository_id=body.repository_id,
                 )
-                session, _ = service.get(session_id)
+                session, _loaded = service.get(session_id)
             except LookupError as error:
                 raise HTTPException(status_code=404, detail="chat session not found") from error
             except ValueError as error:

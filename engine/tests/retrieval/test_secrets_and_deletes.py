@@ -112,3 +112,19 @@ def test_changed_file_replaces_previous_chunks(tmp_path: Path) -> None:
     assert service.search("repo_edit", "OLD_TOKEN_VALUE").items == ()
     hits = service.search("repo_edit", "NEW_TOKEN_VALUE")
     assert any(item.path.endswith("mod.py") for item in hits.items)
+
+
+def test_incremental_indexes_uncommitted_working_tree_edits(tmp_path: Path) -> None:
+    paths = kronos_paths(tmp_path)
+    root = init_git_repo(
+        tmp_path / "dirty",
+        files={"src/mod.py": "COMMITTED_TOKEN_VALUE = 1\n"},
+    )
+    service = IndexingService(paths)
+    policy = indexing_policy()
+    service.rebuild("repo_dirty", root, policy)
+    (root / "src" / "mod.py").write_text("UNCOMMITTED_TOKEN_VALUE = 2\n", encoding="utf-8")
+    service.incremental("repo_dirty", root, policy)
+    assert service.search("repo_dirty", "COMMITTED_TOKEN_VALUE").items == ()
+    hits = service.search("repo_dirty", "UNCOMMITTED_TOKEN_VALUE")
+    assert any(item.path.endswith("mod.py") for item in hits.items)

@@ -31,6 +31,7 @@ class SqliteIndexStore:
         self._conn.execute("DELETE FROM relations")
         self._conn.execute("DELETE FROM chunks_fts")
         self._conn.execute("DELETE FROM chunks")
+        self._conn.execute("DELETE FROM working_files")
         self.upsert(chunks)
         self.replace_relations(relations)
 
@@ -132,6 +133,28 @@ class SqliteIndexStore:
         )
         self._conn.commit()
 
+    def working_file_matches(self, path: str, mtime_ns: int, size: int) -> bool:
+        row = self._conn.execute(
+            "SELECT mtime_ns, size FROM working_files WHERE path = ?",
+            (path.replace("\\", "/"),),
+        ).fetchone()
+        if row is None:
+            return False
+        return int(row["mtime_ns"]) == mtime_ns and int(row["size"]) == size
+
+    def set_working_file(self, path: str, mtime_ns: int, size: int) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO working_files (path, mtime_ns, size) VALUES (?, ?, ?)",
+            (path.replace("\\", "/"), mtime_ns, size),
+        )
+        self._conn.commit()
+
+    def clear_working_file(self, path: str) -> None:
+        self._conn.execute(
+            "DELETE FROM working_files WHERE path = ?", (path.replace("\\", "/"),)
+        )
+        self._conn.commit()
+
     def list_relations(self) -> Sequence[Relation]:
         rows = self._conn.execute("SELECT src_path, dst_path, rel_type FROM relations").fetchall()
         return tuple(
@@ -183,6 +206,11 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             kind TEXT NOT NULL,
             dim INTEGER NOT NULL,
             embedding BLOB NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS working_files (
+            path TEXT PRIMARY KEY,
+            mtime_ns INTEGER NOT NULL,
+            size INTEGER NOT NULL
         );
         """
     )

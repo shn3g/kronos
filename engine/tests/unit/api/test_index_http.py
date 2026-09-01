@@ -148,3 +148,30 @@ async def test_enrol_builds_index_and_refresh_indexes_new_commits(
     )
     assert search.status_code == 200
     assert any("added.py" in item["path"] for item in search.json()["items"])
+
+
+@pytest.mark.asyncio
+async def test_refresh_indexes_uncommitted_working_tree_edits(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    http, headers, tmp_path = client
+    root = init_git_repo(
+        tmp_path / "dirty",
+        files={"src/keep.py": "def keep():\n    return 1\n"},
+    )
+    enrolled = await http.post("/repositories", headers=headers, json={"path": str(root)})
+    assert enrolled.status_code == 200
+    repo_id = enrolled.json()["repository"]["id"]
+    (root / "src" / "keep.py").write_text(
+        "UNCOMMITTED_HTTP_TOKEN = 1\n",
+        encoding="utf-8",
+    )
+    refreshed = await http.post(f"/repositories/{repo_id}/index/refresh", headers=headers)
+    assert refreshed.status_code == 200
+    search = await http.get(
+        f"/repositories/{repo_id}/index/search",
+        headers=headers,
+        params={"q": "UNCOMMITTED_HTTP_TOKEN"},
+    )
+    assert search.status_code == 200
+    assert any("keep.py" in item["path"] for item in search.json()["items"])

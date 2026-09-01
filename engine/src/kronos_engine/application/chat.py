@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -50,7 +50,14 @@ def request_cancel(session_id: str) -> None:
 
 
 class ChatCompleter(Protocol):
-    def complete(self, turns: Sequence[ChatTurn], system: str) -> str: ...
+    def complete(
+        self,
+        turns: Sequence[ChatTurn],
+        system: str,
+        *,
+        cancel: Event | None = None,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +68,14 @@ class ChatTurn:
 
 class ChatModelError(RuntimeError):
     """Raised when no usable model is assigned."""
+
+
+class ChatTurnCancelled(RuntimeError):
+    """Raised when Stop aborts an in-flight model completion."""
+
+    def __init__(self, partial: str) -> None:
+        super().__init__("chat turn cancelled")
+        self.partial = partial
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +178,8 @@ class ChatService:
         cancel.clear()
         try:
             self._run_agent(session.id, repo_id, cancel)
+        except ChatTurnCancelled as cancelled:
+            self._record_stop(session.id, cancelled.partial)
         except ChatModelError:
             self._append(
                 session.id,
@@ -187,56 +204,24 @@ class ChatService:
     def _run_agent(self, session_id: str, repository_id: str | None, cancel: Event) -> None:
         for _ in range(MAX_TOOL_ROUNDS):
             if cancel.is_set():
-                self._append(
-                    session_id,
-                    role="assistant",
-                    content=STOP_MESSAGE,
-                    tool_name=None,
-                    tool_status=None,
-                )
+                self._record_stop(session_id, "")
                 return
             turns = tuple(
                 ChatTurn(role=item.role, content=item.content)
                 for item in self._store.list_messages(session_id)
             )
-            reply = self._completer.complete(turns, self._system_prompt(turns))
-            if cancel.is_set():
-                self._append(
-                    session_id,
-                    role="assistant",
-                    content=STOP_MESSAGE,
-                    tool_name=None,
-                    tool_status=None,
-                )
-                return
             try:
-                call = parse_tool_call(reply)
-            except ToolParseError as error:
-                self._append(
-                    session_id,
-                    role="assistant",
-                    content=str(error),
-                    tool_name=None,
-                    tool_status="error",
+                reply, streaming_id = self._stream_reply(
+                    session_id, turns, self._system_prompt(turns), cancel
                 )
+            except ChatTurnCancelled:
                 return
-            if call is None:
-                self._append(
-                    session_id,
-                    role="assistant",
-                    content=reply.strip() or "I had nothing to add.",
-                    tool_name=None,
-                    tool_status=None,
-                )
+            if cancel.is_set():
+                shown = _stop_partial(reply)
+                self._record_stop(session_id, shown, streaming_id)
                 return
-            result = self._execute_tool(call, repository_id)
-            self._append(
-                session_id,
-                role="tool",
-                content=result,
-                tool_name=call.name,
-                tool_status="ok",
-            )
+            if self._finish_model_text(session_id, repository_id, reply, streaming_id):
+                return
         self._append(
             session_id,
             role="assistant",
@@ -244,6 +229,103 @@ class ChatService:
             tool_name=None,
             tool_status=None,
         )
+
+    def _stream_reply(
+        self,
+        session_id: str,
+        turns: Sequence[ChatTurn],
+        system: str,
+        cancel: Event,
+    ) -> tuple[str, str | None]:
+        chunks: list[str] = []
+        message_id: str | None = None
+
+        def on_delta(chunk: str) -> None:
+            nonlocal message_id
+            chunks.append(chunk)
+            message_id = self._upsert_stream(session_id, message_id, "".join(chunks))
+
+        try:
+            reply = self._invoke_complete(turns, system, cancel, on_delta)
+        except ChatTurnCancelled as cancelled:
+            self._record_stop(session_id, cancelled.partial or "".join(chunks), message_id)
+            raise
+        return reply, message_id
+
+    def _invoke_complete(
+        self,
+        turns: Sequence[ChatTurn],
+        system: str,
+        cancel: Event,
+        on_delta: Callable[[str], None],
+    ) -> str:
+        method = self._completer.complete
+        return method(turns, system, cancel=cancel, on_delta=on_delta)
+
+    def _finish_model_text(
+        self,
+        session_id: str,
+        repository_id: str | None,
+        reply: str,
+        streaming_id: str | None,
+    ) -> bool:
+        try:
+            call = parse_tool_call(reply)
+        except ToolParseError as error:
+            self._finalize_assistant(session_id, streaming_id, str(error), tool_status="error")
+            return True
+        if call is None:
+            self._finalize_assistant(
+                session_id, streaming_id, reply.strip() or "I had nothing to add.", None
+            )
+            return True
+        if streaming_id is not None:
+            self._store.delete_message(streaming_id)
+        result = self._execute_tool(call, repository_id)
+        self._append(
+            session_id,
+            role="tool",
+            content=result,
+            tool_name=call.name,
+            tool_status="ok",
+        )
+        return False
+
+    def _upsert_stream(self, session_id: str, message_id: str | None, content: str) -> str:
+        if message_id is None:
+            return self._append(
+                session_id,
+                role="assistant",
+                content=content,
+                tool_name=None,
+                tool_status="streaming",
+            )
+        self._store.update_message(message_id, content=content, tool_status="streaming")
+        return message_id
+
+    def _finalize_assistant(
+        self,
+        session_id: str,
+        message_id: str | None,
+        content: str,
+        tool_status: str | None,
+    ) -> None:
+        if message_id is None:
+            self._append(
+                session_id,
+                role="assistant",
+                content=content,
+                tool_name=None,
+                tool_status=tool_status,
+            )
+            return
+        self._store.update_message(message_id, content=content, tool_status=tool_status)
+
+    def _record_stop(
+        self, session_id: str, partial: str, message_id: str | None = None
+    ) -> None:
+        body = STOP_MESSAGE if partial.strip() == "" else f"{partial.rstrip()}\n\n{STOP_MESSAGE}"
+        self._finalize_assistant(session_id, message_id, body, None)
 
     def _execute_tool(self, call: ToolCall, repository_id: str | None) -> str:
         if call.name == "list_goals":
@@ -319,7 +401,24 @@ class ChatService:
         if not _is_inside(root, target.parent.resolve()):
             return "That path is outside the workspace or is not a file."
         target.write_text(content, encoding="utf-8")
+        self._refresh_written_path(repository_id, root, record, as_posix)
         return f"Wrote {as_posix} ({len(content)} characters)."
+
+    def _refresh_written_path(
+        self, repository_id: str, root: Path, record: object, rel_path: str
+    ) -> None:
+        if self._indexer is None:
+            return
+        upsert = getattr(self._indexer, "upsert_working_paths", None)
+        if not callable(upsert):
+            return
+        policy = getattr(record, "policy", None)
+        if policy is None:
+            return
+        try:
+            upsert(repository_id, root, policy, (rel_path,))
+        except Exception:
+            return
 
     def _search_memory(self, query: str) -> str:
         if self._memory_conn is None:
@@ -383,11 +482,12 @@ class ChatService:
         content: str,
         tool_name: str | None,
         tool_status: str | None,
-    ) -> None:
+    ) -> str:
         now = self._now()
+        message_id = f"msg_{uuid4().hex[:16]}"
         self._store.append_message(
             ChatMessageRow(
-                id=f"msg_{uuid4().hex[:16]}",
+                id=message_id,
                 session_id=session_id,
                 role=role,
                 content=content,
@@ -407,6 +507,7 @@ class ChatService:
                 updated_at=now,
             )
         )
+        return message_id
 
     def _now(self) -> str:
         if self._clock is not None:
@@ -450,3 +551,12 @@ def _is_inside(root: Path, target: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _stop_partial(reply: str) -> str:
+    try:
+        if parse_tool_call(reply) is not None:
+            return ""
+    except ToolParseError:
+        return reply
+    return reply

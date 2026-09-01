@@ -14,11 +14,12 @@ _OVERLAP = 10
 _FILE_CHUNK_LIMIT = 200
 
 
-def chunk_text(scanned: ScannedFile, *, commit: str) -> tuple[IndexedChunk, ...]:
+def chunk_text(
+    scanned: ScannedFile, *, commit: str, trust: str = "tracked"
+) -> tuple[IndexedChunk, ...]:
     lines = scanned.text.splitlines()
     if not lines and scanned.text == "":
         lines = []
-    trust = "tracked"
     chunks: list[IndexedChunk] = []
     symbols = extract_symbols(scanned.text, scanned.language)
     for symbol in symbols:

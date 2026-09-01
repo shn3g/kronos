@@ -84,6 +84,19 @@ class SqliteChatStore:
         )
         self._conn.commit()
 
+    def update_message(
+        self, message_id: str, *, content: str, tool_status: str | None
+    ) -> None:
+        self._conn.execute(
+            "UPDATE chat_messages SET content = ?, tool_status = ? WHERE id = ?",
+            (content, tool_status, message_id),
+        )
+        self._conn.commit()
+
+    def delete_message(self, message_id: str) -> None:
+        self._conn.execute("DELETE FROM chat_messages WHERE id = ?", (message_id,))
+        self._conn.commit()
+
     def list_messages(self, session_id: str) -> Sequence[ChatMessageRow]:
         rows = self._conn.execute(
             "SELECT id, session_id, role, content, tool_name, tool_status, created_at, seq "

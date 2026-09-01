@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,7 +16,14 @@ from kronos_engine.indexing.context import ContextPack, assemble_context, repo_m
 from kronos_engine.indexing.dense import search_dense, upsert_embeddings
 from kronos_engine.indexing.fusion import reciprocal_rank_fusion
 from kronos_engine.indexing.graph import build_relations, expand_paths
-from kronos_engine.indexing.scanner import GitReadError, diff_paths, head_commit, scan_repository
+from kronos_engine.indexing.scanner import (
+    GitReadError,
+    diff_paths,
+    head_commit,
+    scan_repository,
+    scan_working_file,
+    working_tree_changes,
+)
 from kronos_engine.indexing.sparse import SqliteIndexStore
 from kronos_engine.ports.embedding import EmbeddingPort
 from kronos_engine.ports.index_store import IndexedChunk
@@ -59,48 +67,42 @@ class IndexingService:
 
     def incremental(self, repo_id: str, git_root: Path, policy: RepositoryPolicy) -> IndexStatus:
         root = git_root.resolve()
-        directory = self._index_dir(repo_id)
-        db_path = directory / "index.sqlite3"
+        db_path = self._index_dir(repo_id) / "index.sqlite3"
+        if not db_path.is_file():
+            return self.rebuild(repo_id, root, policy)
+        store = self._open(repo_id, root)
+        rebuild = False
+        try:
+            old = store.indexed_commit()
+            new = head_commit(root)
+            if old is None:
+                rebuild = True
+            elif old != new:
+                rebuild = not self._apply_commit_diff(store, root, policy, old, new)
+            if not rebuild:
+                return self._sync_working_tree(store, repo_id, root, policy, new)
+        finally:
+            store.close()
+        return self.rebuild(repo_id, root, policy)
+
+    def upsert_working_paths(
+        self,
+        repo_id: str,
+        git_root: Path,
+        policy: RepositoryPolicy,
+        paths: Sequence[str],
+    ) -> IndexStatus:
+        root = git_root.resolve()
+        db_path = self._index_dir(repo_id) / "index.sqlite3"
         if not db_path.is_file():
             return self.rebuild(repo_id, root, policy)
         store = self._open(repo_id, root)
         try:
-            old = store.indexed_commit()
-            new = head_commit(root)
-            if old is not None and old == new:
-                return self._status(repo_id, store)
-            if old is not None:
-                try:
-                    changes = diff_paths(root, old, new)
-                except GitReadError:
-                    pass
-                else:
-                    scanned = {
-                        item.path: item for item in scan_repository(root, policy, commit=new)
-                    }
-                    changed_chunks: list[IndexedChunk] = []
-                    for status, path, renamed_from in changes:
-                        if status == "D":
-                            store.delete_paths([path])
-                            continue
-                        if status == "R":
-                            store.delete_paths([renamed_from, path])
-                        else:
-                            store.delete_paths([path])
-                        current = scanned.get(path)
-                        if current is None:
-                            continue
-                        chunked = chunk_text(current, commit=new)
-                        store.upsert(chunked)
-                        changed_chunks.extend(chunked)
-                    store.replace_relations(build_relations(store.list_chunks()))
-                    if changed_chunks:
-                        upsert_embeddings(store.connection(), changed_chunks, self._embeddings)
-                    store.set_indexed_commit(new)
-                    return self._status(repo_id, store)
+            commit = store.indexed_commit() or head_commit(root)
+            self._reindex_paths(store, root, policy, commit, paths)
+            return self._status(repo_id, store)
         finally:
             store.close()
-        return self.rebuild(repo_id, root, policy)
 
     def search(
         self,
@@ -189,6 +191,92 @@ class IndexingService:
         finally:
             store.close()
 
+    def _apply_commit_diff(
+        self,
+        store: SqliteIndexStore,
+        root: Path,
+        policy: RepositoryPolicy,
+        old: str,
+        new: str,
+    ) -> bool:
+        try:
+            changes = diff_paths(root, old, new)
+        except GitReadError:
+            return False
+        scanned = {item.path: item for item in scan_repository(root, policy, commit=new)}
+        changed_chunks: list[IndexedChunk] = []
+        for status, path, renamed_from in changes:
+            if status == "D":
+                store.delete_paths([path])
+                continue
+            if status == "R":
+                store.delete_paths([renamed_from, path])
+            else:
+                store.delete_paths([path])
+            current = scanned.get(path)
+            if current is None:
+                continue
+            chunked = chunk_text(current, commit=new)
+            store.upsert(chunked)
+            changed_chunks.extend(chunked)
+        store.replace_relations(build_relations(store.list_chunks()))
+        if changed_chunks:
+            upsert_embeddings(store.connection(), changed_chunks, self._embeddings)
+        store.set_indexed_commit(new)
+        return True
+
+    def _sync_working_tree(
+        self,
+        store: SqliteIndexStore,
+        repo_id: str,
+        root: Path,
+        policy: RepositoryPolicy,
+        commit: str,
+    ) -> IndexStatus:
+        try:
+            changes = working_tree_changes(root)
+        except GitReadError:
+            return self._status(repo_id, store)
+        paths = [path for status, path in changes if status != "D"]
+        deleted = [path for status, path in changes if status == "D"]
+        for path in deleted:
+            store.delete_paths([path])
+            store.clear_working_file(path)
+        if paths:
+            self._reindex_paths(store, root, policy, commit, paths)
+        elif deleted:
+            store.replace_relations(build_relations(store.list_chunks()))
+        return self._status(repo_id, store)
+
+    def _reindex_paths(
+        self,
+        store: SqliteIndexStore,
+        root: Path,
+        policy: RepositoryPolicy,
+        commit: str,
+        paths: Sequence[str],
+    ) -> None:
+        changed_chunks: list[IndexedChunk] = []
+        for raw_path in paths:
+            path = raw_path.replace("\\", "/")
+            scanned = scan_working_file(root, path, policy)
+            if scanned is None:
+                store.delete_paths([path])
+                store.clear_working_file(path)
+                continue
+            stamp = _file_stamp(root / path)
+            if stamp is not None and store.working_file_matches(path, stamp[0], stamp[1]):
+                continue
+            chunked = chunk_text(scanned, commit=commit, trust="working")
+            store.delete_paths([path])
+            store.upsert(chunked)
+            if stamp is not None:
+                store.set_working_file(path, stamp[0], stamp[1])
+            changed_chunks.extend(chunked)
+        if changed_chunks:
+            store.replace_relations(build_relations(store.list_chunks()))
+            upsert_embeddings(store.connection(), changed_chunks, self._embeddings)
+
     def _graph_ranking(
         self, store: SqliteIndexStore, sparse_ids: list[str], *, limit: int
     ) -> list[str]:
@@ -239,6 +327,14 @@ class IndexingService:
 
     def _index_dir(self, repo_id: str) -> Path:
         return self._paths.cache / "indexes" / repo_id
+
+
+def _file_stamp(path: Path) -> tuple[int, int] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return int(stat.st_mtime_ns), int(stat.st_size)
 
 
 def _assert_outside(target: Path, enrolled_root: Path) -> None:

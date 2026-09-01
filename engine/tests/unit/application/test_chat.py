@@ -4,7 +4,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-from kronos_engine.application.chat import ChatService, ChatTurn, request_cancel
+from kronos_engine.application.chat import (
+    ChatService,
+    ChatTurn,
+    ChatTurnCancelled,
+    request_cancel,
+)
 from kronos_engine.domain.entities import EnrolledRepository, RepositoryId, RepositoryStatus
 from kronos_engine.domain.policy import default_policy
 from kronos_engine.memory.procedural import persist_record
@@ -18,7 +23,15 @@ class ScriptedCompleter:
         self.replies = list(replies)
         self.prompts: list[tuple[tuple[ChatTurn, ...], str]] = []
 
-    def complete(self, turns: Sequence[ChatTurn], system: str) -> str:
+    def complete(
+        self,
+        turns: Sequence[ChatTurn],
+        system: str,
+        *,
+        cancel: object = None,
+        on_delta: object = None,
+    ) -> str:
+        _ = cancel, on_delta
         self.prompts.append((tuple(turns), system))
         return self.replies.pop(0)
 
@@ -64,8 +77,15 @@ class _CancelDuringComplete:
         self.reply = reply
         self.calls = 0
 
-    def complete(self, turns: Sequence[ChatTurn], system: str) -> str:
-        _ = turns, system
+    def complete(
+        self,
+        turns: Sequence[ChatTurn],
+        system: str,
+        *,
+        cancel: object = None,
+        on_delta: object = None,
+    ) -> str:
+        _ = turns, system, cancel, on_delta
         self.calls += 1
         request_cancel(self.session_id)
         return self.reply
@@ -167,3 +187,72 @@ def test_active_memories_are_injected_into_the_system_prompt(tmp_path: Path) -> 
     service.send_message(session.id, "Fix onboarding")
     system = completer.prompts[0][1]
     assert "Never send onboarding to the calendar" in system
+
+
+_STREAM_SNAPSHOTS: list[tuple[str, ...]] = []
+
+
+def _stream_and_snapshot(store: SqliteChatStore, session_id: str, on_delta: object) -> str:
+    if not callable(on_delta):
+        raise AssertionError("chat must stream tokens through on_delta")
+    on_delta("partial-token")
+    snapshot = tuple(item.content for item in store.list_messages(session_id))
+    _STREAM_SNAPSHOTS.append(snapshot)
+    return "partial-token and more"
+
+
+def test_send_persists_streamed_tokens_before_complete_returns(tmp_path: Path) -> None:
+    _STREAM_SNAPSHOTS.clear()
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    store = SqliteChatStore(conn)
+
+    class Streamer:
+        def complete(
+            self,
+            turns: Sequence[ChatTurn],
+            system: str,
+            *,
+            cancel: object = None,
+            on_delta: object = None,
+        ) -> str:
+            _ = turns, system, cancel
+            return _stream_and_snapshot(store, session.id, on_delta)
+
+    service = ChatService(store, Streamer())
+    session = service.create_session()
+    messages = service.send_message(session.id, "Hi")
+    assert _STREAM_SNAPSHOTS
+    assert any("partial-token" in item for item in _STREAM_SNAPSHOTS[0])
+    assert messages[-1].content == "partial-token and more"
+    assert messages[-1].tool_status is None
+
+
+def test_cancel_during_stream_keeps_partial_and_stops(tmp_path: Path) -> None:
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    store = SqliteChatStore(conn)
+
+    class StreamThenCancel:
+        def complete(
+            self,
+            turns: Sequence[ChatTurn],
+            system: str,
+            *,
+            cancel: object = None,
+            on_delta: object = None,
+        ) -> str:
+            _ = turns, system
+            if callable(on_delta):
+                on_delta("Hi from the model")
+            request_cancel(session.id)
+            raise ChatTurnCancelled("Hi from the model")
+
+    service = ChatService(store, StreamThenCancel())
+    session = service.create_session()
+    messages = service.send_message(session.id, "Go")
+    assistant = [item for item in messages if item.role == "assistant"]
+    assert assistant
+    assert "Hi from the model" in assistant[-1].content
+    assert "Stopped" in assistant[-1].content
+    assert not any(item.role == "tool" for item in messages)

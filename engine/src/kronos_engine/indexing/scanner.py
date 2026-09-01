@@ -137,6 +137,58 @@ def diff_paths(
         old_commit,
         new_commit,
     )
+    return _parse_name_status_z(raw)
+
+
+def working_tree_changes(git_root: Path) -> tuple[tuple[str, str], ...]:
+    """Dirty and untracked paths relative to HEAD. status is A, M, D, or R."""
+    root = git_root.resolve()
+    dirty = _parse_name_status_z(_git_bytes(root, "diff", "--name-status", "-z", "HEAD"))
+    found: list[tuple[str, str]] = [(status, path) for status, path, _renamed in dirty]
+    untracked = _git_bytes(root, "ls-files", "-z", "--others", "--exclude-standard")
+    seen = {path for _status, path in found}
+    for item in untracked.split(b"\0"):
+        if not item:
+            continue
+        path = item.decode("utf-8").replace("\\", "/")
+        if path not in seen:
+            found.append(("A", path))
+    return tuple(found)
+
+
+def scan_working_file(
+    git_root: Path, posix: str, policy: RepositoryPolicy
+) -> ScannedFile | None:
+    if not policy.indexing.enabled:
+        return None
+    normalized = posix.replace("\\", "/")
+    if _should_skip_path(normalized, policy.indexing.exclude_prefixes):
+        return None
+    path = git_root.resolve() / normalized
+    if not path.is_file():
+        return None
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return None
+    if size > policy.indexing.max_file_bytes:
+        return None
+    try:
+        payload = path.read_bytes()
+    except OSError:
+        return None
+    if b"\x00" in payload[:8192]:
+        return None
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if _looks_secret(normalized, text):
+        return None
+    return ScannedFile(path=normalized, text=text, language=detect_language(normalized))
+
+
+def _parse_name_status_z(raw: bytes) -> tuple[tuple[str, str, str], ...]:
     parts = [item.decode("utf-8") for item in raw.split(b"\0") if item]
     changes: list[tuple[str, str, str]] = []
     index = 0

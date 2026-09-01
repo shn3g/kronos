@@ -3,10 +3,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
+from threading import Event
 
-from kronos_engine.adapters.models.openai_compatible import OpenAICompatibleProvider
-from kronos_engine.application.chat import ChatModelError, ChatTurn
+from kronos_engine.adapters.models.openai_compatible import (
+    CompletionCancelled,
+    OpenAICompatibleProvider,
+)
+from kronos_engine.application.chat import ChatModelError, ChatTurn, ChatTurnCancelled
 from kronos_engine.ports.model_provider import CompletionRequest, ModelProvider
 from kronos_engine.ports.model_registry import ModelRegistry
 from kronos_engine.ports.secrets import ScopedSecret, SecretStore
@@ -26,7 +30,26 @@ class AssignedPlannerCompleter:
         self._secrets = secrets
         self._provider = provider
 
-    def complete(self, turns: Sequence[ChatTurn], system: str) -> str:
+    def complete(
+        self,
+        turns: Sequence[ChatTurn],
+        system: str,
+        *,
+        cancel: Event | None = None,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> str:
+        adapter, request, secret = self._bound_request(turns, system)
+        stream = getattr(adapter, "complete_stream", None)
+        if callable(stream):
+            return _consume_stream(stream, request, secret, cancel, on_delta)
+        result = adapter.complete(request, secret)
+        if on_delta is not None and result.text:
+            on_delta(result.text)
+        return result.text
+
+    def _bound_request(
+        self, turns: Sequence[ChatTurn], system: str
+    ) -> tuple[ModelProvider, CompletionRequest, ScopedSecret | None]:
         assignments = self._registry.load_assignments()
         if assignments.planner is None:
             raise ChatModelError("no planner assigned")
@@ -45,8 +68,25 @@ class AssignedPlannerCompleter:
             billed=config.billed,
         )
         prompt = _flatten(system, turns)
-        result = adapter.complete(CompletionRequest(profile=profile, prompt=prompt), secret)
-        return result.text
+        return adapter, CompletionRequest(profile=profile, prompt=prompt), secret
+
+
+def _consume_stream(
+    stream: Callable[..., Iterator[str]],
+    request: CompletionRequest,
+    secret: ScopedSecret | None,
+    cancel: Event | None,
+    on_delta: Callable[[str], None] | None,
+) -> str:
+    parts: list[str] = []
+    try:
+        for chunk in stream(request, secret, cancel=cancel or Event()):
+            parts.append(chunk)
+            if on_delta is not None:
+                on_delta(chunk)
+        return "".join(parts)
+    except CompletionCancelled as error:
+        raise ChatTurnCancelled(error.partial or "".join(parts)) from error
 
 
 def _flatten(system: str, turns: Sequence[ChatTurn]) -> str:

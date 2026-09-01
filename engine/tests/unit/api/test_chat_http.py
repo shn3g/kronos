@@ -19,8 +19,15 @@ class ScriptedCompleter:
     def __init__(self, replies: list[str]) -> None:
         self.replies = list(replies)
 
-    def complete(self, turns: Sequence[ChatTurn], system: str) -> str:
-        _ = turns, system
+    def complete(
+        self,
+        turns: Sequence[ChatTurn],
+        system: str,
+        *,
+        cancel: object = None,
+        on_delta: object = None,
+    ) -> str:
+        _ = turns, system, cancel, on_delta
         return self.replies.pop(0)
 
 
