@@ -11,6 +11,7 @@ import {
 import {
   editorLineLabels,
   fileDraftIsDirty,
+  fileFindQueryError,
   fileFindStatusLabel,
   FIND_IN_FILE_EVENT,
   FIND_IN_FILES_EVENT,
@@ -99,6 +100,8 @@ export function FilesPage({
   const [findQuery, setFindQuery] = useState("");
   const [replaceText, setReplaceText] = useState("");
   const [matchCase, setMatchCase] = useState(false);
+  const [wholeWord, setWholeWord] = useState(false);
+  const [regularExpression, setRegularExpression] = useState(false);
   const [goToLineQuery, setGoToLineQuery] = useState("");
   const [goToLineStatus, setGoToLineStatus] = useState("");
   const [findIndex, setFindIndex] = useState(0);
@@ -107,10 +110,15 @@ export function FilesPage({
   dirtyRef.current = dirty;
   findOpenRef.current = findOpen;
   goToLineOpenRef.current = goToLineOpen;
-  const findMatches = useMemo(
-    () => findInFileText(draft ?? "", findQuery, { caseSensitive: matchCase }),
-    [draft, findQuery, matchCase],
+  const findOptions = useMemo(
+    () => ({ caseSensitive: matchCase, wholeWord, regularExpression }),
+    [matchCase, wholeWord, regularExpression],
   );
+  const findMatches = useMemo(
+    () => findInFileText(draft ?? "", findQuery, findOptions),
+    [draft, findQuery, findOptions],
+  );
+  const findQueryError = fileFindQueryError(findQuery, findOptions);
   const activeFind =
     findMatches.length === 0 ? 0 : Math.min(findIndex, findMatches.length - 1);
 
@@ -152,6 +160,8 @@ export function FilesPage({
     setFindQuery("");
     setReplaceText("");
     setMatchCase(false);
+    setWholeWord(false);
+    setRegularExpression(false);
     setGoToLineQuery("");
     setGoToLineStatus("");
     setFindIndex(0);
@@ -518,7 +528,7 @@ export function FilesPage({
   const canEdit = Boolean(preview && !preview.binary && draft !== null && !loadingPreview);
   const findStatus = !canEdit
     ? "Select a file to find in it."
-    : fileFindStatusLabel(findQuery, findMatches.length, activeFind);
+    : (findQueryError ?? fileFindStatusLabel(findQuery, findMatches.length, activeFind));
 
   function stepFind(delta: number): void {
     if (findMatches.length === 0) {
@@ -543,7 +553,7 @@ export function FilesPage({
     if (draft === null || !canEdit) {
       return;
     }
-    const next = replaceAllInFileText(draft, findQuery, replaceText, { caseSensitive: matchCase });
+    const next = replaceAllInFileText(draft, findQuery, replaceText, findOptions);
     setDraft(next.content);
     setFindIndex(0);
   }
@@ -784,6 +794,30 @@ export function FilesPage({
                   }}
                 />
                 Match case
+              </label>
+              <label className="files-page__check" htmlFor="files-whole-word">
+                <input
+                  id="files-whole-word"
+                  type="checkbox"
+                  checked={wholeWord}
+                  onChange={(event) => {
+                    setWholeWord(event.target.checked);
+                    setFindIndex(0);
+                  }}
+                />
+                Whole word
+              </label>
+              <label className="files-page__check" htmlFor="files-regular-expression">
+                <input
+                  id="files-regular-expression"
+                  type="checkbox"
+                  checked={regularExpression}
+                  onChange={(event) => {
+                    setRegularExpression(event.target.checked);
+                    setFindIndex(0);
+                  }}
+                />
+                Regular expression
               </label>
               {replaceOpen ? (
                 <label className="files-page__filter" htmlFor="files-replace">

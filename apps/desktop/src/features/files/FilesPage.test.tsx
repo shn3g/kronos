@@ -663,4 +663,56 @@ describe("FilesPage", () => {
     expect(editor).toHaveProperty("selectionStart", 6);
     expect(editor).toHaveProperty("selectionEnd", 11);
   });
+
+  it("can require a whole word when finding in the open file", async () => {
+    const user = userEvent.setup();
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({
+          readWorkspaceFile: async () => ({
+            path: "src/app.py",
+            content: "cat catalog cat",
+            binary: false,
+          }),
+        })}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    const editor = await screen.findByRole("textbox", { name: "src/app.py" });
+    await user.keyboard("{Control>}f{/Control}");
+    await user.type(await screen.findByRole("searchbox", { name: /find in file/i }), "cat");
+    expect(screen.getByText("1 of 3")).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: /whole word/i }));
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
+    expect(editor).toHaveProperty("selectionStart", 0);
+    expect(editor).toHaveProperty("selectionEnd", 3);
+    await user.click(screen.getByRole("button", { name: /^next$/i }));
+    expect(editor).toHaveProperty("selectionStart", 12);
+    expect(editor).toHaveProperty("selectionEnd", 15);
+  });
+
+  it("says so when a find regular expression is not valid", async () => {
+    const user = userEvent.setup();
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos()}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    await screen.findByRole("textbox", { name: "src/app.py" });
+    await user.keyboard("{Control>}f{/Control}");
+    await user.click(screen.getByRole("checkbox", { name: /regular expression/i }));
+    await user.type(await screen.findByRole("searchbox", { name: /find in file/i }), "[[");
+    expect(screen.getByText(/that regular expression is not valid/i)).toBeInTheDocument();
+  });
 });

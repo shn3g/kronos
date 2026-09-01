@@ -230,6 +230,7 @@ export function MenuBar({
           In Terminal, the shell stays open as a real TTY. Type in the panel. Stop ends the shell.
           Escape stops the current chat turn. Ctrl+F or Cmd+F finds text in the open file.
           Match case limits that search to the same letter case.
+          Whole word and Regular expression refine that search.
           Ctrl+Shift+F or Cmd+Shift+F searches the workspace index. Click a hit to open that line.
           Ctrl+H or Cmd+H replaces text in the open file. Ctrl+G or Cmd+G jumps to a line.
           Revert in Changes restores the last chat write for that file, or the last committed

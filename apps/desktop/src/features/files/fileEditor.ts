@@ -14,7 +14,11 @@ export interface FileFindMatch {
 
 export interface FileFindOptions {
   caseSensitive?: boolean;
+  wholeWord?: boolean;
+  regularExpression?: boolean;
 }
+
+const MAX_FIND_MATCHES = 10_000;
 
 export function fileDraftIsDirty(saved: string | null, draft: string | null): boolean {
   if (saved === null || draft === null) {
@@ -47,24 +51,31 @@ export function findInFileText(
   query: string,
   options: FileFindOptions = {},
 ): FileFindMatch[] {
-  const trimmed = query.trim();
-  if (trimmed === "") {
+  const pattern = compileFindPattern(query, options);
+  if (pattern === null) {
     return [];
   }
-  const caseSensitive = options.caseSensitive === true;
-  const needle = caseSensitive ? trimmed : trimmed.toLowerCase();
-  const haystack = caseSensitive ? content : content.toLowerCase();
   const matches: FileFindMatch[] = [];
-  let from = 0;
-  while (from <= haystack.length) {
-    const at = haystack.indexOf(needle, from);
-    if (at < 0) {
+  for (const match of content.matchAll(pattern)) {
+    if (match.index === undefined || match[0] === "") {
+      continue;
+    }
+    matches.push({ start: match.index, end: match.index + match[0].length });
+    if (matches.length >= MAX_FIND_MATCHES) {
       break;
     }
-    matches.push({ start: at, end: at + needle.length });
-    from = at + needle.length;
   }
   return matches;
+}
+
+export function fileFindQueryError(query: string, options: FileFindOptions = {}): string | null {
+  if (options.regularExpression !== true || query.trim() === "") {
+    return null;
+  }
+  if (compileFindPattern(query, options) === null) {
+    return "That regular expression is not valid.";
+  }
+  return null;
 }
 
 export function nextFileFindIndex(current: number, delta: number, length: number): number {
@@ -182,4 +193,23 @@ export function workspaceSearchHitSnippet(text: string): string {
     return line;
   }
   return `${line.slice(0, WORKSPACE_SEARCH_SNIPPET_LIMIT - 3)}...`;
+}
+
+function compileFindPattern(query: string, options: FileFindOptions): RegExp | null {
+  const trimmed = query.trim();
+  if (trimmed === "") {
+    return null;
+  }
+  const source = options.regularExpression === true ? trimmed : escapeRegExp(trimmed);
+  const wrapped = options.wholeWord === true ? `\\b(?:${source})\\b` : source;
+  const flags = options.caseSensitive === true ? "g" : "gi";
+  try {
+    return new RegExp(wrapped, flags);
+  } catch {
+    return null;
+  }
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

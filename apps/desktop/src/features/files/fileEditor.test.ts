@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   editorLineLabels,
   fileDraftIsDirty,
+  fileFindQueryError,
   fileFindStatusLabel,
   findInFileText,
   insertEditorText,
@@ -70,6 +71,24 @@ describe("findInFileText", () => {
       { start: 6, end: 11 },
     ]);
   });
+
+  it("can require a whole word", () => {
+    expect(findInFileText("cat catalog cat", "cat", { wholeWord: true })).toEqual([
+      { start: 0, end: 3 },
+      { start: 12, end: 15 },
+    ]);
+  });
+
+  it("can treat the query as a regular expression", () => {
+    expect(findInFileText("a1 b22", String.raw`\d+`, { regularExpression: true })).toEqual([
+      { start: 1, end: 2 },
+      { start: 4, end: 6 },
+    ]);
+  });
+
+  it("returns nothing for a broken regular expression", () => {
+    expect(findInFileText("alpha", "[", { regularExpression: true })).toEqual([]);
+  });
 });
 
 describe("nextFileFindIndex", () => {
@@ -81,6 +100,16 @@ describe("nextFileFindIndex", () => {
 
   it("stays at zero when there are no matches", () => {
     expect(nextFileFindIndex(4, 1, 0)).toBe(0);
+  });
+});
+
+describe("fileFindQueryError", () => {
+  it("explains a broken regular expression", () => {
+    expect(fileFindQueryError("[", { regularExpression: true })).toBe(
+      "That regular expression is not valid.",
+    );
+    expect(fileFindQueryError("alpha", { regularExpression: true })).toBeNull();
+    expect(fileFindQueryError("[", {})).toBeNull();
   });
 });
 
@@ -125,6 +154,13 @@ describe("replaceAllInFileText", () => {
     expect(replaceAllInFileText("Alpha\nalpha\n", "alpha", "beta", { caseSensitive: true })).toEqual({
       content: "Alpha\nbeta\n",
       count: 1,
+    });
+  });
+
+  it("can replace only whole words", () => {
+    expect(replaceAllInFileText("cat catalog cat", "cat", "dog", { wholeWord: true })).toEqual({
+      content: "dog catalog dog",
+      count: 2,
     });
   });
 });
