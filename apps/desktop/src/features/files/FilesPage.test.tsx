@@ -104,6 +104,38 @@ describe("FilesPage", () => {
     expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled();
   });
 
+  it("indents selected lines with Tab and outdents with Shift+Tab", async () => {
+    const user = userEvent.setup();
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({
+          readWorkspaceFile: async () => ({
+            path: "src/app.py",
+            content: "alpha\nbeta\ngamma\n",
+            binary: false,
+          }),
+        })}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    const editor = (await screen.findByRole("textbox", { name: "src/app.py" })) as HTMLTextAreaElement;
+    editor.focus();
+    editor.setSelectionRange(0, 10);
+    await user.keyboard("{Tab}");
+    expect(editor).toHaveValue("  alpha\n  beta\ngamma\n");
+    await waitFor(() => {
+      expect(editor).toHaveProperty("selectionStart", 0);
+      expect(editor).toHaveProperty("selectionEnd", 14);
+    });
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(editor).toHaveValue("alpha\nbeta\ngamma\n");
+  });
+
   it("saves edited text into the workspace", async () => {
     const user = userEvent.setup();
     const writeWorkspaceFile = vi.fn(async () => undefined);

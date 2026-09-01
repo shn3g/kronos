@@ -9,6 +9,7 @@ import {
   type WorkspaceFileContents,
 } from "../workspaces/client";
 import {
+  applyEditorTab,
   ASK_IN_CHAT_EVENT,
   editorLineLabels,
   fileDraftIsDirty,
@@ -19,7 +20,6 @@ import {
   findInFileText,
   GO_TO_LINE_EVENT,
   goToLineStatusLabel,
-  insertEditorText,
   nextFileFindIndex,
   parseGoToLineInput,
   REPLACE_IN_FILE_EVENT,
@@ -999,6 +999,7 @@ function EditorBody({
 }) {
   const gutterRef = useRef<HTMLOListElement>(null);
   const highlightRef = useRef<HTMLPreElement>(null);
+  const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
   const language = editorLanguageFromPath(preview.path);
   const tokens = useMemo(() => {
     if (draft === null || preview.binary || language === null) {
@@ -1006,6 +1007,16 @@ function EditorBody({
     }
     return highlightEditorTokens(draft, language);
   }, [draft, language, preview.binary]);
+  useLayoutEffect(() => {
+    const pending = pendingSelectionRef.current;
+    const node = editorRef.current;
+    if (pending === null || node === null) {
+      return;
+    }
+    pendingSelectionRef.current = null;
+    node.selectionStart = pending.start;
+    node.selectionEnd = pending.end;
+  }, [draft, editorRef]);
   if (preview.binary) {
     return (
       <p className="files-page__status">This file is binary, so Kronos is not showing its contents.</p>
@@ -1061,7 +1072,7 @@ function EditorBody({
             }
           }}
           onKeyDown={(event) => {
-            onEditorKeyDown(event, draft, onDraft);
+            onEditorKeyDown(event, draft, onDraft, pendingSelectionRef);
           }}
         />
       </div>
@@ -1073,19 +1084,16 @@ function onEditorKeyDown(
   event: ReactKeyboardEvent<HTMLTextAreaElement>,
   draft: string,
   onDraft: (value: string) => void,
+  pendingSelection: RefObject<{ start: number; end: number } | null>,
 ): void {
   if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey) {
     return;
   }
   event.preventDefault();
   const node = event.currentTarget;
-  const next = insertEditorText(draft, node.selectionStart, node.selectionEnd, "  ");
+  const next = applyEditorTab(draft, node.selectionStart, node.selectionEnd, event.shiftKey);
+  pendingSelection.current = { start: next.start, end: next.end };
   onDraft(next.content);
-  const caret = next.caret;
-  window.requestAnimationFrame(() => {
-    node.selectionStart = caret;
-    node.selectionEnd = caret;
-  });
 }
 
 function expandAncestors(current: ReadonlySet<string>, path: string): Set<string> {

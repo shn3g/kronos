@@ -35,6 +35,8 @@ export function fileDraftIsDirty(saved: string | null, draft: string | null): bo
   return saved !== draft;
 }
 
+export const EDITOR_INDENT = "  ";
+
 export function insertEditorText(
   content: string,
   start: number,
@@ -47,6 +49,106 @@ export function insertEditorText(
     content: `${content.slice(0, from)}${insertion}${content.slice(to)}`,
     caret: from + insertion.length,
   };
+}
+
+export function applyEditorTab(
+  content: string,
+  start: number,
+  end: number,
+  shift: boolean,
+): { content: string; start: number; end: number } {
+  if (shift) {
+    return outdentEditorLines(content, start, end);
+  }
+  if (start === end) {
+    const next = insertEditorText(content, start, end, EDITOR_INDENT);
+    return { content: next.content, start: next.caret, end: next.caret };
+  }
+  return indentEditorLines(content, start, end);
+}
+
+function indentEditorLines(
+  content: string,
+  start: number,
+  end: number,
+): { content: string; start: number; end: number } {
+  return rewriteEditorLines(content, start, end, (line) => `${EDITOR_INDENT}${line}`);
+}
+
+function outdentEditorLines(
+  content: string,
+  start: number,
+  end: number,
+): { content: string; start: number; end: number } {
+  return rewriteEditorLines(content, start, end, (line) => {
+    if (line.startsWith(EDITOR_INDENT)) {
+      return line.slice(EDITOR_INDENT.length);
+    }
+    if (line.startsWith("\t")) {
+      return line.slice(1);
+    }
+    if (line.startsWith(" ")) {
+      return line.slice(1);
+    }
+    return line;
+  });
+}
+
+function rewriteEditorLines(
+  content: string,
+  start: number,
+  end: number,
+  rewrite: (line: string) => string,
+): { content: string; start: number; end: number } {
+  const from = Math.max(0, Math.min(start, end, content.length));
+  const to = Math.max(0, Math.min(Math.max(start, end), content.length));
+  const last = from === to ? from : Math.max(from, to - 1);
+  const blockStart = lineStartAt(content, from);
+  const blockEnd = lineEndExclusive(content, last);
+  const block = content.slice(blockStart, blockEnd);
+  const lines = block.split("\n");
+  const nextLines = lines.map((line) => rewrite(line));
+  const nextBlock = nextLines.join("\n");
+  const nextContent = `${content.slice(0, blockStart)}${nextBlock}${content.slice(blockEnd)}`;
+  let deltaBefore = 0;
+  let deltaInside = 0;
+  let walked = blockStart;
+  for (let index = 0; index < lines.length; index += 1) {
+    const original = lines[index] ?? "";
+    const next = nextLines[index] ?? "";
+    const change = next.length - original.length;
+    const lineStart = walked;
+    if (lineStart < from) {
+      deltaBefore += change;
+    }
+    if (lineStart < to) {
+      deltaInside += change;
+    }
+    walked += original.length + 1;
+  }
+  return {
+    content: nextContent,
+    start: Math.max(0, from + deltaBefore),
+    end: Math.max(0, to + deltaInside),
+  };
+}
+
+function lineStartAt(content: string, offset: number): number {
+  const clamped = Math.max(0, Math.min(offset, content.length));
+  const newline = content.lastIndexOf("\n", Math.max(0, clamped - 1));
+  if (newline < 0) {
+    return 0;
+  }
+  return newline + 1;
+}
+
+function lineEndExclusive(content: string, offset: number): number {
+  const clamped = Math.max(0, Math.min(offset, content.length));
+  const newline = content.indexOf("\n", clamped);
+  if (newline < 0) {
+    return content.length;
+  }
+  return newline;
 }
 
 export function editorLineLabels(content: string): string[] {

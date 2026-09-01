@@ -8,6 +8,7 @@ import {
   fileFindStatusLabel,
   findInFileText,
   insertEditorText,
+  applyEditorTab,
   nextFileFindIndex,
   parseGoToLineInput,
   replaceAllInFileText,
@@ -37,6 +38,36 @@ describe("insertEditorText", () => {
   it("replaces the selected range and places the caret after the insertion", () => {
     expect(insertEditorText("abef", 2, 2, "cd")).toEqual({ content: "abcdef", caret: 4 });
     expect(insertEditorText("aXXXf", 1, 4, "bcd")).toEqual({ content: "abcdf", caret: 4 });
+  });
+});
+
+describe("applyEditorTab", () => {
+  it("inserts two spaces at the caret when nothing is selected", () => {
+    expect(applyEditorTab("ab", 1, 1, false)).toEqual({ content: "a  b", start: 3, end: 3 });
+  });
+
+  it("indents every selected line instead of replacing the selection", () => {
+    expect(applyEditorTab("alpha\nbeta\ngamma\n", 0, 10, false)).toEqual({
+      content: "  alpha\n  beta\ngamma\n",
+      start: 0,
+      end: 14,
+    });
+  });
+
+  it("outdents selected lines that start with two spaces", () => {
+    expect(applyEditorTab("  alpha\n  beta\n", 0, 15, true)).toEqual({
+      content: "alpha\nbeta\n",
+      start: 0,
+      end: 11,
+    });
+  });
+
+  it("outdents the current line when the caret has no range", () => {
+    expect(applyEditorTab("  alpha\nbeta\n", 4, 4, true)).toEqual({
+      content: "alpha\nbeta\n",
+      start: 2,
+      end: 2,
+    });
   });
 });
 
