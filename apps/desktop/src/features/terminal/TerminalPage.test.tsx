@@ -32,20 +32,23 @@ function repos(overrides: Partial<RepositoriesClient> = {}): RepositoriesClient 
     listWorkspaceFiles: async () => [],
     readWorkspaceFile: unused,
     writeWorkspaceFile: unused,
-    runWorkspaceCommand: async () => ({
-      command: "echo hi",
-      exitCode: 0,
-      timedOut: false,
-      cancelled: false,
-      output: "hi\n",
-    }),
-    cancelWorkspaceCommand: unused,
-    watchWorkspaceCommand: async () => ({
-      command: "",
+    runWorkspaceCommand: unused,
+    startWorkspaceShell: async () => ({
+      command: "shell",
       exitCode: null,
       timedOut: false,
       cancelled: false,
-      running: false,
+      running: true,
+      output: "",
+    }),
+    writeWorkspaceShell: async () => ({ ok: true }),
+    cancelWorkspaceCommand: unused,
+    watchWorkspaceCommand: async () => ({
+      command: "shell",
+      exitCode: null,
+      timedOut: false,
+      cancelled: false,
+      running: true,
       output: "",
     }),
     ...overrides,
@@ -54,29 +57,29 @@ function repos(overrides: Partial<RepositoriesClient> = {}): RepositoriesClient 
 
 describe("TerminalPage", () => {
   it("stays closed when the engine is not ready", async () => {
-    const runWorkspaceCommand = vi.fn();
+    const startWorkspaceShell = vi.fn();
     render(
       <TerminalPage
         engineClient={engine("unavailable")}
         repositoryId="repo_alpha"
-        repositoriesClient={repos({ runWorkspaceCommand })}
+        repositoriesClient={repos({ startWorkspaceShell })}
         onOpenWorkspace={() => undefined}
       />,
     );
 
     expect(await screen.findByRole("heading", { level: 2, name: "Terminal" })).toBeInTheDocument();
     expect(screen.getByText(/local engine is not connected/i)).toBeInTheDocument();
-    expect(runWorkspaceCommand).not.toHaveBeenCalled();
+    expect(startWorkspaceShell).not.toHaveBeenCalled();
   });
 
   it("asks for a git folder when no workspace is selected", async () => {
-    const runWorkspaceCommand = vi.fn();
+    const startWorkspaceShell = vi.fn();
     const onOpenWorkspace = vi.fn();
     render(
       <TerminalPage
         engineClient={engine("ready")}
         repositoryId={null}
-        repositoriesClient={repos({ runWorkspaceCommand })}
+        repositoriesClient={repos({ startWorkspaceShell })}
         onOpenWorkspace={onOpenWorkspace}
       />,
     );
@@ -86,162 +89,116 @@ describe("TerminalPage", () => {
     ).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("button", { name: /open folder/i }));
     expect(onOpenWorkspace).toHaveBeenCalled();
-    expect(runWorkspaceCommand).not.toHaveBeenCalled();
+    expect(startWorkspaceShell).not.toHaveBeenCalled();
   });
 
-  it("runs a command in the current workspace and shows the output", async () => {
+  it("sends a line to the live shell and keeps the prompt open", async () => {
     const user = userEvent.setup();
-    const runWorkspaceCommand = vi.fn(async () => ({
-      command: "python probe.py",
-      exitCode: 0,
-      timedOut: false,
-      cancelled: false,
-      output: "from-workspace\n",
-    }));
-    render(
-      <TerminalPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
-        repositoriesClient={repos({ runWorkspaceCommand })}
-        onOpenWorkspace={() => undefined}
-      />,
-    );
-
-    const input = await screen.findByRole("textbox", { name: /command/i });
-    await user.type(input, "python probe.py");
-    await user.click(screen.getByRole("button", { name: /^run$/i }));
-
-    expect(await screen.findByText("from-workspace")).toBeInTheDocument();
-    expect(screen.getByText("Exit 0")).toBeInTheDocument();
-    expect(runWorkspaceCommand).toHaveBeenCalledWith("repo_alpha", "python probe.py");
-  });
-
-  it("shows command output while the run is still in flight", async () => {
-    const user = userEvent.setup();
-    let finish!: (run: {
-      command: string;
-      exitCode: number | null;
-      timedOut: boolean;
-      cancelled: boolean;
-      running?: boolean;
-      output: string;
-    }) => void;
-    const runWorkspaceCommand = vi.fn(
-      () =>
-        new Promise<{
-          command: string;
-          exitCode: number | null;
-          timedOut: boolean;
-          cancelled: boolean;
-          running?: boolean;
-          output: string;
-        }>((resolve) => {
-          finish = resolve;
-        }),
-    );
+    let live = "";
+    const writeWorkspaceShell = vi.fn(async (_id: string, line: string) => {
+      live += `${line}\n`;
+      return { ok: true };
+    });
     const watchWorkspaceCommand = vi.fn(async () => ({
-      command: "python stream.py",
+      command: "echo hello-shell",
       exitCode: null,
       timedOut: false,
       cancelled: false,
       running: true,
-      output: "hello-live\n",
+      output: live,
     }));
     render(
       <TerminalPage
         engineClient={engine("ready")}
         repositoryId="repo_alpha"
-        repositoriesClient={repos({ runWorkspaceCommand, watchWorkspaceCommand })}
+        repositoriesClient={repos({ writeWorkspaceShell, watchWorkspaceCommand })}
         onOpenWorkspace={() => undefined}
       />,
     );
 
     const input = await screen.findByRole("textbox", { name: /command/i });
-    await user.type(input, "python stream.py");
-    await user.click(screen.getByRole("button", { name: /^run$/i }));
+    await user.type(input, "echo hello-shell");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
 
-    expect(await screen.findByText("hello-live")).toBeInTheDocument();
-    expect(screen.getByText("Running.")).toBeInTheDocument();
-    finish({
-      command: "python stream.py",
-      exitCode: 0,
-      timedOut: false,
-      cancelled: false,
-      running: false,
-      output: "hello-live\ndone-live\n",
-    });
-    expect(await screen.findByText(/done-live/)).toBeInTheDocument();
-    expect(screen.getByText("Exit 0")).toBeInTheDocument();
+    expect(writeWorkspaceShell).toHaveBeenCalledWith("repo_alpha", "echo hello-shell");
+    expect(await screen.findByText("echo hello-shell")).toBeInTheDocument();
+    expect(screen.getByText("Shell is open.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^send$/i })).toBeDisabled();
+    expect(input).toHaveValue("");
   });
 
-  it("stops a running command without waiting for the timeout", async () => {
+  it("keeps earlier output when another line is sent", async () => {
     const user = userEvent.setup();
-    let finish!: (run: {
-      command: string;
-      exitCode: number | null;
-      timedOut: boolean;
-      cancelled: boolean;
-      output: string;
-    }) => void;
-    const runWorkspaceCommand = vi.fn(
-      () =>
-        new Promise<{
-          command: string;
-          exitCode: number | null;
-          timedOut: boolean;
-          cancelled: boolean;
-          output: string;
-        }>((resolve) => {
-          finish = resolve;
-        }),
-    );
-    const cancelWorkspaceCommand = vi.fn(async () => {
-      finish({
-        command: "sleep 5",
-        exitCode: null,
-        timedOut: false,
-        cancelled: true,
-        output: "partial\n",
-      });
+    let live = "";
+    const writeWorkspaceShell = vi.fn(async (_id: string, line: string) => {
+      live += `${line}\n`;
       return { ok: true };
     });
+    const watchWorkspaceCommand = vi.fn(async () => ({
+      command: live.trim().split("\n").at(-1) ?? "shell",
+      exitCode: null,
+      timedOut: false,
+      cancelled: false,
+      running: true,
+      output: live,
+    }));
     render(
       <TerminalPage
         engineClient={engine("ready")}
         repositoryId="repo_alpha"
-        repositoriesClient={repos({ runWorkspaceCommand, cancelWorkspaceCommand })}
+        repositoriesClient={repos({ writeWorkspaceShell, watchWorkspaceCommand })}
         onOpenWorkspace={() => undefined}
       />,
     );
 
-    await user.type(await screen.findByRole("textbox", { name: /command/i }), "sleep 5");
-    await user.click(screen.getByRole("button", { name: /^run$/i }));
-    await user.click(await screen.findByRole("button", { name: /^stop$/i }));
+    const input = await screen.findByRole("textbox", { name: /command/i });
+    await user.type(input, "echo hello-shell");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    expect(await screen.findByText("echo hello-shell")).toBeInTheDocument();
+    await user.type(input, "echo second-line");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    expect(await screen.findByText(/second-line/)).toBeInTheDocument();
+    expect(screen.getByText(/hello-shell/)).toBeInTheDocument();
+  });
 
+  it("stops the shell without waiting for a command timeout", async () => {
+    const user = userEvent.setup();
+    let running = true;
+    const cancelWorkspaceCommand = vi.fn(async () => {
+      running = false;
+      return { ok: true };
+    });
+    const watchWorkspaceCommand = vi.fn(async () => ({
+      command: "shell",
+      exitCode: null,
+      timedOut: false,
+      cancelled: !running,
+      running,
+      output: "",
+    }));
+    render(
+      <TerminalPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({ cancelWorkspaceCommand, watchWorkspaceCommand })}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await screen.findByText("Shell is open.");
+    await user.click(await screen.findByRole("button", { name: /^stop$/i }));
     expect(cancelWorkspaceCommand).toHaveBeenCalledWith("repo_alpha");
-    expect(await screen.findByText("partial")).toBeInTheDocument();
-    expect(screen.getByText("Stopped.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^run$/i })).toBeEnabled();
+    expect(await screen.findByText("Stopped.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^stop$/i })).not.toBeInTheDocument();
   });
 
   it("says so when stop cannot reach the engine", async () => {
     const user = userEvent.setup();
-    const runWorkspaceCommand = vi.fn(
-      () =>
-        new Promise<{
-          command: string;
-          exitCode: number | null;
-          timedOut: boolean;
-          cancelled: boolean;
-          output: string;
-        }>(() => undefined),
-    );
     render(
       <TerminalPage
         engineClient={engine("ready")}
         repositoryId="repo_alpha"
         repositoriesClient={repos({
-          runWorkspaceCommand,
           cancelWorkspaceCommand: async () => {
             throw new Error("engine request failed: 500");
           },
@@ -250,47 +207,40 @@ describe("TerminalPage", () => {
       />,
     );
 
-    await user.type(await screen.findByRole("textbox", { name: /command/i }), "sleep 5");
-    await user.click(screen.getByRole("button", { name: /^run$/i }));
+    await screen.findByText("Shell is open.");
     await user.click(await screen.findByRole("button", { name: /^stop$/i }));
     expect(
       await screen.findByText(/could not stop that command. wait for it to finish, then try again/i),
     ).toBeInTheDocument();
   });
 
-  it("says so when the command times out or the engine call fails", async () => {
+  it("says so when the shell cannot start or a line cannot be sent", async () => {
     const user = userEvent.setup();
-    const runWorkspaceCommand = vi
-      .fn()
-      .mockResolvedValueOnce({
-        command: "sleep 5",
-        exitCode: null,
-        timedOut: true,
-        cancelled: false,
-        output: "still going",
-      })
-      .mockRejectedValueOnce(new Error("engine request failed: 409"));
-
     const { rerender } = render(
       <TerminalPage
         engineClient={engine("ready")}
         repositoryId="repo_alpha"
-        repositoriesClient={repos({ runWorkspaceCommand })}
+        repositoriesClient={repos({
+          startWorkspaceShell: async () => {
+            throw new Error("engine request failed: 500");
+          },
+        })}
         onOpenWorkspace={() => undefined}
       />,
     );
 
-    await user.type(await screen.findByRole("textbox", { name: /command/i }), "sleep 5");
-    await user.click(screen.getByRole("button", { name: /^run$/i }));
-    expect(await screen.findByText(/timed out/i)).toBeInTheDocument();
-    expect(screen.getByText("still going")).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        /could not start the workspace shell. check that the engine is running, then try again/i,
+      ),
+    ).toBeInTheDocument();
 
     rerender(
       <TerminalPage
         engineClient={engine("ready")}
         repositoryId="repo_alpha"
         repositoriesClient={repos({
-          runWorkspaceCommand: async () => {
+          writeWorkspaceShell: async () => {
             throw new Error("engine request failed: 409");
           },
         })}
@@ -299,15 +249,14 @@ describe("TerminalPage", () => {
     );
 
     const next = screen.getByRole("textbox", { name: /command/i });
-    await user.clear(next);
     await user.type(next, "echo again");
-    await user.click(screen.getByRole("button", { name: /^run$/i }));
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
     expect(
-      await screen.findByText(/could not run that command. check the workspace and try again/i),
+      await screen.findByText(/could not send that line. check that the engine is running, then try again/i),
     ).toBeInTheDocument();
   });
 
-  it("keeps Run disabled until the command box has text", async () => {
+  it("keeps Send disabled until the command box has text", async () => {
     render(
       <TerminalPage
         engineClient={engine("ready")}
@@ -317,38 +266,31 @@ describe("TerminalPage", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: /^run$/i })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: /^send$/i })).toBeDisabled();
   });
 
   it("recalls previous commands with the arrow keys", async () => {
     const user = userEvent.setup();
-    const runWorkspaceCommand = vi.fn(async (_id: string, command: string) => ({
-      command,
-      exitCode: 0,
-      timedOut: false,
-      cancelled: false,
-      output: `${command} ok\n`,
-    }));
+    const writeWorkspaceShell = vi.fn(async () => ({ ok: true }));
     render(
       <TerminalPage
         engineClient={engine("ready")}
         repositoryId="repo_alpha"
-        repositoriesClient={repos({ runWorkspaceCommand })}
+        repositoriesClient={repos({ writeWorkspaceShell })}
         onOpenWorkspace={() => undefined}
       />,
     );
 
     const input = await screen.findByRole("textbox", { name: /command/i });
     await user.type(input, "python probe.py");
-    await user.click(screen.getByRole("button", { name: /^run$/i }));
-    expect(await screen.findByText("python probe.py ok")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    expect(writeWorkspaceShell).toHaveBeenCalledWith("repo_alpha", "python probe.py");
 
-    await user.clear(input);
     await user.type(input, "echo later");
-    await user.click(screen.getByRole("button", { name: /^run$/i }));
-    expect(await screen.findByText("echo later ok")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    expect(writeWorkspaceShell).toHaveBeenCalledWith("repo_alpha", "echo later");
 
-    await user.clear(input);
+    await user.click(input);
     await user.keyboard("{ArrowUp}");
     expect(input).toHaveValue("echo later");
     await user.keyboard("{ArrowUp}");

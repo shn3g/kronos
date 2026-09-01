@@ -216,6 +216,49 @@ describe("createProductionRepositoriesClient", () => {
     });
   });
 
+  it("starts a workspace shell through the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path) => {
+      expect(method).toBe("POST");
+      expect(path).toBe("/repositories/repo_alpha/terminal/sessions");
+      return {
+        status: 200,
+        body: JSON.stringify({
+          command: "shell",
+          exit_code: null,
+          timed_out: false,
+          cancelled: false,
+          running: true,
+          output: "",
+        }),
+      };
+    });
+
+    await expect(client.startWorkspaceShell("repo_alpha")).resolves.toEqual({
+      command: "shell",
+      exitCode: null,
+      timedOut: false,
+      cancelled: false,
+      running: true,
+      output: "",
+    });
+  });
+
+  it("sends a shell line through the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path, body) => {
+      expect(method).toBe("POST");
+      expect(path).toBe("/repositories/repo_alpha/terminal/sessions/input");
+      expect(body).toEqual({ line: "echo hello-shell" });
+      return {
+        status: 200,
+        body: JSON.stringify({ ok: true }),
+      };
+    });
+
+    await expect(client.writeWorkspaceShell("repo_alpha", "echo hello-shell")).resolves.toEqual({
+      ok: true,
+    });
+  });
+
   it("writes a workspace file through the engine JSON proxy", async () => {
     const client = createProductionRepositoriesClient(async (method, path, body) => {
       expect(method).toBe("PUT");

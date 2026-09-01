@@ -181,8 +181,9 @@ export function MenuBar({
         <p className="menu-help">
           Kronos is a locally installed desktop app for coding agents on your git folders. Ctrl+N
           or Cmd+N starts a new chat. Ctrl+B or Cmd+B hides the activity bar. Ctrl+Shift+J or
-          Cmd+Shift+J hides Changes. Ctrl+` or Cmd+` shows Terminal. In Terminal, Up and Down
-          recall previous commands. Stop, Escape, or Ctrl+C ends a running command. Escape also
+          Cmd+Shift+J hides Changes. Ctrl+` or Cmd+` shows Terminal. In Terminal, the shell stays
+          open. Type a line and press Enter. Up and Down recall previous lines. Stop, or Escape in
+          the command box, ends the shell. Escape also
           stops the current chat turn.
           Revert in Changes restores the last chat write for that file, or the last committed
           version if chat did not write it. Commit records a local git commit. This turn lists

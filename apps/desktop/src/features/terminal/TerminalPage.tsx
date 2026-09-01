@@ -26,7 +26,7 @@ export function TerminalPage({
   const client = repositoriesClient ?? productionRepos;
   const [ready, setReady] = useState(false);
   const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [run, setRun] = useState<WorkspaceTerminalRun | null>(null);
   const [history, setHistory] = useState<string[]>([]);
@@ -34,6 +34,19 @@ export function TerminalPage({
   const [historyStash, setHistoryStash] = useState("");
   const stoppingRef = useRef(false);
   const outputRef = useRef<HTMLPreElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const runRef = useRef<WorkspaceTerminalRun | null>(null);
+  const previousRepoRef = useRef<string | null>(null);
+  runRef.current = run;
+
+  useEffect(() => {
+    const previous = previousRepoRef.current;
+    if (previous !== null && previous !== repositoryId) {
+      void client.cancelWorkspaceCommand(previous);
+      setRun(null);
+    }
+    previousRepoRef.current = repositoryId;
+  }, [client, repositoryId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,42 +65,82 @@ export function TerminalPage({
     };
   }, [engineClient]);
 
-  async function onRun(): Promise<void> {
-    const command = draft.trim();
-    if (command === "" || busy || !repositoryId) {
+  useEffect(() => {
+    if (!ready || !repositoryId) {
       return;
     }
-    setBusy(true);
+    let cancelled = false;
     setError(null);
-    setHistory((current) => rememberCommand(current, command));
+    void client.startWorkspaceShell(repositoryId).then(
+      (snapshot) => {
+        if (!cancelled) {
+          setRun(snapshot);
+        }
+      },
+      () => {
+        if (!cancelled) {
+          setError("Could not start the workspace shell. Check that the engine is running, then try again.");
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [client, ready, repositoryId]);
+
+  async function ensureShell(): Promise<boolean> {
+    if (!repositoryId) {
+      return false;
+    }
+    if (runRef.current?.running === true) {
+      return true;
+    }
+    try {
+      const snapshot = await client.startWorkspaceShell(repositoryId);
+      setRun(snapshot);
+      runRef.current = snapshot;
+      return snapshot.running === true;
+    } catch {
+      setError("Could not start the workspace shell. Check that the engine is running, then try again.");
+      return false;
+    }
+  }
+
+  async function onSend(): Promise<void> {
+    const line = draft.trim();
+    if (line === "" || sending || !repositoryId) {
+      return;
+    }
+    setSending(true);
+    setError(null);
+    setHistory((current) => rememberCommand(current, line));
     setHistoryIndex(null);
     setHistoryStash("");
-    setRun({
-      command,
-      exitCode: null,
-      timedOut: false,
-      cancelled: false,
-      running: true,
-      output: "",
-    });
     try {
-      const next = await client.runWorkspaceCommand(repositoryId, command);
-      setRun(next);
+      const live = await ensureShell();
+      if (!live) {
+        return;
+      }
+      await client.writeWorkspaceShell(repositoryId, line);
+      setDraft("");
+      inputRef.current?.focus();
     } catch {
-      setRun(null);
-      setError("Could not run that command. Check the workspace and try again.");
+      setError("Could not send that line. Check that the engine is running, then try again.");
     } finally {
-      setBusy(false);
+      setSending(false);
     }
   }
 
   async function onStop(): Promise<void> {
-    if (!repositoryId || stoppingRef.current || !busy) {
+    if (!repositoryId || stoppingRef.current || runRef.current?.running !== true) {
       return;
     }
     stoppingRef.current = true;
     try {
       await client.cancelWorkspaceCommand(repositoryId);
+      setRun((current) =>
+        current === null ? current : { ...current, running: false, cancelled: true },
+      );
     } catch {
       setError("Could not stop that command. Wait for it to finish, then try again.");
     } finally {
@@ -96,28 +149,7 @@ export function TerminalPage({
   }
 
   useEffect(() => {
-    if (!busy) {
-      return;
-    }
-    function onKey(event: KeyboardEvent): void {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        void onStop();
-        return;
-      }
-      if (event.key === "c" && (event.ctrlKey || event.metaKey) && !event.shiftKey) {
-        event.preventDefault();
-        void onStop();
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [busy, client, repositoryId]);
-
-  useEffect(() => {
-    if (!busy || !repositoryId) {
+    if (!ready || !repositoryId) {
       return;
     }
     let cancelled = false;
@@ -126,9 +158,7 @@ export function TerminalPage({
         if (cancelled) {
           return;
         }
-        if (snapshot.running === true || snapshot.output !== "") {
-          setRun(snapshot);
-        }
+        setRun((current) => mergeTerminalSnapshot(current, snapshot));
       }, () => undefined);
     };
     pull();
@@ -137,7 +167,7 @@ export function TerminalPage({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [busy, client, repositoryId]);
+  }, [ready, client, repositoryId]);
 
   useEffect(() => {
     const node = outputRef.current;
@@ -171,7 +201,8 @@ export function TerminalPage({
     );
   }
 
-  const status = runStatus(run, busy);
+  const status = runStatus(run);
+  const shellOpen = run?.running === true;
 
   return (
     <section className="terminal-page">
@@ -188,11 +219,12 @@ export function TerminalPage({
         <label className="terminal-page__field">
           <span className="visually-hidden">Command</span>
           <input
+            ref={inputRef}
             className="terminal-page__input"
             value={draft}
             aria-label="Command"
             placeholder="npm test"
-            disabled={busy}
+            disabled={sending}
             spellCheck={false}
             onChange={(event) => {
               setDraft(event.target.value);
@@ -214,9 +246,14 @@ export function TerminalPage({
                 setHistoryStash(newer.stash);
                 return;
               }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                void onStop();
+                return;
+              }
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
-                void onRun();
+                void onSend();
               }
             }}
           />
@@ -224,14 +261,14 @@ export function TerminalPage({
         <button
           type="button"
           className="btn-primary"
-          disabled={busy || draft.trim() === ""}
+          disabled={sending || draft.trim() === ""}
           onClick={() => {
-            void onRun();
+            void onSend();
           }}
         >
-          {busy ? "Running" : "Run"}
+          Send
         </button>
-        {busy ? (
+        {shellOpen ? (
           <button type="button" className="btn-quiet" onClick={() => void onStop()}>
             Stop
           </button>
@@ -240,35 +277,37 @@ export function TerminalPage({
       <pre
         ref={outputRef}
         className="terminal-page__output"
-        data-empty={run && (busy || run.output !== "") ? undefined : "true"}
+        data-empty={run && run.output !== "" ? undefined : "true"}
       >
         {run?.output !== undefined && run.output !== ""
           ? run.output
-          : busy
-            ? ""
-            : "Run a command in this workspace."}
+          : "Type a command in this workspace."}
       </pre>
     </section>
   );
 }
 
-function runStatus(run: WorkspaceTerminalRun | null, busy: boolean): string | null {
-  if (busy) {
-    return "Running.";
+function mergeTerminalSnapshot(
+  current: WorkspaceTerminalRun | null,
+  snapshot: WorkspaceTerminalRun,
+): WorkspaceTerminalRun {
+  if (snapshot.running === true || snapshot.output !== "") {
+    return snapshot;
   }
-  if (!run) {
-    return null;
+  if (current !== null && current.output !== "") {
+    return { ...current, running: false };
   }
-  if (run.cancelled) {
+  return snapshot;
+}
+
+function runStatus(run: WorkspaceTerminalRun | null): string | null {
+  if (run?.running === true) {
+    return "Shell is open.";
+  }
+  if (run?.cancelled) {
     return "Stopped.";
   }
-  if (run.timedOut) {
-    return "The command timed out.";
-  }
-  if (run.exitCode === null) {
-    return "Finished.";
-  }
-  return `Exit ${run.exitCode}`;
+  return null;
 }
 
 const MAX_TERMINAL_HISTORY = 50;

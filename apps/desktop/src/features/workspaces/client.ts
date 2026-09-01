@@ -74,6 +74,8 @@ export interface RepositoriesClient {
   readWorkspaceFile(id: string, path: string): Promise<WorkspaceFileContents>;
   writeWorkspaceFile(id: string, path: string, content: string): Promise<void>;
   runWorkspaceCommand(id: string, command: string): Promise<WorkspaceTerminalRun>;
+  startWorkspaceShell(id: string): Promise<WorkspaceTerminalRun>;
+  writeWorkspaceShell(id: string, line: string): Promise<{ ok: boolean }>;
   watchWorkspaceCommand(id: string): Promise<WorkspaceTerminalRun>;
   cancelWorkspaceCommand(id: string): Promise<{ ok: boolean }>;
 }
@@ -159,6 +161,16 @@ export function createProductionRepositoriesClient(
         command,
       });
       return mapTerminalRun(payload, command);
+    },
+    async startWorkspaceShell(id: string) {
+      const payload = await jsonRequest(request, "POST", `/repositories/${id}/terminal/sessions`);
+      return mapTerminalRun(payload, "shell");
+    },
+    async writeWorkspaceShell(id: string, line: string) {
+      const payload = await jsonRequest(request, "POST", `/repositories/${id}/terminal/sessions/input`, {
+        line,
+      });
+      return { ok: payload.ok === true };
     },
     async watchWorkspaceCommand(id: string) {
       const payload = await jsonRequest(request, "GET", `/repositories/${id}/terminal/runs`);

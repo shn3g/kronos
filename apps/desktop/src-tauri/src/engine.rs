@@ -417,6 +417,8 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
                     | ("GET", Some("terminal/runs"))
                     | ("POST", Some("terminal/runs"))
                     | ("POST", Some("terminal/runs/cancel"))
+                    | ("POST", Some("terminal/sessions"))
+                    | ("POST", Some("terminal/sessions/input"))
                     | ("POST", Some("pause" | "disable" | "remove" | "re-enrol" | "resume"))
             )
         }
@@ -961,6 +963,14 @@ mod tests {
         assert!(engine_path_allowed(
             "POST",
             "/repositories/repo_alpha/terminal/runs/cancel"
+        ));
+        assert!(engine_path_allowed(
+            "POST",
+            "/repositories/repo_alpha/terminal/sessions"
+        ));
+        assert!(engine_path_allowed(
+            "POST",
+            "/repositories/repo_alpha/terminal/sessions/input"
         ));
         assert!(!engine_path_allowed("DELETE", "/repositories/repo_alpha/index"));
         assert!(engine_path_allowed("GET", "/goals"));

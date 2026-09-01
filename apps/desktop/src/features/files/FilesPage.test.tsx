@@ -33,6 +33,8 @@ function repos(overrides: Partial<RepositoriesClient> = {}): RepositoriesClient 
     readWorkspaceFile: async () => ({ path: "src/app.py", content: "print(1)\n", binary: false }),
     writeWorkspaceFile: unused,
     runWorkspaceCommand: unused,
+    startWorkspaceShell: unused,
+    writeWorkspaceShell: unused,
     cancelWorkspaceCommand: unused,
     watchWorkspaceCommand: unused,
     ...overrides,
