@@ -87,7 +87,7 @@ export function UpdatesPage({ engineClient, updatesClient }: UpdatesPageProps) {
       <p className="page-kicker">Updates</p>
       <h1 className="page-title">Updates</h1>
       <p className="page-body">
-        Engine {status?.engineVersion ?? "0.1.0"}. Desktop {status?.clientVersion ?? "0.1.0"}.
+        Engine {status?.engineVersion ?? "0.2.0"}. Desktop {status?.clientVersion ?? "0.2.0"}.
       </p>
       <p className="workspace-card__meta">
         {status?.signed ? "Signed" : "Not signed"}. Checksums{" "}

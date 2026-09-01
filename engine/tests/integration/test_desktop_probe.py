@@ -73,7 +73,7 @@ def probe_engine_state(
     base_url: str,
     token: str,
     *,
-    client_version: str = "0.1.0",
+    client_version: str = "0.2.0",
 ) -> dict[str, str]:
     headers = {
         "Authorization": f"Bearer {token}",
@@ -109,7 +109,7 @@ def test_desktop_probe_path_is_ready_and_can_read_events(tmp_path: Path) -> None
         base_url = _wait_ready_line(proc).rstrip("/")
         assert base_url.startswith("http://127.0.0.1:")
         state = probe_engine_state(base_url, token)
-        assert state == {"status": "ready", "version": "0.1.0"}
+        assert state == {"status": "ready", "version": "0.2.0"}
 
         events = httpx.get(
             f"{base_url}/events",

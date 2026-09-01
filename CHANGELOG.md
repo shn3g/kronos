@@ -1,0 +1,39 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.2.0] - 2026-09-01
+
+Developed as 0.1.1–0.1.6 on this branch; tagged together as 0.2.0.
+
+### Added
+
+- Local embeddings use a real tokenizer. Optional MiniLM ONNX weights already on disk, an OpenAI-compatible embedding HTTP adapter, a registry embedding role, and memory backfill into the index.
+- Continuous indexing: a file watcher, dirty working-tree files, chunk-hash skip for unchanged embeddings, progress, and a watch toggle.
+- Orchestrator model role. Provider presets for OpenAI, OpenRouter, OpenCode Zen (`https://opencode.ai/zen/v1`), Ollama, and LM Studio. Cost ceiling in the Models UI. Streamed completions. Per-repository executor (`controlled`, `cursor`, or `opencode`). LLM planner with IndexedPlanner as the deterministic fallback.
+- Chat orchestrator HTTP API and desktop Chat page. Streaming goes through Rust `engine_stream`. `/goal` creates draft goals. Chat does not edit files or call GitHub.
+- Safety gate before `write_draft_prs` and higher (branch protection, Kronos PR workflow, CODEOWNERS, reviewer app). GitHub issue and pull request templates and labels. Effort tiers. Lessons included in executor and planner context.
+
+### Changed
+
+- Each model role (orchestrator, planner, coder, reviewer, embedding) can use an online API or a local OpenAI-compatible endpoint on its own.
+- Sparse FTS5 search stays available when dense embeddings are missing.
+
+### Fixed
+
+- Embedding adapters fail closed on bad responses. Backfill batches stay independent.
+- Index watcher honors git commits, per-repo debounce, and idle probes so watch does not load embedders. Stale search hits are ignored.
+- Chat returns 409 when billed secrets are missing, hides planner intent JSON, and the desktop stream/load race is fixed.
+
+## [0.1.0] - 2026-09-01
+
+First public desktop preview (`v0.1.0`). Enrol a git folder, leave freeze and observe/shadow until you want writes, unsigned Windows/Linux/macOS installers.
+
+[unreleased]: https://github.com/shn3g/kronos/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/shn3g/kronos/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/shn3g/kronos/releases/tag/v0.1.0

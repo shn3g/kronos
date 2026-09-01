@@ -1,10 +1,12 @@
 # Models, executors, and sandboxes
 
-Planner, coder, reviewer, and embedding profiles are assigned explicitly. Provider configuration is stored in SQLite without secret values. API keys live in OS credential storage (Windows Credential Manager, macOS Keychain, or libsecret) and are passed to adapters as scoped values that expire after their TTL.
+Orchestrator, planner, coder, reviewer, and embedding profiles are assigned explicitly. Each role can use an online API or a local OpenAI-compatible endpoint on its own. Provider configuration is stored in SQLite without secret values. API keys live in OS credential storage (Windows Credential Manager, macOS Keychain, or libsecret) and are passed to adapters as scoped values that expire after their TTL.
+
+The Models page ships presets for OpenAI (`https://api.openai.com/v1`), OpenRouter (`https://openrouter.ai/api/v1`), OpenCode Zen (`https://opencode.ai/zen/v1`), Ollama (`http://127.0.0.1:11434/v1`), and LM Studio (`http://127.0.0.1:1234/v1`). Cost ceiling and max tokens are editable per profile. A billed call with a zero ceiling is refused.
+
+Chat uses the orchestrator role. Planning uses the planner role, with `LlmPlanner` calling that profile and falling back to `IndexedPlanner` when the LLM is missing or fails. Coding uses the executor profile in committed policy: `controlled` (template default `standard` maps to controlled), `cursor`, or `opencode`. Retrieval uses the local index. Deterministic tests plus the isolated reviewer control integration merges. You can replace Cursor with OpenHands or an OpenAI-compatible local coder without changing the control plane.
 
 The default sandbox is an in-process path jail. It does not drop network, root, or cgroups, and it fails closed when a request asks for those capabilities. Docker/SWE-ReX is a separate adapter and is not selected until a confined runtime is available. `secrets=False` strips secret-shaped worker env, not only a GitHub denylist. Local unsandboxed execution is labeled UNSAFE and cannot authorize autonomous merges. `coder_may_merge` remains unrepresentable in policy.
-
-Orchestration uses an approved planner profile. Coding uses the executor profile in committed policy (template default `standard`). Retrieval uses the local index. Deterministic tests plus the isolated reviewer control integration merges. You can replace Cursor with OpenHands or an OpenAI-compatible local coder without changing the control plane.
 
 `autonomy.mode` is an operator fuse. Models cannot change it. Observe and shadow do not create GitHub issues, pull requests, or merges.
 

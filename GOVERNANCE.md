@@ -25,7 +25,7 @@ Security reports follow [SECURITY.md](SECURITY.md). They bypass the public issue
 
 Releases are git tags on `main` (`v0.1.0`, then `v0.1.1`, `v0.2.0`, and so on). Kronos uses [Semantic Versioning](https://semver.org/). `0.x` is preview: public installers may exist, the product is not 1.0, and APIs may change. GitHub still publishes `0.x` as the latest release so the download is visible. `1.0.0` is the first stable line.
 
-The version Cursor and the desktop app read is `0.1.0` in `apps/desktop/src-tauri/tauri.conf.json`, kept in lockstep with `package.json`, `apps/desktop/src-tauri/Cargo.toml`, `engine/pyproject.toml`, and `services/reviewer/pyproject.toml`.
+The version Cursor and the desktop app read is `0.2.0` in `apps/desktop/src-tauri/tauri.conf.json`, kept in lockstep with `package.json`, `apps/desktop/src-tauri/Cargo.toml`, `engine/pyproject.toml`, and `services/reviewer/pyproject.toml`. `scripts/check-version-sync.py` fails CI when those files disagree.
 
 Unsigned NSIS / `.deb` / `.app` installers and `SHA256SUMS` attach to GitHub Releases. SBOM and provenance stay on the Actions run. Signing is optional and fail-closed without a key.
 

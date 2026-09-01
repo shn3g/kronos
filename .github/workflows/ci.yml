@@ -13,6 +13,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  versions:
+    name: Version lockstep
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check version lockstep
+        run: python3 scripts/check-version-sync.py
+
   frontend:
     name: Frontend (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
