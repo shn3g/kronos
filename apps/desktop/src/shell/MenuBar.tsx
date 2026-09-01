@@ -180,7 +180,8 @@ export function MenuBar({
           files chat wrote. All lists every dirty file. Kronos does not push. AGENTS.md,
           .cursorrules, and files under .cursor/rules are followed on every chat turn. Apply on a
           code block writes that file into the open folder and lists it in Changes. Retry
-          sends the last prompt again. Try again resends after a failed send.
+          sends the last prompt again. Try again resends after a failed send. Click a file mention
+          in chat, or Open in Changes, to read that file in Files.
         </p>
       </Menu>
     </div>

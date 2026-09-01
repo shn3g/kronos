@@ -238,4 +238,70 @@ describe("FilesPage", () => {
       ),
     ).toBeInTheDocument();
   });
+
+  it("reveals a nested file from an external request without a tree click", async () => {
+    const readWorkspaceFile = vi.fn(async (_id: string, path: string) => ({
+      path,
+      content: "print(1)\n",
+      binary: false,
+    }));
+
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({ readWorkspaceFile })}
+        onOpenWorkspace={() => undefined}
+        revealRequest={{ path: "src/app.py", nonce: 1 }}
+      />,
+    );
+
+    expect(await screen.findByText("print(1)")).toBeInTheDocument();
+    expect(readWorkspaceFile).toHaveBeenCalledWith("repo_alpha", "src/app.py");
+    expect(screen.getByRole("treeitem", { name: "app.py" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("ignores an empty reveal request", async () => {
+    const readWorkspaceFile = vi.fn(async () => ({
+      path: "src/app.py",
+      content: "print(1)\n",
+      binary: false,
+    }));
+
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({ readWorkspaceFile })}
+        onOpenWorkspace={() => undefined}
+        revealRequest={{ path: "", nonce: 0 }}
+      />,
+    );
+
+    expect(await screen.findByRole("treeitem", { name: "src" })).toBeInTheDocument();
+    expect(screen.getByText(/select a file to read it/i)).toBeInTheDocument();
+    expect(readWorkspaceFile).not.toHaveBeenCalled();
+  });
+
+  it("ignores a parent-directory reveal path", async () => {
+    const readWorkspaceFile = vi.fn(async () => ({
+      path: "secret.txt",
+      content: "nope\n",
+      binary: false,
+    }));
+
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({ readWorkspaceFile })}
+        onOpenWorkspace={() => undefined}
+        revealRequest={{ path: "../secret.txt", nonce: 1 }}
+      />,
+    );
+
+    expect(await screen.findByRole("treeitem", { name: "src" })).toBeInTheDocument();
+    expect(screen.getByText(/select a file to read it/i)).toBeInTheDocument();
+    expect(readWorkspaceFile).not.toHaveBeenCalled();
+  });
 });

@@ -90,4 +90,28 @@ describe("ChatMarkdown", () => {
       await screen.findByText("Could not apply that file. Check the path and try again."),
     ).toBeInTheDocument();
   });
+
+  it("opens an inline workspace path from assistant markdown", async () => {
+    const user = userEvent.setup();
+    const onOpenPath = vi.fn();
+
+    render(
+      <ChatMarkdown source={"Look at `src/ok.ts` and `const`."} onOpenPath={onOpenPath} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /open src\/ok\.ts/i }));
+
+    expect(onOpenPath).toHaveBeenCalledWith("src/ok.ts");
+    expect(screen.getByText("const").tagName).toBe("CODE");
+    expect(screen.queryByRole("button", { name: /open const/i })).not.toBeInTheDocument();
+  });
+
+  it("does not open a parent-directory inline path", () => {
+    const onOpenPath = vi.fn();
+
+    render(<ChatMarkdown source={"Skip `../secret.txt`."} onOpenPath={onOpenPath} />);
+
+    expect(screen.getByText("../secret.txt").tagName).toBe("CODE");
+    expect(screen.queryByRole("button", { name: /open \.\.\/secret\.txt/i })).not.toBeInTheDocument();
+  });
 });

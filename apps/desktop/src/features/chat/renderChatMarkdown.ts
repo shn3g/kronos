@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { safeWorkspaceRelPath } from "../files/workspacePath";
+
 export type ChatMarkdownSpan =
   | { type: "text"; text: string }
   | { type: "strong"; text: string }
@@ -148,13 +150,13 @@ export function parseFenceInfo(info: string): { language: string; path: string }
   const space = trimmed.indexOf(" ");
   if (space === -1) {
     if (looksLikePath(trimmed)) {
-      return { language: "", path: safeRelPath(trimmed) };
+      return { language: "", path: safeWorkspaceRelPath(trimmed) };
     }
     return { language: trimmed, path: "" };
   }
   return {
     language: trimmed.slice(0, space),
-    path: safeRelPath(trimmed.slice(space + 1).trim()),
+    path: safeWorkspaceRelPath(trimmed.slice(space + 1).trim()),
   };
 }
 
@@ -167,22 +169,10 @@ function colonFence(trimmed: string): { language: string; path: string } | null 
   if (!looksLikePath(rest)) {
     return null;
   }
-  return { language: trimmed.slice(0, index), path: safeRelPath(rest) };
+  return { language: trimmed.slice(0, index), path: safeWorkspaceRelPath(rest) };
 }
 
 function looksLikePath(value: string): boolean {
   const trimmed = value.trim();
   return trimmed.includes("/") || trimmed.includes(".");
-}
-
-function safeRelPath(value: string): string {
-  const trimmed = value.trim().replace(/\\/g, "/").replace(/^\/+/, "");
-  if (trimmed === "") {
-    return "";
-  }
-  const parts = trimmed.split("/");
-  if (parts.some((part) => part === "" || part === "." || part === ".." || part === ".git")) {
-    return "";
-  }
-  return parts.join("/");
 }

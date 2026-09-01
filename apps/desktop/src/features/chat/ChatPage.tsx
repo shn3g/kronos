@@ -3,11 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatClient, ChatMessage, ChatSession } from "./client";
 import { ChatMarkdown } from "./ChatMarkdown";
+import { ChatPathButton } from "./ChatPathButton";
 import { chatContextMeterLabel, chatContextUsage, chatContextWarning } from "./contextMeter";
 import { CopyTextButton } from "./CopyTextButton";
 import { appendMention, insertMention, mentionQueryAtCursor, mentionSegments, uniqueMentionPaths } from "./mentionQuery";
 import { toolCardLabel } from "./toolCard";
 import type { IndexClient } from "../index/client";
+import { safeWorkspaceRelPath } from "../files/workspacePath";
 
 const EMPTY_MENTION_REQUEST = { path: "", nonce: 0 };
 
@@ -22,6 +24,7 @@ interface ChatPageProps {
   onOpenWorkspace: () => void;
   onOpenModels?: () => void;
   onApplyFile?: ((path: string, content: string) => Promise<void>) | undefined;
+  onOpenPath?: ((path: string) => void) | undefined;
 }
 
 export function ChatPage({
@@ -35,6 +38,7 @@ export function ChatPage({
   onOpenWorkspace,
   onOpenModels,
   onApplyFile,
+  onOpenPath,
 }: ChatPageProps) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -332,7 +336,7 @@ export function ChatPage({
             <h1 className="chat-empty__title">Ask Kronos</h1>
             <p>
               {repositoryId
-                ? "Chat can search this workspace, read and write files, run commands, and start a longer goal when you want unattended work. AGENTS.md and Cursor rules files in this folder are followed on every turn. Apply on a code block writes that file here."
+                ? "Chat can search this workspace, read and write files, run commands, and start a longer goal when you want unattended work. AGENTS.md and Cursor rules files in this folder are followed on every turn. Apply on a code block writes that file here. Click a file mention to open it in Files."
                 : "You can ask how Kronos works now. Open a git folder to index code."}
             </p>
             {repositoryId ? null : (
@@ -350,9 +354,9 @@ export function ChatPage({
                 data-tool={item.toolName ?? undefined}
               >
                 {item.role === "assistant" ? (
-                  <ChatMarkdown source={item.content} onApply={onApplyFile} />
+                  <ChatMarkdown source={item.content} onApply={onApplyFile} onOpenPath={onOpenPath} />
                 ) : item.role === "user" ? (
-                  <UserMentionText content={item.content} />
+                  <UserMentionText content={item.content} onOpenPath={onOpenPath} />
                 ) : item.role === "tool" ? (
                   <>
                     <p className="chat-bubble__tool">{toolCardLabel(item.toolName, item.toolStatus)}</p>
@@ -522,16 +526,25 @@ export function ChatPage({
   );
 }
 
-function UserMentionText({ content }: { content: string }) {
+function UserMentionText({
+  content,
+  onOpenPath,
+}: {
+  content: string;
+  onOpenPath: ((path: string) => void) | undefined;
+}) {
   return (
     <p>
-      {mentionSegments(content).map((part, index) =>
-        part.kind === "path" ? (
-          <code key={`${part.value}:${index}`}>{part.value}</code>
-        ) : (
-          <span key={`${part.value}:${index}`}>{part.value}</span>
-        ),
-      )}
+      {mentionSegments(content).map((part, index) => {
+        if (part.kind !== "path") {
+          return <span key={`${part.value}:${index}`}>{part.value}</span>;
+        }
+        const path = safeWorkspaceRelPath(part.value);
+        if (onOpenPath && path !== "") {
+          return <ChatPathButton key={`${part.value}:${index}`} path={path} onOpen={onOpenPath} />;
+        }
+        return <code key={`${part.value}:${index}`}>{part.value}</code>;
+      })}
     </p>
   );
 }

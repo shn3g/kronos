@@ -545,6 +545,50 @@ describe("ChatPage", () => {
     await user.click(screen.getByRole("button", { name: /^send$/i }));
     const mentioned = await screen.findAllByText("src/App.tsx");
     expect(mentioned[0]?.tagName).toBe("CODE");
+    expect(screen.queryByRole("button", { name: /open src\/app\.tsx/i })).not.toBeInTheDocument();
+  });
+
+  it("opens a mentioned workspace file from the user bubble", async () => {
+    const user = userEvent.setup();
+    const onOpenPath = vi.fn();
+    render(
+      <ChatPage
+        chatClient={chatClient()}
+        repositoryId="repo_alpha"
+        historyOpen={false}
+        onOpenWorkspace={() => undefined}
+        onOpenPath={onOpenPath}
+      />,
+    );
+
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "Fix @src/App.tsx");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    await user.click(await screen.findByRole("button", { name: /open src\/app\.tsx/i }));
+
+    expect(onOpenPath).toHaveBeenCalledWith("src/App.tsx");
+  });
+
+  it("does not open a parent-directory mention as a file", async () => {
+    const user = userEvent.setup();
+    const onOpenPath = vi.fn();
+    render(
+      <ChatPage
+        chatClient={chatClient()}
+        repositoryId="repo_alpha"
+        historyOpen={false}
+        onOpenWorkspace={() => undefined}
+        onOpenPath={onOpenPath}
+      />,
+    );
+
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "Ignore @../secret.txt");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+
+    expect(await screen.findByText("../secret.txt")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /open \.\.\/secret\.txt/i })).not.toBeInTheDocument();
+    expect(onOpenPath).not.toHaveBeenCalled();
   });
 
   it("appends a workspace path from an external mention request", async () => {

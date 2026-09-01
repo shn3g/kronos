@@ -29,6 +29,7 @@ interface InspectorDrawerProps {
   onCommit?: (message: string, paths: string[]) => void;
   commitError?: string | null;
   committing?: boolean;
+  onOpenPath?: ((path: string) => void) | undefined;
 }
 
 export function InspectorDrawer({
@@ -43,6 +44,7 @@ export function InspectorDrawer({
   onCommit,
   commitError = null,
   committing = false,
+  onOpenPath,
 }: InspectorDrawerProps) {
   const [pickedScope, setPickedScope] = useState<ChangeListScope | null>(null);
   const hasTurn = changes.some((item) => item.fromChat === true);
@@ -113,6 +115,7 @@ export function InspectorDrawer({
                         key={`${item.path}:${item.summary}`}
                         item={item}
                         onRevert={onRevert}
+                        onOpenPath={onOpenPath}
                         reverting={revertingPath === item.path}
                       />
                     ))}
@@ -192,10 +195,12 @@ function CommitForm({
 function ChangeRow({
   item,
   onRevert,
+  onOpenPath,
   reverting,
 }: {
   item: InspectorChange;
   onRevert: ((path: string) => void) | undefined;
+  onOpenPath: ((path: string) => void) | undefined;
   reverting: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -221,19 +226,33 @@ function ChangeRow({
             <span>{item.summary}</span>
           </button>
         )}
-        {onRevert ? (
-          <button
-            type="button"
-            className="btn-quiet"
-            aria-label={`Revert ${item.path}`}
-            disabled={reverting}
-            onClick={() => {
-              onRevert(item.path);
-            }}
-          >
-            Revert
-          </button>
-        ) : null}
+        <div className="inspector__change-actions">
+          {onOpenPath ? (
+            <button
+              type="button"
+              className="btn-quiet"
+              aria-label={`Open ${item.path}`}
+              onClick={() => {
+                onOpenPath(item.path);
+              }}
+            >
+              Open
+            </button>
+          ) : null}
+          {onRevert ? (
+            <button
+              type="button"
+              className="btn-quiet"
+              aria-label={`Revert ${item.path}`}
+              disabled={reverting}
+              onClick={() => {
+                onRevert(item.path);
+              }}
+            >
+              Revert
+            </button>
+          ) : null}
+        </div>
       </div>
       {open && patch !== "" ? <pre className="inspector__diff">{patch}</pre> : null}
     </li>

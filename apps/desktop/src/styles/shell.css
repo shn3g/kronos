@@ -642,6 +642,14 @@
   font-size: 12px;
 }
 
+.inspector__change-actions {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
 .inspector__change {
   display: flex;
   flex-direction: column;
@@ -1012,6 +1020,35 @@
   border-radius: 4px;
   background: rgb(255 255 255 / 0.08);
   font-size: 12px;
+}
+
+.chat-path {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chat-path code {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 0.08);
+  font-size: 12px;
+}
+
+.chat-path:hover code,
+.chat-path:focus-visible code {
+  text-decoration: underline;
+}
+
+.chat-path:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
 }
 
 .chat-bubble--user {

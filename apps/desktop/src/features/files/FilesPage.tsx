@@ -14,6 +14,7 @@ import {
   flattenFileTree,
   folderPathsInTree,
 } from "./fileTree";
+import { ancestorFolderPaths, safeWorkspaceRelPath } from "./workspacePath";
 
 const productionRepos = createProductionRepositoriesClient();
 
@@ -24,7 +25,10 @@ interface FilesPageProps {
   indexClient?: IndexClient;
   onOpenWorkspace: () => void;
   onAskInChat?: (path: string) => void;
+  revealRequest?: { path: string; nonce: number };
 }
+
+const EMPTY_REVEAL = { path: "", nonce: 0 };
 
 export function FilesPage({
   engineClient,
@@ -33,6 +37,7 @@ export function FilesPage({
   indexClient,
   onOpenWorkspace,
   onAskInChat,
+  revealRequest = EMPTY_REVEAL,
 }: FilesPageProps) {
   const client = repositoriesClient ?? productionRepos;
   const [ready, setReady] = useState(false);
@@ -79,6 +84,21 @@ export function FilesPage({
     setSearchHits([]);
     setSearchError(null);
   }, [repositoryId]);
+
+  useEffect(() => {
+    const path = safeWorkspaceRelPath(revealRequest.path);
+    if (revealRequest.nonce === 0 || path === "") {
+      return;
+    }
+    setSelectedPath(path);
+    setExpanded((current) => {
+      const next = new Set(current);
+      for (const folder of ancestorFolderPaths(path)) {
+        next.add(folder);
+      }
+      return next;
+    });
+  }, [revealRequest.nonce, revealRequest.path]);
 
   useEffect(() => {
     if (!ready || !repositoryId) {

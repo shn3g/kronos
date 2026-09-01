@@ -65,6 +65,45 @@ describe("InspectorDrawer", () => {
     expect(onRevert).toHaveBeenCalledWith("src/App.tsx");
   });
 
+  it("opens a change in Files from the Changes list", async () => {
+    const user = userEvent.setup();
+    const onOpenPath = vi.fn();
+    render(
+      <InspectorDrawer
+        tab="changes"
+        onTab={() => undefined}
+        changes={[
+          {
+            path: "src/App.tsx",
+            summary: "Wrote src/App.tsx",
+            patch: "--- a/src/App.tsx\n+++ b/src/App.tsx\n-old\n+new\n",
+          },
+        ]}
+        goals={[]}
+        checks={[]}
+        onOpenPath={onOpenPath}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /open src\/app\.tsx/i }));
+    expect(onOpenPath).toHaveBeenCalledWith("src/App.tsx");
+    expect(screen.queryByText(/-old/)).not.toBeInTheDocument();
+  });
+
+  it("hides Open when no file opener is provided", () => {
+    render(
+      <InspectorDrawer
+        tab="changes"
+        onTab={() => undefined}
+        changes={[{ path: "src/App.tsx", summary: "Modified src/App.tsx" }]}
+        goals={[]}
+        checks={[]}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: /open src\/app\.tsx/i })).not.toBeInTheDocument();
+  });
+
   it("commits listed files from a local message", async () => {
     const user = userEvent.setup();
     const onCommit = vi.fn();

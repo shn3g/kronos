@@ -20,6 +20,7 @@ import {
 } from "../features/models/client";
 import { plannerDisplayName } from "../features/models/plannerLabel";
 import { FilesPage } from "../features/files/FilesPage";
+import { safeWorkspaceRelPath } from "../features/files/workspacePath";
 import { TerminalPage } from "../features/terminal/TerminalPage";
 import { createProductionIndexClient, type IndexClient } from "../features/index/client";
 import { SettingsPage } from "../features/settings/SettingsPage";
@@ -103,6 +104,7 @@ export function App({
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("changes");
   const [newChatRequest, setNewChatRequest] = useState(0);
   const [mentionRequest, setMentionRequest] = useState({ path: "", nonce: 0 });
+  const [fileReveal, setFileReveal] = useState({ path: "", nonce: 0 });
   const [activityCollapsed, setActivityCollapsed] = useState(() =>
     readFlag(ACTIVITY_BAR_STORAGE_KEY),
   );
@@ -173,9 +175,22 @@ export function App({
     settingsClient: settings,
   });
 
+  useEffect(() => {
+    setFileReveal({ path: "", nonce: 0 });
+  }, [session.workspaceId]);
+
   function startNewChat(): void {
     setActivity("chat");
     setNewChatRequest((current) => current + 1);
+  }
+
+  function revealWorkspaceFile(path: string): void {
+    const safe = safeWorkspaceRelPath(path);
+    if (safe === "") {
+      return;
+    }
+    setFileReveal((current) => ({ path: safe, nonce: current.nonce + 1 }));
+    setActivity("files");
   }
 
   function toggleActivityBar(): void {
@@ -377,6 +392,7 @@ export function App({
                   onOpenModels={() => {
                     setActivity("settings");
                   }}
+                  onOpenPath={revealWorkspaceFile}
                   onApplyFile={
                     workspaceId
                       ? async (path, content) => {
@@ -409,6 +425,7 @@ export function App({
                       setMentionRequest((current) => ({ path, nonce: current.nonce + 1 }));
                       setActivity("chat");
                     }}
+                    revealRequest={fileReveal}
                   />
                 </div>
               ) : null}
@@ -437,6 +454,7 @@ export function App({
                 }}
                 commitError={commitError}
                 committing={committing}
+                onOpenPath={revealWorkspaceFile}
               />
             )}
           </div>

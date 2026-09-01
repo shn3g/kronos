@@ -4,18 +4,26 @@ import { useState } from "react";
 import type { ChatMarkdownBlock, ChatMarkdownSpan } from "./renderChatMarkdown";
 import { renderChatMarkdown } from "./renderChatMarkdown";
 import { CopyTextButton } from "./CopyTextButton";
+import { ChatPathButton } from "./ChatPathButton";
+import { looksLikeWorkspaceFilePath } from "../files/workspacePath";
 
 interface ChatMarkdownProps {
   source: string;
   onApply?: ((path: string, content: string) => Promise<void>) | undefined;
+  onOpenPath?: ((path: string) => void) | undefined;
 }
 
-export function ChatMarkdown({ source, onApply }: ChatMarkdownProps) {
+export function ChatMarkdown({ source, onApply, onOpenPath }: ChatMarkdownProps) {
   const blocks = renderChatMarkdown(source);
   return (
     <div className="chat-md">
       {blocks.map((block, index) => (
-        <MarkdownBlock key={blockKey(block, index)} block={block} onApply={onApply} />
+        <MarkdownBlock
+          key={blockKey(block, index)}
+          block={block}
+          onApply={onApply}
+          onOpenPath={onOpenPath}
+        />
       ))}
     </div>
   );
@@ -24,28 +32,30 @@ export function ChatMarkdown({ source, onApply }: ChatMarkdownProps) {
 function MarkdownBlock({
   block,
   onApply,
+  onOpenPath,
 }: {
   block: ChatMarkdownBlock;
   onApply?: ((path: string, content: string) => Promise<void>) | undefined;
+  onOpenPath?: ((path: string) => void) | undefined;
 }) {
   if (block.type === "code") {
     return <CodeBlock block={block} onApply={onApply} />;
   }
   if (block.type === "heading") {
     const Tag = headingTag(block.level);
-    return <Tag className="chat-md__h">{renderSpans(block.spans)}</Tag>;
+    return <Tag className="chat-md__h">{renderSpans(block.spans, onOpenPath)}</Tag>;
   }
   if (block.type === "list") {
     const Tag = block.ordered ? "ol" : "ul";
     return (
       <Tag className="chat-md__list">
         {block.items.map((item, index) => (
-          <li key={`li${index}`}>{renderSpans(item)}</li>
+          <li key={`li${index}`}>{renderSpans(item, onOpenPath)}</li>
         ))}
       </Tag>
     );
   }
-  return <p>{renderSpans(block.spans)}</p>;
+  return <p>{renderSpans(block.spans, onOpenPath)}</p>;
 }
 
 function CodeBlock({
@@ -118,12 +128,18 @@ function CodeBlock({
   );
 }
 
-function renderSpans(spans: ChatMarkdownSpan[]) {
+function renderSpans(
+  spans: ChatMarkdownSpan[],
+  onOpenPath: ((path: string) => void) | undefined,
+) {
   return spans.map((span, index) => {
     if (span.type === "strong") {
       return <strong key={`s${index}`}>{span.text}</strong>;
     }
     if (span.type === "code") {
+      if (onOpenPath && looksLikeWorkspaceFilePath(span.text)) {
+        return <ChatPathButton key={`c${index}`} path={span.text} onOpen={onOpenPath} />;
+      }
       return (
         <code key={`c${index}`} className="chat-md__inline">
           {span.text}
