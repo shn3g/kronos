@@ -5,6 +5,7 @@ import type { EngineClient } from "../../engine/client";
 import {
   createProductionModelsClient,
   type DetectedTool,
+  type EmbeddingBackend,
   type ModelRole,
   type ModelsClient,
   type ModelsSnapshot,
@@ -100,6 +101,7 @@ export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
           reviewer: null,
           embedding: null,
         },
+        embeddingBackend: snapshot?.embeddingBackend ?? sparseBackend(),
       };
       setSnapshot(next);
       setAssignments(assignmentsFromProfiles(created.profiles));
@@ -135,6 +137,11 @@ export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
         Assign explicit planner, coder, reviewer, and embedding profiles. Kronos never silently
         falls back to an unapproved or paid model.
       </p>
+      {snapshot?.embeddingBackend ? (
+        <p className="page-body models__backend">
+          {embeddingBackendLabel(snapshot.embeddingBackend)}
+        </p>
+      ) : null}
       {snapshot?.detected.length ? (
         <ul className="models__detected">
           {snapshot.detected.map((tool) => (
@@ -202,6 +209,20 @@ export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
       {error ? <p className="wizard__error">{error}</p> : null}
     </section>
   );
+}
+
+function embeddingBackendLabel(backend: EmbeddingBackend): string {
+  if (backend.kind === "openai_compatible") {
+    return `Embedding backend: OpenAI-compatible (${backend.displayName})`;
+  }
+  if (backend.kind === "onnx") {
+    return `Embedding backend: Local ONNX (${backend.displayName})`;
+  }
+  return `Embedding backend: ${backend.displayName || "Sparse only"}`;
+}
+
+function sparseBackend(): EmbeddingBackend {
+  return { kind: "none", modelId: "", displayName: "Sparse only" };
 }
 
 function assignmentsFromSnapshot(snapshot: ModelsSnapshot): Record<ModelRole, string> {

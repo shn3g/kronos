@@ -6,13 +6,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from kronos_engine.adapters.embeddings.local import LocalEmbeddingAdapter
 from kronos_engine.adapters.executors.controlled import ControlledOpenExecutor
 from kronos_engine.adapters.git.detection import ManifestStackDetector
 from kronos_engine.adapters.git.repository import FilesystemGitInspector
 from kronos_engine.adapters.git.worktrees import CacheRuntimeLayout
 from kronos_engine.adapters.sandboxes.process_jail import ProcessJailSandbox
 from kronos_engine.application.dispatch import DispatchService
+from kronos_engine.application.embeddings import resolve_embedder
 from kronos_engine.application.gates import ProcessGateRunner
 from kronos_engine.application.github_setup import GitHubSetupService
 from kronos_engine.application.goal_engine import GoalEngine
@@ -37,6 +37,7 @@ from kronos_engine.state.event_store import SqliteEventStore
 from kronos_engine.state.github_apps import SqliteGithubAppStore
 from kronos_engine.state.goals import SqliteGoalStore
 from kronos_engine.state.leases import SqliteLeases
+from kronos_engine.state.model_profiles import SqliteModelRegistry
 from kronos_engine.state.outbox import SqliteOutbox
 from kronos_engine.state.repositories import SqliteRepositoryRegistry
 from kronos_engine.state.scheduler import GoalScheduler
@@ -61,7 +62,11 @@ def build_goal_engine(
     outbox = SqliteOutbox(conn)  # type: ignore[arg-type]
     recorder = Recorder(conn, events, outbox)  # type: ignore[arg-type]
     leases = SqliteLeases(conn)  # type: ignore[arg-type]
-    embeddings = LocalEmbeddingAdapter(settings.paths.cache / "models")
+    embeddings = resolve_embedder(
+        SqliteModelRegistry(conn),  # type: ignore[arg-type]
+        secrets,
+        settings.paths.cache / "models",
+    ).adapter
     indexer = IndexingService(settings.paths, embeddings=embeddings)
     repos = RepositoryService(
         SqliteRepositoryRegistry(conn),  # type: ignore[arg-type]

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 export type ModelRole = "planner" | "coder" | "reviewer" | "embedding";
+export type EmbeddingBackendKind = "openai_compatible" | "onnx" | "none";
 
 export interface DetectedTool {
   kind: string;
@@ -30,10 +31,17 @@ export interface CreatedProvider {
 
 export type RoleAssignments = Record<ModelRole, string | null>;
 
+export interface EmbeddingBackend {
+  kind: EmbeddingBackendKind;
+  modelId: string;
+  displayName: string;
+}
+
 export interface ModelsSnapshot {
   detected: DetectedTool[];
   profiles: ModelProfileOption[];
   assignments: RoleAssignments;
+  embeddingBackend: EmbeddingBackend;
 }
 
 export interface ModelsClient {
@@ -127,7 +135,31 @@ function mapSnapshot(payload: Record<string, unknown>): ModelsSnapshot {
     }),
     profiles: profilesRaw.map(mapProfile),
     assignments: mapAssignments(asRecord(payload.assignments)),
+    embeddingBackend: mapEmbeddingBackend(payload.embedding_backend),
   };
+}
+
+function mapEmbeddingBackend(raw: unknown): EmbeddingBackend {
+  const record = asRecord(raw);
+  const kind = record.kind;
+  if (kind === "openai_compatible" || kind === "onnx" || kind === "none") {
+    return {
+      kind,
+      modelId: stringField(record, "model_id"),
+      displayName: stringField(record, "display_name") || defaultBackendName(kind),
+    };
+  }
+  return { kind: "none", modelId: "", displayName: "Sparse only" };
+}
+
+function defaultBackendName(kind: EmbeddingBackendKind): string {
+  if (kind === "onnx") {
+    return "Local ONNX";
+  }
+  if (kind === "openai_compatible") {
+    return "OpenAI-compatible";
+  }
+  return "Sparse only";
 }
 
 function mapCreatedProvider(payload: Record<string, unknown>): CreatedProvider {

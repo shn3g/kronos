@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
+import logging
 import threading
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,7 +14,6 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
-from kronos_engine.adapters.embeddings.local import LocalEmbeddingAdapter
 from kronos_engine.adapters.git.detection import ManifestStackDetector
 from kronos_engine.adapters.git.repository import FilesystemGitInspector, GitError
 from kronos_engine.adapters.git.worktrees import CacheRuntimeLayout
@@ -26,6 +26,7 @@ from kronos_engine.api.models import (
     AssignmentsResponse,
     BackupRequest,
     DetectedToolModel,
+    EmbeddingBackendModel,
     EventItem,
     EventListResponse,
     GithubAppRecordResponse,
@@ -73,6 +74,7 @@ from kronos_engine.api.models import (
 )
 from kronos_engine.application.composition import build_goal_engine
 from kronos_engine.application.doctor import DoctorService, OpsSettings
+from kronos_engine.application.embeddings import ResolvedEmbedder, resolve_embedder
 from kronos_engine.application.event_query import EventQuery
 from kronos_engine.application.github_setup import GitHubSetupService
 from kronos_engine.application.goal_engine import GoalEngine
@@ -114,6 +116,7 @@ from kronos_engine.domain.tasks import SchemaError, WipExceeded
 from kronos_engine.domain.version import client_is_compatible
 from kronos_engine.domain.workflow import UnresolvedEvidence
 from kronos_engine.indexing.service import IndexingService, IndexStatus
+from kronos_engine.memory.procedural import backfill_memory_vectors
 from kronos_engine.memory.promotion import PromotionBlocked, activate_promoted
 from kronos_engine.memory.records import MemoryRecord, MemoryRejected
 from kronos_engine.observability.otel import LocalMetrics, Tracer
@@ -178,8 +181,12 @@ def create_app(
     telegram_transport: TelegramTransport | None = None,
     telegram_auto_poll: bool = False,
 ) -> FastAPI:
+    embedding_startup: list[Callable[[], None]] = []
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        for hook in embedding_startup:
+            hook()
         stop_polling = threading.Event()
         worker: threading.Thread | None = None
         if telegram_auto_poll:
@@ -250,6 +257,7 @@ def create_app(
                 FilesystemGitInspector(),
                 ManifestStackDetector(),
                 CacheRuntimeLayout(),
+                indexer=_indexing_service(conn),
             )
         finally:
             conn.close()
@@ -257,6 +265,39 @@ def create_app(
     detector = tool_detector or DefaultToolDetector()
     store = secret_store or OsSecretStore(settings.paths.config)
     github_http = github_transport or HttpxTransport()
+
+    def _resolve_embedder(conn: object) -> ResolvedEmbedder:
+        return resolve_embedder(
+            SqliteModelRegistry(conn),  # type: ignore[arg-type]
+            store,
+            settings.paths.cache / "models",
+        )
+
+    def _indexing_service(conn: object) -> IndexingService:
+        return IndexingService(settings.paths, embeddings=_resolve_embedder(conn).adapter)
+
+    def _current_embedder() -> ResolvedEmbedder:
+        conn = database.connect()
+        try:
+            return _resolve_embedder(conn)
+        finally:
+            conn.close()
+
+    def _live_indexer() -> IndexingService:
+        return IndexingService(settings.paths, embeddings=_current_embedder().adapter)
+
+    def _warm_embeddings() -> None:
+        try:
+            conn = database.connect()
+            try:
+                backfill_memory_vectors(conn, _resolve_embedder(conn).adapter)
+            finally:
+                conn.close()
+        except Exception:
+            logging.getLogger("kronos.engine").exception("memory embedding backfill failed")
+
+    embedding_startup.append(_warm_embeddings)
+    _warm_embeddings()
 
     def _ops_flags() -> OpsSettings:
         conn = database.connect()
@@ -330,7 +371,7 @@ def create_app(
                 skills_root=chosen_skills_root,
                 store_dir=settings.paths.cache / "skills",
                 source=skill_source,
-                embeddings=LocalEmbeddingAdapter(settings.paths.cache / "models"),
+                embeddings=_resolve_embedder(conn).adapter,
             )
             catalog.load_core()
             yield catalog
@@ -562,6 +603,7 @@ def create_app(
                 providers=[_provider_model(item) for item in service.list_providers()],
                 profiles=[_profile_model(item) for item in service.list_profiles()],
                 assignments=service.assignments().as_dict(),
+                embedding_backend=_embedding_backend_model(_current_embedder()),
             )
 
     @app.post("/models/providers", response_model=ProviderCreateResponse)
@@ -613,7 +655,7 @@ def create_app(
     def index_status(repository_id: str, _: None = Depends(require_auth)) -> IndexStatusResponse:
         with repository_service() as repos:
             record = _load(repos, repository_id)
-            status = IndexingService(settings.paths).status(record.id.value)
+            status = _live_indexer().status(record.id.value)
             return _index_status(status)
 
     @app.post("/repositories/{repository_id}/index/rebuild", response_model=IndexStatusResponse)
@@ -622,7 +664,7 @@ def create_app(
     ) -> IndexStatusResponse:
         with repository_service() as repos:
             record = _load(repos, repository_id)
-            status = IndexingService(settings.paths).rebuild(
+            status = _live_indexer().rebuild(
                 record.id.value, Path(record.realpath), record.policy
             )
             return _index_status(status)
@@ -633,7 +675,7 @@ def create_app(
     ) -> IndexStatusResponse:
         with repository_service() as repos:
             record = _load(repos, repository_id)
-            status = IndexingService(settings.paths).incremental(
+            status = _live_indexer().incremental(
                 record.id.value, Path(record.realpath), record.policy
             )
             return _index_status(status)
@@ -647,7 +689,7 @@ def create_app(
     ) -> IndexSearchResponse:
         with repository_service() as repos:
             record = _load(repos, repository_id)
-            pack = IndexingService(settings.paths).search(record.id.value, q, mode=mode)
+            pack = _live_indexer().search(record.id.value, q, mode=mode)
             with recorder() as events:
                 events.emit(
                     "retrieval.searched",
@@ -673,7 +715,7 @@ def create_app(
     def index_map(repository_id: str, _: None = Depends(require_auth)) -> IndexMapResponse:
         with repository_service() as repos:
             record = _load(repos, repository_id)
-            return IndexMapResponse(text=IndexingService(settings.paths).repo_map(record.id.value))
+            return IndexMapResponse(text=_live_indexer().repo_map(record.id.value))
 
     GITHUB_APP_CREATE_URL = "https://github.com/settings/apps/new"
 
@@ -1431,6 +1473,17 @@ def _detail_response(
         wrote_files=False,
         committed=False,
         pushed=False,
+    )
+
+
+def _embedding_backend_model(resolved: ResolvedEmbedder) -> EmbeddingBackendModel:
+    kind = resolved.backend.kind
+    if kind not in {"openai_compatible", "onnx", "none"}:
+        kind = "none"
+    return EmbeddingBackendModel(
+        kind=kind,  # type: ignore[arg-type]
+        model_id=resolved.backend.model_id,
+        display_name=resolved.backend.display_name,
     )
 
 

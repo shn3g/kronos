@@ -99,6 +99,11 @@ async def test_models_endpoints_fail_closed_and_hide_secrets(
     body = listed.json()
     assert set(body["assignments"]) == set(MODEL_ROLES)
     assert body["profiles"] == []
+    assert body["embedding_backend"] == {
+        "kind": "none",
+        "model_id": "",
+        "display_name": "Sparse only",
+    }
     assert "api_key" not in str(body)
 
     created = await http.post(
@@ -130,6 +135,8 @@ async def test_models_endpoints_fail_closed_and_hide_secrets(
     assert snapshot["assignments"]["coder"] == profiles["coder"]
     assert snapshot["assignments"]["reviewer"] == profiles["reviewer"]
     assert snapshot["assignments"]["embedding"] == profiles["embedding"]
+    assert snapshot["embedding_backend"]["kind"] == "openai_compatible"
+    assert snapshot["embedding_backend"]["model_id"] == "default"
     assert snapshot["providers"][0]["id"] == provider_id
     assert "sk-http-secret" not in str(snapshot)
     db_bytes = (tmp_path / "data" / "kronos.sqlite3").read_bytes()
@@ -168,3 +175,21 @@ async def test_empty_ready_engine_can_register_detected_local_provider_then_assi
     assigned = await http.put("/models/assignments", headers=headers, json=profiles)
     assert assigned.status_code == 200
     assert assigned.json()["assignments"]["coder"] == profiles["coder"]
+    snapshot = (await http.get("/models", headers=headers)).json()
+    assert snapshot["embedding_backend"]["kind"] == "openai_compatible"
+
+
+@pytest.mark.asyncio
+async def test_models_snapshot_reports_onnx_embedding_backend(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    pytest.importorskip("onnxruntime")
+    pytest.importorskip("tokenizers")
+    from tests.retrieval.support import write_local_embedding_fixtures
+
+    http, headers, tmp_path = client
+    write_local_embedding_fixtures(tmp_path / "cache" / "models")
+    snapshot = (await http.get("/models", headers=headers)).json()
+    assert snapshot["embedding_backend"]["kind"] == "onnx"
+    assert snapshot["embedding_backend"]["model_id"]
+    assert snapshot["embedding_backend"]["display_name"]

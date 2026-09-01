@@ -39,6 +39,38 @@ describe("createProductionModelsClient", () => {
         reviewer: "prof_local",
         embedding: "prof_local",
       },
+      embeddingBackend: { kind: "none", modelId: "", displayName: "Sparse only" },
+    });
+  });
+
+  it("maps embedding_backend from GET /models", async () => {
+    const client = createProductionModelsClient(async (method, path) => {
+      expect(method).toBe("GET");
+      expect(path).toBe("/models");
+      return {
+        status: 200,
+        body: JSON.stringify({
+          detected: [],
+          profiles: [],
+          assignments: { planner: null, coder: null, reviewer: null, embedding: null },
+          embedding_backend: {
+            kind: "onnx",
+            model_id: "all-MiniLM-L6-v2",
+            display_name: "Local ONNX",
+          },
+        }),
+      };
+    });
+
+    await expect(client.snapshot()).resolves.toEqual({
+      detected: [],
+      profiles: [],
+      assignments: { planner: null, coder: null, reviewer: null, embedding: null },
+      embeddingBackend: {
+        kind: "onnx",
+        modelId: "all-MiniLM-L6-v2",
+        displayName: "Local ONNX",
+      },
     });
   });
 

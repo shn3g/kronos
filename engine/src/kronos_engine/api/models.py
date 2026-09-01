@@ -182,11 +182,18 @@ class DetectedToolModel(BaseModel):
     present: bool
 
 
+class EmbeddingBackendModel(BaseModel):
+    kind: Literal["openai_compatible", "onnx", "none"]
+    model_id: str
+    display_name: str
+
+
 class ModelsSnapshotResponse(BaseModel):
     detected: list[DetectedToolModel]
     providers: list[ProviderModel]
     profiles: list[ProfileModel]
     assignments: dict[str, str | None]
+    embedding_backend: EmbeddingBackendModel
 
 
 class ProviderCreateRequest(BaseModel):

@@ -4,7 +4,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from tests.retrieval.support import indexing_policy, kronos_paths, write_tiny_embedding_onnx
+from tests.retrieval.support import (
+    indexing_policy,
+    kronos_paths,
+    write_local_embedding_fixtures,
+    write_tiny_token_embedding_onnx,
+    write_tiny_tokenizer,
+)
 from tests.support.git_fixtures import init_git_repo
 
 from kronos_engine.adapters.embeddings.local import (
@@ -85,6 +91,8 @@ def test_dense_degrades_when_model_file_is_absent(tmp_path: Path) -> None:
     for name in blocked:
         assert name not in text
     assert "all-MiniLM-L6-v2" in text or "all_minilm" in text.lower()
+    assert "_hash_features" not in text
+    assert "tokenizer.json" in text
 
 
 def test_minilm_document_path_never_embeds_source_code(tmp_path: Path) -> None:
@@ -113,13 +121,36 @@ def test_minilm_document_path_never_embeds_source_code(tmp_path: Path) -> None:
     _ = EmbeddingPort
 
 
-def test_local_onnx_file_produces_code_vectors_and_never_uses_minilm(
+def test_onnx_weights_without_tokenizer_leave_dense_unavailable_sparse_works(
     tmp_path: Path,
 ) -> None:
     pytest.importorskip("onnxruntime")
     models = tmp_path / "models"
-    write_tiny_embedding_onnx(models / "code.onnx")
-    write_tiny_embedding_onnx(models / "all-MiniLM-L6-v2.onnx")
+    write_tiny_token_embedding_onnx(models / "code.onnx")
+    adapter = LocalEmbeddingAdapter(models)
+    assert adapter.available("code") is False
+    assert adapter.available("document") is False
+    assert adapter.embed(["def visible():\n    return 'ok'\n"], kind="code") is None
+
+    paths = kronos_paths(tmp_path)
+    root = init_git_repo(
+        tmp_path / "no-tokenizer",
+        files={"src/mod.py": "def visible():\n    return 'ok'\n"},
+    )
+    service = IndexingService(paths, embeddings=adapter)
+    status = service.rebuild("repo_no_tok", root, indexing_policy())
+    assert status.dense_available is False
+    hits = service.search("repo_no_tok", "visible")
+    assert any(item.path.endswith("mod.py") for item in hits.items)
+    assert all("dense" not in item.rank_sources for item in hits.items)
+
+
+def test_local_onnx_file_produces_code_vectors_and_never_uses_minilm(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("onnxruntime")
+    pytest.importorskip("tokenizers")
+    models = write_local_embedding_fixtures(tmp_path / "models")
     adapter = LocalEmbeddingAdapter(models)
     assert adapter.available("code") is True
     assert adapter.available("document") is True
@@ -164,6 +195,7 @@ def test_unloadable_onnx_degrades_without_raising(tmp_path: Path) -> None:
     models = tmp_path / "models"
     models.mkdir()
     (models / "code.onnx").write_bytes(b"not a valid onnx file")
+    write_tiny_tokenizer(models / "tokenizer.json")
     adapter = LocalEmbeddingAdapter(models)
     assert adapter.available("code") is False
     assert adapter.embed(["def enrol():\n    pass\n"], kind="code") is None

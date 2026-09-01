@@ -189,6 +189,40 @@ def persist_record(
     conn.commit()
 
 
+def backfill_memory_vectors(
+    conn: sqlite3.Connection,
+    embeddings: EmbeddingPort | None,
+) -> int:
+    if embeddings is None or not embeddings.available("document"):
+        return 0
+    rows = conn.execute(
+        """
+        SELECT r.id, r.text
+        FROM memory_records r
+        WHERE NOT EXISTS (
+            SELECT 1 FROM memory_vectors v WHERE v.record_id = r.id
+        )
+        ORDER BY r.created_at, r.id
+        """
+    ).fetchall()
+    if not rows:
+        return 0
+    vectors = embeddings.embed([str(row["text"]) for row in rows], kind="document")
+    if vectors is None or len(vectors) != len(rows):
+        return 0
+    filled = 0
+    for row, vector in zip(rows, vectors, strict=True):
+        values = [float(value) for value in vector]
+        payload = struct.pack(f"{len(values)}f", *values)
+        conn.execute(
+            "INSERT INTO memory_vectors(record_id, kind, dim, embedding) VALUES (?, ?, ?, ?)",
+            (str(row["id"]), "document", len(values), payload),
+        )
+        filled += 1
+    conn.commit()
+    return filled
+
+
 def load_record(conn: sqlite3.Connection, record_id: str) -> MemoryRecord | None:
     row = conn.execute("SELECT * FROM memory_records WHERE id = ?", (record_id,)).fetchone()
     if row is None:

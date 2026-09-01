@@ -35,6 +35,11 @@ function modelsClient(overrides: Partial<ModelsClient> = {}): ModelsClient {
         reviewer: "prof_local",
         embedding: "prof_embed",
       },
+      embeddingBackend: {
+        kind: "onnx",
+        modelId: "all-MiniLM-L6-v2",
+        displayName: "Local ONNX",
+      },
     }),
     assign: async () => ({
       planner: "prof_local",
@@ -138,6 +143,7 @@ describe("ModelsPage", () => {
               reviewer: null,
               embedding: null,
             },
+            embeddingBackend: { kind: "none", modelId: "", displayName: "Sparse only" },
           }),
           createProvider,
           assign,
@@ -163,5 +169,14 @@ describe("ModelsPage", () => {
       reviewer: "prof_reviewer",
       embedding: "prof_embedding",
     });
+  });
+
+  it("shows which embedding backend is in use", async () => {
+    render(
+      <ModelsPage engineClient={engine("ready")} modelsClient={modelsClient()} />,
+    );
+
+    expect(await screen.findByText(/embedding backend/i)).toBeInTheDocument();
+    expect(screen.getByText(/local onnx/i)).toBeInTheDocument();
   });
 });
