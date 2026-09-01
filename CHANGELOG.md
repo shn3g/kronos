@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A desktop newer than the engine on PATH is now reported as incompatible instead of ready. The status banner shows both versions (`Engine ready. Desktop 0.2.0. Engine 0.2.0.`) and the incompatible message names the PATH engine to install.
+
 ## [0.2.0] - 2026-09-01
 
 Developed as 0.1.1–0.1.6 on this branch; tagged together as 0.2.0.

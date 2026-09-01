@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { EngineClient, EngineConnectionState } from "./client";
+import { DESKTOP_CLIENT_VERSION } from "../api/kronosClient";
 
 interface EngineStatusProps {
   client: EngineClient;
@@ -14,9 +15,9 @@ function labelFor(state: EngineConnectionState): string {
     case "starting":
       return "Engine starting. Waiting for the local engine.";
     case "ready":
-      return `Engine ready. Version ${state.version}.`;
+      return `Engine ready. Desktop ${DESKTOP_CLIENT_VERSION}. Engine ${state.version}.`;
     case "incompatible":
-      return `Incompatible engine version. Desktop ${state.clientVersion} cannot use engine ${state.engineVersion}.`;
+      return `Incompatible engine version. Desktop ${state.clientVersion} cannot use engine ${state.engineVersion} on PATH. Install the matching engine.`;
   }
 }
 

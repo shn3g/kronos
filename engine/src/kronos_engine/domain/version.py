@@ -34,6 +34,8 @@ def client_is_compatible(client_version: str, min_client_version: str, engine_ve
         return False
     if client.major != engine.major:
         return False
+    if (engine.major, engine.minor, engine.patch) < (client.major, client.minor, client.patch):
+        return False
     return (client.major, client.minor, client.patch) >= (
         minimum.major,
         minimum.minor,

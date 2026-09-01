@@ -52,6 +52,13 @@ async def test_incompatible_desktop_version_is_reported(http: AsyncClient) -> No
 
 
 @pytest.mark.asyncio
+async def test_newer_desktop_is_incompatible_with_older_engine(http: AsyncClient) -> None:
+    response = await http.get("/version", headers={"X-Kronos-Client-Version": "0.2.0"})
+    assert response.status_code == 200
+    assert response.json()["compatible"] is False
+
+
+@pytest.mark.asyncio
 async def test_missing_client_version_is_incompatible(http: AsyncClient) -> None:
     response = await http.get("/version")
     assert response.status_code == 200

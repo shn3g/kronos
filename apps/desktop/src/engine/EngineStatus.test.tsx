@@ -22,14 +22,15 @@ describe("EngineStatus", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("Engine starting");
   });
 
-  it("announces engine ready with the reported version", async () => {
+  it("announces engine ready with desktop and engine versions", async () => {
     render(
       <EngineStatus client={clientOf({ status: "ready", version: "2.4.1" })} />,
     );
 
     const status = await screen.findByRole("status");
     expect(status).toHaveTextContent("Engine ready");
-    expect(status).toHaveTextContent("2.4.1");
+    expect(status).toHaveTextContent("Desktop 0.2.0");
+    expect(status).toHaveTextContent("Engine 2.4.1");
   });
 
   it("announces incompatible engine version with both versions", async () => {
@@ -47,5 +48,6 @@ describe("EngineStatus", () => {
     expect(status).toHaveTextContent("Incompatible engine version");
     expect(status).toHaveTextContent("0.1.0");
     expect(status).toHaveTextContent("9.9.9");
+    expect(status).toHaveTextContent("on PATH");
   });
 });
