@@ -190,6 +190,55 @@ def test_workspace_shell_stays_open_and_accepts_another_line(tmp_path: Path) -> 
     assert write_workspace_shell(run_key, "echo after-stop\n") is False
 
 
+def test_workspace_shell_child_sees_a_tty(tmp_path: Path) -> None:
+    from kronos_engine.application.workspace_terminal import (
+        cancel_workspace_command,
+        start_workspace_shell,
+        write_workspace_shell,
+    )
+
+    repo = init_git_repo(tmp_path / "alpha", files={"README.md": "hello\n"})
+    probe = _python_script(
+        repo,
+        "tty.py",
+        "import sys\nprint('KRONOS_TTY' if sys.stdout.isatty() else 'KRONOS_PIPE')\n",
+    )
+    run_key = "terminal:repo_tty"
+    start_workspace_shell(repo, run_key=run_key)
+    try:
+        assert write_workspace_shell(run_key, f"{probe}\n") is True
+        snapshot = _wait_for_output(run_key, "KRONOS_TTY", timeout_seconds=6)
+        assert "KRONOS_PIPE" not in snapshot["output"]
+        assert snapshot["running"] is True
+    finally:
+        cancel_workspace_command(run_key)
+
+
+def test_workspace_shell_honors_resize(tmp_path: Path) -> None:
+    from kronos_engine.application.workspace_terminal import (
+        cancel_workspace_command,
+        resize_workspace_shell,
+        start_workspace_shell,
+        write_workspace_shell,
+    )
+
+    repo = init_git_repo(tmp_path / "alpha", files={"README.md": "hello\n"})
+    probe = _python_script(
+        repo,
+        "cols.py",
+        "import shutil\nprint('KRONOS_COLS=' + str(shutil.get_terminal_size().columns))\n",
+    )
+    run_key = "terminal:repo_size"
+    start_workspace_shell(repo, run_key=run_key)
+    try:
+        assert resize_workspace_shell(run_key, cols=100, rows=24) is True
+        assert write_workspace_shell(run_key, f"{probe}\n") is True
+        snapshot = _wait_for_output(run_key, "KRONOS_COLS=100", timeout_seconds=6)
+        assert snapshot["running"] is True
+    finally:
+        cancel_workspace_command(run_key)
+
+
 def test_start_workspace_shell_reuses_a_live_session(tmp_path: Path) -> None:
     from kronos_engine.application.workspace_terminal import (
         cancel_workspace_command,

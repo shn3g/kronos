@@ -12,6 +12,7 @@ dependencies = [
     "pydantic>=2.9",
     "uvicorn>=0.32",
     "keyring>=25",
+    "pywinpty>=2.0; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
@@ -75,5 +76,7 @@ module = [
     "tree_sitter_python",
     "tree_sitter_javascript",
     "tree_sitter_typescript",
+    "winpty",
+    "winpty.*",
 ]
 ignore_missing_imports = true

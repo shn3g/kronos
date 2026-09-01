@@ -82,6 +82,7 @@ from kronos_engine.api.models import (
     TerminalRunRequest,
     TerminalRunResponse,
     TerminalShellInputRequest,
+    TerminalShellSizeRequest,
     VersionResponse,
     WorkspaceFileContentsResponse,
     WorkspaceFileItem,
@@ -127,6 +128,7 @@ from kronos_engine.application.workspace_files import list_workspace_files, read
 from kronos_engine.application.workspace_terminal import (
     cancel_workspace_command,
     peek_workspace_command,
+    resize_workspace_shell,
     run_workspace_command,
     start_workspace_shell,
     terminal_run_key,
@@ -1002,8 +1004,28 @@ def create_app(
     ) -> TerminalCancelResponse:
         with repository_service() as repos:
             _load(repos, repository_id)
-        payload = body.line if body.line.endswith("\n") else f"{body.line}\n"
+        payload = body.line
         ok = write_workspace_shell(terminal_run_key(repository_id), payload)
+        if not ok:
+            raise HTTPException(status_code=409, detail="No live terminal session. Start the shell first.")
+        return TerminalCancelResponse(ok=True)
+
+    @app.post(
+        "/repositories/{repository_id}/terminal/sessions/size",
+        response_model=TerminalCancelResponse,
+    )
+    def resize_repository_terminal_shell(
+        repository_id: str,
+        body: TerminalShellSizeRequest,
+        _: None = Depends(require_auth),
+    ) -> TerminalCancelResponse:
+        with repository_service() as repos:
+            _load(repos, repository_id)
+        ok = resize_workspace_shell(
+            terminal_run_key(repository_id),
+            cols=body.cols,
+            rows=body.rows,
+        )
         if not ok:
             raise HTTPException(status_code=409, detail="No live terminal session. Start the shell first.")
         return TerminalCancelResponse(ok=True)

@@ -320,7 +320,7 @@ async def test_workspace_terminal_shell_session_fail_closed(
         first = await http.post(
             f"/repositories/{repo_id}/terminal/sessions/input",
             headers=headers,
-            json={"line": "echo hello-shell"},
+            json={"line": "echo hello-shell\n"},
         )
         assert first.status_code == 200
         assert first.json()["ok"] is True
@@ -338,7 +338,7 @@ async def test_workspace_terminal_shell_session_fail_closed(
         second = await http.post(
             f"/repositories/{repo_id}/terminal/sessions/input",
             headers=headers,
-            json={"line": "echo second-line"},
+            json={"line": "echo second-line\n"},
         )
         assert second.status_code == 200
         seen_second = False

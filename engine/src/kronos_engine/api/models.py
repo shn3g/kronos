@@ -61,6 +61,11 @@ class TerminalShellInputRequest(BaseModel):
     line: str
 
 
+class TerminalShellSizeRequest(BaseModel):
+    cols: int
+    rows: int
+
+
 class WorkspaceFileItem(BaseModel):
     path: str
 
