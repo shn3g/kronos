@@ -90,6 +90,7 @@ jobs:
 
       - name: Checksums SBOM and provenance
         working-directory: engine
+        shell: bash
         env:
           CLAIM_SIGNED: ${{ vars.CLAIM_SIGNED }}
         run: |
