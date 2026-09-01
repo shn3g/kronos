@@ -1,0 +1,452 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""Desktop agent chat. Tools stay inside enrolled repository roots."""
+
+from __future__ import annotations
+
+import sqlite3
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from threading import Event, Lock
+from typing import Protocol
+from uuid import uuid4
+
+from kronos_engine.application.chat_tools import ToolCall, ToolParseError, parse_tool_call
+from kronos_engine.application.goals import GoalService
+from kronos_engine.application.repositories import RepositoryNotFound, RepositoryService
+from kronos_engine.domain.entities import RepositoryId
+from kronos_engine.domain.goals import GoalSource, GoalSpec
+from kronos_engine.indexing.service import IndexingService
+from kronos_engine.memory.procedural import retrieve_records
+from kronos_engine.state.chat import ChatMessageRow, ChatSessionRow, SqliteChatStore
+
+MAX_TOOL_ROUNDS = 6
+MAX_WRITE_CHARS = 200_000
+STOP_MESSAGE = "Stopped. Ask again when you want to continue."
+SYSTEM_PROMPT = """You are Kronos, a locally installed coding agent. Answer in plain language.
+When you need a tool, emit only a fenced JSON block:
+
+```tool
+{"name": "search_index", "query": "onboarding"}
+```
+
+Tools: search_index (query), read_file (path), write_file (path, content),
+search_memory (query), create_goal (title, success_criteria), list_goals.
+Stay inside the current workspace. Do not claim you edited files unless write_file succeeded.
+If you do not need a tool, reply without a tool fence."""
+
+_CANCEL: dict[str, Event] = {}
+_CANCEL_LOCK = Lock()
+
+
+def _cancel_event(session_id: str) -> Event:
+    with _CANCEL_LOCK:
+        return _CANCEL.setdefault(session_id, Event())
+
+
+def request_cancel(session_id: str) -> None:
+    _cancel_event(session_id).set()
+
+
+class ChatCompleter(Protocol):
+    def complete(self, turns: Sequence[ChatTurn], system: str) -> str: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ChatTurn:
+    role: str
+    content: str
+
+
+class ChatModelError(RuntimeError):
+    """Raised when no usable model is assigned."""
+
+
+@dataclass(frozen=True, slots=True)
+class ChatSessionView:
+    id: str
+    title: str
+    repository_id: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class ChatMessageView:
+    id: str
+    role: str
+    content: str
+    tool_name: str | None
+    tool_status: str | None
+    created_at: str
+
+
+class ChatService:
+    def __init__(
+        self,
+        store: SqliteChatStore,
+        completer: ChatCompleter,
+        *,
+        repos: RepositoryService | None = None,
+        indexer: IndexingService | None = None,
+        goals: GoalService | None = None,
+        clock: datetime | None = None,
+        memory_conn: sqlite3.Connection | None = None,
+    ) -> None:
+        self._store = store
+        self._completer = completer
+        self._repos = repos
+        self._indexer = indexer
+        self._goals = goals
+        self._clock = clock
+        self._memory_conn = memory_conn
+
+    def create_session(self, *, repository_id: str | None = None) -> ChatSessionView:
+        now = self._now()
+        row = ChatSessionRow(
+            id=f"chat_{uuid4().hex[:16]}",
+            title="New chat",
+            repository_id=repository_id,
+            created_at=now,
+            updated_at=now,
+        )
+        self._store.save_session(row)
+        return _session_view(row)
+
+    def list_sessions(self) -> Sequence[ChatSessionView]:
+        return tuple(_session_view(item) for item in self._store.list_sessions())
+
+    def get(self, session_id: str) -> tuple[ChatSessionView, tuple[ChatMessageView, ...]]:
+        session = _session_view(self._store.get_session(session_id))
+        messages = tuple(_message_view(item) for item in self._store.list_messages(session_id))
+        return session, messages
+
+    def send_message(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        repository_id: str | None = None,
+    ) -> tuple[ChatMessageView, ...]:
+        text = content.strip()
+        if text == "":
+            raise ValueError("message is required")
+        session = self._store.get_session(session_id)
+        if repository_id:
+            session = ChatSessionRow(
+                id=session.id,
+                title=_title_from(text, session.title),
+                repository_id=repository_id,
+                created_at=session.created_at,
+                updated_at=self._now(),
+            )
+            self._store.save_session(session)
+        elif session.title == "New chat":
+            session = ChatSessionRow(
+                id=session.id,
+                title=_title_from(text, session.title),
+                repository_id=session.repository_id,
+                created_at=session.created_at,
+                updated_at=self._now(),
+            )
+            self._store.save_session(session)
+        self._append(
+            session.id,
+            role="user",
+            content=text,
+            tool_name=None,
+            tool_status=None,
+        )
+        repo_id = repository_id or session.repository_id
+        cancel = _cancel_event(session.id)
+        cancel.clear()
+        try:
+            self._run_agent(session.id, repo_id, cancel)
+        except ChatModelError:
+            self._append(
+                session.id,
+                role="assistant",
+                content="No model is connected. Add a model before chatting.",
+                tool_name=None,
+                tool_status=None,
+            )
+        except Exception:
+            self._append(
+                session.id,
+                role="assistant",
+                content=(
+                    "The model could not finish this turn. "
+                    "Check the model connection in Settings."
+                ),
+                tool_name=None,
+                tool_status=None,
+            )
+        return tuple(_message_view(item) for item in self._store.list_messages(session.id))
+
+    def _run_agent(self, session_id: str, repository_id: str | None, cancel: Event) -> None:
+        for _ in range(MAX_TOOL_ROUNDS):
+            if cancel.is_set():
+                self._append(
+                    session_id,
+                    role="assistant",
+                    content=STOP_MESSAGE,
+                    tool_name=None,
+                    tool_status=None,
+                )
+                return
+            turns = tuple(
+                ChatTurn(role=item.role, content=item.content)
+                for item in self._store.list_messages(session_id)
+            )
+            reply = self._completer.complete(turns, self._system_prompt(turns))
+            if cancel.is_set():
+                self._append(
+                    session_id,
+                    role="assistant",
+                    content=STOP_MESSAGE,
+                    tool_name=None,
+                    tool_status=None,
+                )
+                return
+            try:
+                call = parse_tool_call(reply)
+            except ToolParseError as error:
+                self._append(
+                    session_id,
+                    role="assistant",
+                    content=str(error),
+                    tool_name=None,
+                    tool_status="error",
+                )
+                return
+            if call is None:
+                self._append(
+                    session_id,
+                    role="assistant",
+                    content=reply.strip() or "I had nothing to add.",
+                    tool_name=None,
+                    tool_status=None,
+                )
+                return
+            result = self._execute_tool(call, repository_id)
+            self._append(
+                session_id,
+                role="tool",
+                content=result,
+                tool_name=call.name,
+                tool_status="ok",
+            )
+        self._append(
+            session_id,
+            role="assistant",
+            content="Stopped after too many tool steps. Ask again with a smaller request.",
+            tool_name=None,
+            tool_status=None,
+        )
+
+    def _execute_tool(self, call: ToolCall, repository_id: str | None) -> str:
+        if call.name == "list_goals":
+            return self._list_goals()
+        if call.name == "search_memory":
+            return self._search_memory(call.arguments.get("query", ""))
+        if repository_id is None or repository_id == "":
+            return "No workspace is open. Open a git folder first."
+        if call.name == "search_index":
+            return self._search_index(repository_id, call.arguments.get("query", ""))
+        if call.name == "read_file":
+            return self._read_file(repository_id, call.arguments.get("path", ""))
+        if call.name == "write_file":
+            return self._write_file(
+                repository_id,
+                call.arguments.get("path", ""),
+                call.arguments.get("content", ""),
+            )
+        if call.name == "create_goal":
+            return self._create_goal(repository_id, call.arguments)
+        return "unknown tool"
+
+    def _search_index(self, repository_id: str, query: str) -> str:
+        if self._indexer is None:
+            return "Index is not available."
+        pack = self._indexer.search(repository_id, query)
+        if not pack.items:
+            return "No index hits. Rebuild the index after opening a workspace."
+        lines = [
+            f"{item.path}:{item.start_line}-{item.end_line} {item.text[:240]}"
+            for item in pack.items[:8]
+        ]
+        return "\n".join(lines)
+
+    def _read_file(self, repository_id: str, rel_path: str) -> str:
+        if self._repos is None:
+            return "Workspace is not available."
+        try:
+            record = self._repos.get(RepositoryId(repository_id))
+        except (RepositoryNotFound, LookupError, ValueError):
+            return "Workspace was not found."
+        root = Path(record.realpath).resolve()
+        target = (root / rel_path).resolve()
+        if not _is_inside(root, target) or not target.is_file():
+            return "That path is outside the workspace or is not a file."
+        text = target.read_text(encoding="utf-8", errors="replace")
+        return text[:8000]
+
+    def _write_file(self, repository_id: str, rel_path: str, content: str) -> str:
+        if self._repos is None:
+            return "Workspace is not available."
+        if len(content) > MAX_WRITE_CHARS:
+            return f"File is too large to write here. Keep it under {MAX_WRITE_CHARS} characters."
+        try:
+            record = self._repos.get(RepositoryId(repository_id))
+        except (RepositoryNotFound, LookupError, ValueError):
+            return "Workspace was not found."
+        root = Path(record.realpath).resolve()
+        relative = Path(rel_path)
+        if relative.is_absolute() or any(part == ".." or part == ".git" for part in relative.parts):
+            return "That path is outside the workspace or is not a file."
+        target = (root / relative).resolve()
+        if not _is_inside(root, target):
+            return "That path is outside the workspace or is not a file."
+        locked = getattr(getattr(record, "policy", None), "paths", None)
+        prefixes = getattr(locked, "locked_prefixes", ())
+        as_posix = relative.as_posix()
+        if any(
+            as_posix == prefix.rstrip("/") or as_posix.startswith(prefix) for prefix in prefixes
+        ):
+            return "That path is locked by repository policy."
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not _is_inside(root, target.parent.resolve()):
+            return "That path is outside the workspace or is not a file."
+        target.write_text(content, encoding="utf-8")
+        return f"Wrote {as_posix} ({len(content)} characters)."
+
+    def _search_memory(self, query: str) -> str:
+        if self._memory_conn is None:
+            return "Memories are not available."
+        records = retrieve_records(self._memory_conn, query, None, limit=5)
+        if not records:
+            return "No matching memories."
+        return "\n".join(item.text[:400] for item in records)
+
+    def _system_prompt(self, turns: Sequence[ChatTurn]) -> str:
+        prompt = SYSTEM_PROMPT
+        if self._memory_conn is None:
+            return prompt
+        query = ""
+        for item in reversed(turns):
+            if item.role == "user":
+                query = item.content
+                break
+        if query == "":
+            return prompt
+        records = retrieve_records(self._memory_conn, query, None, limit=5)
+        if not records:
+            return prompt
+        lines = "\n".join(f"- {item.text[:400]}" for item in records)
+        return f"{prompt}\n\nRelevant memories:\n{lines}"
+
+    def _create_goal(self, repository_id: str, arguments: dict[str, str]) -> str:
+        if self._goals is None:
+            return "Goals are not available."
+        title = arguments.get("title", "").strip()
+        criteria = arguments.get("success_criteria", "").strip() or title
+        if title == "" or criteria == "":
+            return "create_goal needs title and success_criteria."
+        goal = self._goals.create(
+            GoalSpec(
+                repository_id=RepositoryId(repository_id),
+                title=title,
+                success_criteria=criteria,
+                non_goals=arguments.get("non_goals", "").strip()
+                or "Out of scope unless you expand the goal.",
+                risk_ceiling=arguments.get("risk_ceiling", "low") or "low",
+                source=GoalSource.DESKTOP,
+                max_attempts=3,
+            )
+        )
+        return f"Created goal {goal.id.value}: {goal.title}"
+
+    def _list_goals(self) -> str:
+        if self._goals is None:
+            return "Goals are not available."
+        items = self._goals.list()
+        if not items:
+            return "No goals yet."
+        return "\n".join(f"{item.id.value} {item.state.value} {item.title}" for item in items[:20])
+
+    def _append(
+        self,
+        session_id: str,
+        *,
+        role: str,
+        content: str,
+        tool_name: str | None,
+        tool_status: str | None,
+    ) -> None:
+        now = self._now()
+        self._store.append_message(
+            ChatMessageRow(
+                id=f"msg_{uuid4().hex[:16]}",
+                session_id=session_id,
+                role=role,
+                content=content,
+                tool_name=tool_name,
+                tool_status=tool_status,
+                created_at=now,
+                seq=self._store.next_seq(session_id),
+            )
+        )
+        session = self._store.get_session(session_id)
+        self._store.save_session(
+            ChatSessionRow(
+                id=session.id,
+                title=session.title,
+                repository_id=session.repository_id,
+                created_at=session.created_at,
+                updated_at=now,
+            )
+        )
+
+    def _now(self) -> str:
+        if self._clock is not None:
+            return self._clock.isoformat()
+        return datetime.now(tz=UTC).isoformat()
+
+
+def _session_view(row: ChatSessionRow) -> ChatSessionView:
+    return ChatSessionView(
+        id=row.id,
+        title=row.title,
+        repository_id=row.repository_id,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _message_view(row: ChatMessageRow) -> ChatMessageView:
+    return ChatMessageView(
+        id=row.id,
+        role=row.role,
+        content=row.content,
+        tool_name=row.tool_name,
+        tool_status=row.tool_status,
+        created_at=row.created_at,
+    )
+
+
+def _title_from(message: str, current: str) -> str:
+    if current != "New chat":
+        return current
+    compact = " ".join(message.split())
+    if len(compact) <= 48:
+        return compact or "New chat"
+    return f"{compact[:45]}..."
+
+
+def _is_inside(root: Path, target: Path) -> bool:
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return False
+    return True

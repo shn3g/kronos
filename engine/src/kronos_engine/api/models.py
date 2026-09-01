@@ -352,3 +352,38 @@ class OpsSettingsRequest(BaseModel):
     otel_export: bool = False
     langfuse_export: bool = False
 
+
+class ChatSessionModel(BaseModel):
+    id: str
+    title: str
+    repository_id: str | None
+    created_at: str
+    updated_at: str
+
+
+class ChatMessageModel(BaseModel):
+    id: str
+    role: str
+    content: str
+    tool_name: str | None = None
+    tool_status: str | None = None
+    created_at: str
+
+
+class ChatSessionCreateRequest(BaseModel):
+    repository_id: str | None = None
+
+
+class ChatMessageCreateRequest(BaseModel):
+    content: str
+    repository_id: str | None = None
+
+
+class ChatSessionDetailResponse(BaseModel):
+    session: ChatSessionModel
+    messages: list[ChatMessageModel]
+
+
+class ChatSessionListResponse(BaseModel):
+    sessions: list[ChatSessionModel]
+

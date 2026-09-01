@@ -224,3 +224,17 @@ def test_doctor_output_never_contains_os_secrets(tmp_path: Path) -> None:
     blob = b"".join(p.read_bytes() for p in Path(archive.path).rglob("*") if p.is_file())
     assert BOT.encode() not in blob
     assert b"BEGIN RSA" not in blob
+
+
+def test_doctor_exposes_named_health_checks(tmp_path: Path) -> None:
+    doctor = _doctor(tmp_path, InMemorySecretStore())
+    report = doctor.check(client_version="0.1.0")
+    ids = [item.id for item in report.checks]
+    assert ids == ["engine", "model", "workspace", "index", "secrets"]
+    engine = next(item for item in report.checks if item.id == "engine")
+    assert engine.ok is True
+    model = next(item for item in report.checks if item.id == "model")
+    assert model.ok is False
+    secrets = next(item for item in report.checks if item.id == "secrets")
+    assert secrets.ok is True
+    assert "secret store" in secrets.detail.lower()

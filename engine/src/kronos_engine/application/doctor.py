@@ -37,6 +37,14 @@ class Finding:
 
 
 @dataclass(frozen=True, slots=True)
+class HealthCheck:
+    id: str
+    label: str
+    ok: bool
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
 class DoctorReport:
     ready: bool
     health: str
@@ -44,6 +52,7 @@ class DoctorReport:
     model_degraded: bool
     index_degraded: bool
     findings: tuple[Finding, ...] = ()
+    checks: tuple[HealthCheck, ...] = ()
 
     def __str__(self) -> str:
         return (
@@ -154,6 +163,11 @@ class DoctorService:
             model_degraded=model_degraded,
             index_degraded=index_degraded,
             findings=tuple(findings),
+            checks=self._health_checks(
+                compatible=compatible,
+                model_degraded=model_degraded,
+                index_degraded=index_degraded,
+            ),
         )
 
     def backup(self, dest: Path) -> BackupArchive:
@@ -456,6 +470,68 @@ class DoctorService:
             "SELECT 1 FROM ops_degradation WHERE kind = ? LIMIT 1", (kind,)
         ).fetchone()
         return row is not None
+
+    def _health_checks(
+        self,
+        *,
+        compatible: bool,
+        model_degraded: bool,
+        index_degraded: bool,
+    ) -> tuple[HealthCheck, ...]:
+        planner = self._conn.execute(
+            "SELECT profile_id FROM model_assignments WHERE role = 'planner'"
+        ).fetchone()
+        repo_row = self._conn.execute("SELECT COUNT(*) FROM repositories").fetchone()
+        repo_count = int(repo_row[0]) if repo_row is not None else 0
+        model_ok = planner is not None and not model_degraded
+        return (
+            HealthCheck(
+                id="engine",
+                label="Engine",
+                ok=compatible,
+                detail=(
+                    "The local engine is running."
+                    if compatible
+                    else "This desktop cannot use the connected engine version."
+                ),
+            ),
+            HealthCheck(
+                id="model",
+                label="Model",
+                ok=model_ok,
+                detail=(
+                    "A planner model is assigned."
+                    if model_ok
+                    else "Connect a model before chatting."
+                ),
+            ),
+            HealthCheck(
+                id="workspace",
+                label="Workspace",
+                ok=repo_count > 0,
+                detail=(
+                    f"{repo_count} folder{'s' if repo_count != 1 else ''} enrolled."
+                    if repo_count > 0
+                    else "Open a git folder to index and edit code."
+                ),
+            ),
+            HealthCheck(
+                id="index",
+                label="Index",
+                ok=not index_degraded,
+                detail=(
+                    "The local search index is healthy."
+                    if not index_degraded
+                    else "The search index needs a rebuild."
+                ),
+            ),
+            HealthCheck(
+                id="secrets",
+                label="Secrets",
+                ok=True,
+                detail="API keys stay in the operating system secret store.",
+            ),
+        )
 
     def _degradation_findings(self) -> list[Finding]:
         rows = self._conn.execute("SELECT kind, target, detail FROM ops_degradation").fetchall()

@@ -25,6 +25,12 @@ from kronos_engine.api.models import (
     AssignmentsRequest,
     AssignmentsResponse,
     BackupRequest,
+    ChatMessageCreateRequest,
+    ChatMessageModel,
+    ChatSessionCreateRequest,
+    ChatSessionDetailResponse,
+    ChatSessionListResponse,
+    ChatSessionModel,
     DetectedToolModel,
     EventItem,
     EventListResponse,
@@ -71,6 +77,14 @@ from kronos_engine.api.models import (
     TelegramTokenRequest,
     VersionResponse,
 )
+from kronos_engine.application.chat import (
+    ChatCompleter,
+    ChatMessageView,
+    ChatService,
+    ChatSessionView,
+    request_cancel,
+)
+from kronos_engine.application.chat_complete import AssignedPlannerCompleter
 from kronos_engine.application.composition import build_goal_engine
 from kronos_engine.application.doctor import DoctorService, OpsSettings
 from kronos_engine.application.event_query import EventQuery
@@ -144,6 +158,7 @@ from kronos_engine.skills.quarantine import (
     SkillSourcePort,
     SkillStillQuarantined,
 )
+from kronos_engine.state.chat import SqliteChatStore
 from kronos_engine.state.database import Database
 from kronos_engine.state.event_store import SqliteEventStore
 from kronos_engine.state.github_apps import SqliteGithubAppStore
@@ -177,6 +192,7 @@ def create_app(
     skill_source: SkillSourcePort | None = None,
     telegram_transport: TelegramTransport | None = None,
     telegram_auto_poll: bool = False,
+    chat_completer: ChatCompleter | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -316,6 +332,37 @@ def create_app(
         conn = database.connect()
         try:
             yield ModelProfileService(SqliteModelRegistry(conn), store)
+        finally:
+            conn.close()
+
+    @contextmanager
+    def chat_service() -> Iterator[ChatService]:
+        conn = database.connect()
+        try:
+            repos = RepositoryService(
+                SqliteRepositoryRegistry(conn),
+                settings.paths,
+                FilesystemGitInspector(),
+                ManifestStackDetector(),
+                CacheRuntimeLayout(),
+            )
+            completer = chat_completer or AssignedPlannerCompleter(
+                SqliteModelRegistry(conn),
+                store,
+            )
+            yield ChatService(
+                SqliteChatStore(conn),
+                completer,
+                repos=repos,
+                indexer=IndexingService(settings.paths),
+                goals=GoalService(
+                    SqliteGoalStore(conn),
+                    repos,
+                    Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn)),
+                    notifications=_notifications_for(conn),
+                ),
+                memory_conn=conn,
+            )
         finally:
             conn.close()
 
@@ -608,6 +655,80 @@ def create_app(
             except RoleAssignmentError as error:
                 raise HTTPException(status_code=400, detail=str(error)) from error
             return AssignmentsResponse(assignments=assigned.as_dict())
+
+    def _chat_session_model(item: ChatSessionView) -> ChatSessionModel:
+        return ChatSessionModel(
+            id=item.id,
+            title=item.title,
+            repository_id=item.repository_id,
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+        )
+
+    def _chat_message_model(item: ChatMessageView) -> ChatMessageModel:
+        return ChatMessageModel(
+            id=item.id,
+            role=item.role,
+            content=item.content,
+            tool_name=item.tool_name,
+            tool_status=item.tool_status,
+            created_at=item.created_at,
+        )
+
+    @app.get("/chat/sessions", response_model=ChatSessionListResponse)
+    def chat_sessions(_: None = Depends(require_auth)) -> ChatSessionListResponse:
+        with chat_service() as service:
+            return ChatSessionListResponse(
+                sessions=[_chat_session_model(item) for item in service.list_sessions()]
+            )
+
+    @app.post("/chat/sessions", response_model=ChatSessionDetailResponse)
+    def chat_create(
+        body: ChatSessionCreateRequest, _: None = Depends(require_auth)
+    ) -> ChatSessionDetailResponse:
+        with chat_service() as service:
+            session = service.create_session(repository_id=body.repository_id)
+            return ChatSessionDetailResponse(session=_chat_session_model(session), messages=[])
+
+    @app.get("/chat/sessions/{session_id}", response_model=ChatSessionDetailResponse)
+    def chat_get(session_id: str, _: None = Depends(require_auth)) -> ChatSessionDetailResponse:
+        with chat_service() as service:
+            try:
+                session, messages = service.get(session_id)
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="chat session not found") from error
+            return ChatSessionDetailResponse(
+                session=_chat_session_model(session),
+                messages=[_chat_message_model(item) for item in messages],
+            )
+
+    @app.post("/chat/sessions/{session_id}/messages", response_model=ChatSessionDetailResponse)
+    def chat_send(
+        session_id: str,
+        body: ChatMessageCreateRequest,
+        _: None = Depends(require_auth),
+    ) -> ChatSessionDetailResponse:
+        with chat_service() as service:
+            try:
+                messages = service.send_message(
+                    session_id,
+                    body.content,
+                    repository_id=body.repository_id,
+                )
+                session, _ = service.get(session_id)
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="chat session not found") from error
+            except ValueError as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            return ChatSessionDetailResponse(
+                session=_chat_session_model(session),
+                messages=[_chat_message_model(item) for item in messages],
+            )
+
+    @app.post("/chat/sessions/{session_id}/cancel")
+    def chat_cancel(session_id: str, _: None = Depends(require_auth)) -> dict[str, object]:
+        request_cancel(session_id)
+        return {"ok": True, "session_id": session_id}
 
     @app.get("/repositories/{repository_id}/index", response_model=IndexStatusResponse)
     def index_status(repository_id: str, _: None = Depends(require_auth)) -> IndexStatusResponse:
@@ -1221,6 +1342,15 @@ def create_app(
                 "model_degraded": report.model_degraded,
                 "index_degraded": report.index_degraded,
                 "findings": [item.detail for item in report.findings],
+                "checks": [
+                    {
+                        "id": item.id,
+                        "label": item.label,
+                        "ok": item.ok,
+                        "detail": item.detail,
+                    }
+                    for item in report.checks
+                ],
             }
 
     @app.post("/ops/backup")

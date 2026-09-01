@@ -316,6 +316,31 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        10,
+        """
+        CREATE TABLE chat_sessions (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            repository_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE chat_messages (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL REFERENCES chat_sessions(id),
+            role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'tool')),
+            content TEXT NOT NULL,
+            tool_name TEXT,
+            tool_status TEXT,
+            created_at TEXT NOT NULL,
+            seq INTEGER NOT NULL
+        );
+
+        CREATE INDEX chat_messages_session_seq ON chat_messages(session_id, seq);
+        """,
+    ),
 )
 
 
