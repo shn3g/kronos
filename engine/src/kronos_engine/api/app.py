@@ -82,6 +82,8 @@ from kronos_engine.api.models import (
     WorkspaceFileContentsResponse,
     WorkspaceFileItem,
     WorkspaceFilesResponse,
+    WorkspaceWriteRequest,
+    WorkspaceWriteResponse,
 )
 from kronos_engine.application.chat import (
     ChatCompleter,
@@ -844,6 +846,28 @@ def create_app(
             content=payload["content"],
             binary=payload["binary"],
         )
+
+    @app.put(
+        "/repositories/{repository_id}/files/contents",
+        response_model=WorkspaceWriteResponse,
+    )
+    def write_repository_file(
+        repository_id: str,
+        body: WorkspaceWriteRequest,
+        _: None = Depends(require_auth),
+    ) -> WorkspaceWriteResponse:
+        rel = body.path.strip()
+        if rel == "":
+            raise HTTPException(status_code=400, detail="A file path is required.")
+        with repository_service() as repos:
+            _load(repos, repository_id)
+        with chat_service() as service:
+            message = service.write_workspace_file(repository_id, rel, body.content)
+        if message.startswith("Wrote "):
+            return WorkspaceWriteResponse(path=Path(rel).as_posix(), ok=True)
+        if "too large" in message.lower():
+            raise HTTPException(status_code=400, detail=message)
+        raise HTTPException(status_code=409, detail=message)
 
     @app.post(
         "/repositories/{repository_id}/terminal/runs",

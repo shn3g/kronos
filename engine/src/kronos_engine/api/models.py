@@ -65,6 +65,16 @@ class WorkspaceFileContentsResponse(BaseModel):
     binary: bool
 
 
+class WorkspaceWriteRequest(BaseModel):
+    path: str
+    content: str
+
+
+class WorkspaceWriteResponse(BaseModel):
+    path: str
+    ok: bool
+
+
 class PreviewFileModel(BaseModel):
     path: str
     action: str

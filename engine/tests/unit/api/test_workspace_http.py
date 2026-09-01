@@ -189,3 +189,55 @@ async def test_workspace_terminal_run_fail_closed(
     assert payload["exit_code"] == 0
     assert payload["timed_out"] is False
     assert "old" in payload["output"]
+
+
+@pytest.mark.asyncio
+async def test_workspace_file_write_fail_closed(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    http, headers, repo = client
+    enrolled = await http.post("/repositories", headers=headers, json={"path": str(repo)})
+    assert enrolled.status_code == 200
+    repo_id = enrolled.json()["repository"]["id"]
+
+    unauth = await http.put(
+        f"/repositories/{repo_id}/files/contents",
+        json={"path": "hello.py", "content": "applied\n"},
+    )
+    assert unauth.status_code == 401
+
+    missing_repo = await http.put(
+        "/repositories/repo_missing/files/contents",
+        headers=headers,
+        json={"path": "hello.py", "content": "applied\n"},
+    )
+    assert missing_repo.status_code == 404
+
+    empty_path = await http.put(
+        f"/repositories/{repo_id}/files/contents",
+        headers=headers,
+        json={"path": "   ", "content": "applied\n"},
+    )
+    assert empty_path.status_code == 400
+
+    escaped = await http.put(
+        f"/repositories/{repo_id}/files/contents",
+        headers=headers,
+        json={"path": "../secret.txt", "content": "nope\n"},
+    )
+    assert escaped.status_code == 409
+    assert (repo / "hello.py").read_text(encoding="utf-8") == "old\n"
+
+    wrote = await http.put(
+        f"/repositories/{repo_id}/files/contents",
+        headers=headers,
+        json={"path": "hello.py", "content": "applied\n"},
+    )
+    assert wrote.status_code == 200
+    assert wrote.json()["ok"] is True
+    assert wrote.json()["path"] == "hello.py"
+    assert (repo / "hello.py").read_text(encoding="utf-8") == "applied\n"
+
+    listed = await http.get(f"/repositories/{repo_id}/changes", headers=headers)
+    by_path = {item["path"]: item for item in listed.json()["changes"]}
+    assert by_path["hello.py"]["from_chat"] is True

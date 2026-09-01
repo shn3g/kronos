@@ -41,6 +41,7 @@ Tools: search_index (query), read_file (path), write_file (path, content),
 run_command (command), search_memory (query), create_goal (title, success_criteria),
 list_goals.
 Stay inside the current workspace. Do not claim you edited files unless write_file succeeded.
+When you show a file in a fenced block, put the path on the fence line, like ts src/app.ts.
 run_command runs in the workspace folder. Prefer tests and local tools. Do not push.
 Follow workspace instructions when they are provided.
 If you do not need a tool, reply without a tool fence."""
@@ -429,6 +430,9 @@ class ChatService:
             unified_write_patch(path=as_posix, before=before, after=content),
         )
         return f"Wrote {as_posix} ({len(content)} characters)."
+
+    def write_workspace_file(self, repository_id: str, rel_path: str, content: str) -> str:
+        return self._write_file(repository_id, rel_path, content)
 
     def _run_command(self, repository_id: str, command: str) -> str:
         if self._run_commands_this_turn >= MAX_RUN_COMMANDS_PER_TURN:
