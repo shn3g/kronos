@@ -8,6 +8,9 @@
   --hairline: rgb(255 255 255 / 0.1);
   --hairline-strong: rgb(255 255 255 / 0.12);
   --accent: #ececef;
+  --hl-keyword: #c5cdd8;
+  --hl-string: #cbb89a;
+  --hl-number: #b5c4a8;
   --radius: 10px;
   --sidebar-width: 232px;
   --font: "Segoe UI Variable", "Segoe UI", Inter, "Helvetica Neue", sans-serif;

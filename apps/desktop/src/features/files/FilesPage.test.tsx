@@ -509,4 +509,33 @@ describe("FilesPage", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("searchbox", { name: /find in file/i })).not.toBeInTheDocument();
   });
+
+  it("colors Python keywords in the open file", async () => {
+    const user = userEvent.setup();
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({
+          readWorkspaceFile: async () => ({
+            path: "src/app.py",
+            content: "def foo():\n    return 1\n",
+            binary: false,
+          }),
+        })}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    expect(await screen.findByRole("textbox", { name: "src/app.py" })).toHaveValue(
+      "def foo():\n    return 1\n",
+    );
+    const keywords = [...document.querySelectorAll(".files-page__hl--keyword")].map(
+      (node) => node.textContent,
+    );
+    expect(keywords).toEqual(["def", "return"]);
+    expect(document.querySelector(".files-page__hl--number")).toHaveTextContent("1");
+  });
 });

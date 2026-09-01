@@ -381,6 +381,63 @@
   padding-left: 8px;
 }
 
+.files-page__code {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.files-page__highlight {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  margin: 0;
+  overflow: hidden;
+  padding: 8px 12px 14px 8px;
+  pointer-events: none;
+  color: var(--ink);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.files-page__code .files-page__editor {
+  height: 100%;
+}
+
+.files-page__editor--over {
+  position: relative;
+  z-index: 1;
+  color: transparent;
+  caret-color: var(--ink);
+}
+
+.files-page__editor--over::selection {
+  color: transparent;
+  background: rgb(255 255 255 / 0.18);
+}
+
+.files-page__hl--keyword {
+  color: var(--hl-keyword);
+}
+
+.files-page__hl--string {
+  color: var(--hl-string);
+}
+
+.files-page__hl--comment {
+  color: var(--muted);
+}
+
+.files-page__hl--number {
+  color: var(--hl-number);
+}
+
 .files-page__find {
   display: flex;
   flex-shrink: 0;

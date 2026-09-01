@@ -25,6 +25,7 @@ import {
   folderPathsInTree,
 } from "./fileTree";
 import { ancestorFolderPaths, safeWorkspaceRelPath } from "./workspacePath";
+import { editorLanguageFromPath, highlightEditorTokens } from "./fileHighlight";
 
 const productionRepos = createProductionRepositoriesClient();
 
@@ -646,6 +647,14 @@ function EditorBody({
   onDraft: (value: string) => void;
 }) {
   const gutterRef = useRef<HTMLOListElement>(null);
+  const highlightRef = useRef<HTMLPreElement>(null);
+  const language = editorLanguageFromPath(preview.path);
+  const tokens = useMemo(() => {
+    if (draft === null || preview.binary || language === null) {
+      return null;
+    }
+    return highlightEditorTokens(draft, language);
+  }, [draft, language, preview.binary]);
   if (preview.binary) {
     return (
       <p className="files-page__status">This file is binary, so Kronos is not showing its contents.</p>
@@ -662,26 +671,49 @@ function EditorBody({
           <li key={label}>{label}</li>
         ))}
       </ol>
-      <textarea
-        ref={editorRef}
-        className="files-page__preview-body files-page__editor"
-        aria-label={preview.path}
-        spellCheck={false}
-        value={draft}
-        disabled={disabled}
-        onChange={(event) => {
-          onDraft(event.target.value);
-        }}
-        onScroll={(event) => {
-          const gutter = gutterRef.current;
-          if (gutter) {
-            gutter.scrollTop = event.currentTarget.scrollTop;
+      <div className="files-page__code">
+        {tokens ? (
+          <pre className="files-page__highlight" aria-hidden="true" ref={highlightRef}>
+            {tokens.map((token, index) => (
+              <span
+                key={index}
+                className={token.kind === "plain" ? undefined : `files-page__hl--${token.kind}`}
+              >
+                {token.text}
+              </span>
+            ))}
+          </pre>
+        ) : null}
+        <textarea
+          ref={editorRef}
+          className={
+            tokens
+              ? "files-page__preview-body files-page__editor files-page__editor--over"
+              : "files-page__preview-body files-page__editor"
           }
-        }}
-        onKeyDown={(event) => {
-          onEditorKeyDown(event, draft, onDraft);
-        }}
-      />
+          aria-label={preview.path}
+          spellCheck={false}
+          value={draft}
+          disabled={disabled}
+          onChange={(event) => {
+            onDraft(event.target.value);
+          }}
+          onScroll={(event) => {
+            const top = event.currentTarget.scrollTop;
+            const left = event.currentTarget.scrollLeft;
+            if (gutterRef.current) {
+              gutterRef.current.scrollTop = top;
+            }
+            if (highlightRef.current) {
+              highlightRef.current.scrollTop = top;
+              highlightRef.current.scrollLeft = left;
+            }
+          }}
+          onKeyDown={(event) => {
+            onEditorKeyDown(event, draft, onDraft);
+          }}
+        />
+      </div>
     </div>
   );
 }

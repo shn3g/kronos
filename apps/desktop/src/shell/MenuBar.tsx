@@ -210,7 +210,7 @@ export function MenuBar({
           code block writes that file into the open folder and lists it in Changes. Retry
           sends the last prompt again. Try again resends after a failed send. Click a file mention
           in chat, or Open in Changes, to edit that file in Files. Save or Ctrl+S writes it into
-          the folder.
+          the folder. Common source files are colored in the editor.
         </p>
       </Menu>
     </div>
