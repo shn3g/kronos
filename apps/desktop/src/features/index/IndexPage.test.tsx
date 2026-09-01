@@ -188,6 +188,68 @@ describe("IndexPage", () => {
     expect(screen.getByLabelText(/watch working tree/i)).toBeChecked();
   });
 
+  it("ignores delayed search hits after switching repositories", async () => {
+    const user = userEvent.setup();
+    const alphaHits = [
+      {
+        path: "alpha-only.py",
+        startLine: 1,
+        endLine: 2,
+        commit: "alpha-commit",
+        symbol: "alpha_fn",
+        rankSources: ["sparse"],
+        trust: "tracked",
+        text: "def alpha_fn",
+      },
+    ];
+    let finishAlphaSearch: (value: typeof alphaHits) => void = () => {};
+    const search = vi.fn(async (id: string) => {
+      if (id === "repo_alpha") {
+        return await new Promise<typeof alphaHits>((resolve) => {
+          finishAlphaSearch = resolve;
+        });
+      }
+      return [];
+    });
+    render(
+      <IndexPage
+        engineClient={engine("ready")}
+        indexClient={clients({
+          listRepositories: async () => [
+            {
+              id: "repo_alpha",
+              displayName: "alpha",
+              realpath: "C:/tmp/alpha",
+              origin: "https://github.com/acme/alpha.git",
+              status: "active",
+            },
+            {
+              id: "repo_bravo",
+              displayName: "bravo",
+              realpath: "C:/tmp/bravo",
+              origin: "https://github.com/acme/bravo.git",
+              status: "active",
+            },
+          ],
+          search,
+        })}
+      />,
+    );
+
+    expect(await screen.findByRole("searchbox", { name: /search index/i })).toBeInTheDocument();
+    await user.type(screen.getByRole("searchbox", { name: /search index/i }), "alpha");
+    await user.click(screen.getByRole("button", { name: /search/i }));
+    await user.selectOptions(screen.getByRole("combobox", { name: /repository/i }), "repo_bravo");
+    expect(screen.queryByText("alpha-only.py")).not.toBeInTheDocument();
+
+    await act(async () => {
+      finishAlphaSearch(alphaHits);
+      await Promise.resolve();
+    });
+    expect(screen.queryByText("alpha-only.py")).not.toBeInTheDocument();
+    expect(search).toHaveBeenCalledWith("repo_alpha", "alpha");
+  });
+
   it("toggles the watcher without rebuilding", async () => {
     const user = userEvent.setup();
     const setWatch = vi.fn(async (_id: string, enabled: boolean) =>

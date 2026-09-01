@@ -148,6 +148,26 @@ class IndexingService:
         finally:
             store.close()
 
+    def watch_enabled(self, repo_id: str, *, policy: RepositoryPolicy | None = None) -> bool:
+        db_path = self._index_dir(repo_id) / "index.sqlite3"
+        if not db_path.is_file():
+            return _watch_enabled(None, policy)
+        store = SqliteIndexStore(db_path)
+        try:
+            return _watch_enabled(store.meta("watch_enabled"), policy)
+        finally:
+            store.close()
+
+    def indexed_revision(self, repo_id: str) -> tuple[str | None, tuple[str, ...]]:
+        db_path = self._index_dir(repo_id) / "index.sqlite3"
+        if not db_path.is_file():
+            return None, ()
+        store = SqliteIndexStore(db_path)
+        try:
+            return store.indexed_commit(), store.dirty_paths()
+        finally:
+            store.close()
+
     def list_chunks(self, repo_id: str) -> tuple[IndexedChunk, ...]:
         db_path = self._index_dir(repo_id) / "index.sqlite3"
         if not db_path.is_file():

@@ -7,10 +7,12 @@ from collections.abc import Iterator, Sequence
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from tests.retrieval.support import commit_tree, indexing_policy, kronos_paths, write_and_commit
 from tests.support.git_fixtures import init_git_repo
 
 from kronos_engine.domain.entities import EnrolledRepository, RepositoryId, RepositoryStatus
+from kronos_engine.indexing.scanner import head_commit
 from kronos_engine.indexing.service import IndexingService
 from kronos_engine.indexing.sparse import SqliteIndexStore
 from kronos_engine.indexing.watcher import IndexWatcher
@@ -247,6 +249,74 @@ def test_watcher_honors_per_repo_debounce_ms(tmp_path: Path) -> None:
     slow_delay = min(slow_times) - origin
     assert slow_delay >= 0.15
     assert fast_delay < slow_delay
+
+
+def test_commit_poll_compares_revision_without_status_or_list_chunks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = kronos_paths(tmp_path)
+    root = init_git_repo(tmp_path / "poll", files={"src/mod.py": "POLL_TOKEN = 1\n"})
+    inner = IndexingService(paths, embeddings=_CountingEmbedder())
+    record = _record(root, "repo_poll")
+    inner.rebuild(record.id.value, root, record.policy)
+    status_calls = 0
+    list_chunks_calls = 0
+    head_times: list[float] = []
+    real_head = head_commit
+
+    def wrapped_head(git_root: Path) -> str:
+        head_times.append(time.monotonic())
+        return real_head(git_root)
+
+    monkeypatch.setattr("kronos_engine.indexing.watcher.head_commit", wrapped_head)
+
+    class _Probe:
+        def status(self, *args: object, **kwargs: object) -> object:
+            nonlocal status_calls
+            status_calls += 1
+            return inner.status(*args, **kwargs)
+
+        def list_chunks(self, *args: object, **kwargs: object) -> object:
+            nonlocal list_chunks_calls
+            list_chunks_calls += 1
+            return inner.list_chunks(*args, **kwargs)
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(inner, name)
+
+    ticks = {"n": 0}
+    started = threading.Event()
+
+    def fake_watch(
+        *_watch_paths: Path | str,
+        stop_event: threading.Event | None = None,
+        **_kwargs: object,
+    ) -> Iterator[set[tuple[object, str]]]:
+        while stop_event is None or not stop_event.is_set():
+            started.set()
+            ticks["n"] += 1
+            yield set()
+            if stop_event is None:
+                return
+            stop_event.wait(0.02)
+
+    watcher = IndexWatcher(
+        list_repos=lambda: (record,),
+        indexer=_Probe(),  # type: ignore[arg-type]
+        watch=fake_watch,
+    )
+    watcher.start()
+    assert started.wait(1.0)
+    deadline = time.time() + 0.4
+    while time.time() < deadline:
+        if ticks["n"] >= 8:
+            break
+        time.sleep(0.02)
+    watcher.stop()
+    assert ticks["n"] >= 8
+    assert status_calls == 0
+    assert list_chunks_calls == 0
+    assert 1 <= len(head_times) <= 2
 
 
 def test_watcher_errors_fail_open(tmp_path: Path) -> None:

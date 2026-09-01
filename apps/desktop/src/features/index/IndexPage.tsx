@@ -165,12 +165,19 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
     if (!selectedId) {
       return;
     }
+    const repoId = selectedId;
+    const gen = requestGen.current;
     setError(null);
     try {
-      const next = await client.search(selectedId, query);
+      const next = await client.search(repoId, query);
+      if (requestGen.current !== gen || selectedRef.current !== repoId) {
+        return;
+      }
       setHits(next);
     } catch {
-      setError("Could not search the index.");
+      if (requestGen.current === gen && selectedRef.current === repoId) {
+        setError("Could not search the index.");
+      }
     }
   }
 

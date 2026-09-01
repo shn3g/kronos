@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from kronos_engine.domain.entities import EnrolledRepository, RepositoryStatus
-from kronos_engine.indexing.scanner import head_commit
+from kronos_engine.indexing.scanner import head_commit, list_dirty_paths
 from kronos_engine.indexing.service import IndexingService
 
 WatchChanges = set[tuple[Any, str]]
@@ -21,6 +21,7 @@ RepoLister = Callable[[], Sequence[EnrolledRepository]]
 
 _LOG = logging.getLogger("kronos.engine.index.watch")
 _PUMP_MS = 50
+_COMMIT_POLL_MIN_MS = 1000
 _GIT_WATCH_NAMES = frozenset({"HEAD", "index", "packed-refs"})
 _DEFAULT_IGNORE_DIRS = frozenset(
     {
@@ -88,6 +89,7 @@ class IndexWatcher:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._pending: dict[str, _Pending] = {}
+        self._commit_poll_at: dict[str, float] = {}
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -109,6 +111,7 @@ class IndexWatcher:
             worker.join(timeout=5.0)
         self._thread = None
         self._pending.clear()
+        self._commit_poll_at.clear()
 
     def is_alive(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
@@ -186,7 +189,7 @@ class IndexWatcher:
                                 self._note(repo_id, changed_paths, now)
                         self._flush_due(by_id, now)
                         if not changes:
-                            self._poll_commits(repos)
+                            self._poll_commits(repos, now)
                 except Exception:
                     self._log.exception("index watch loop failed")
                     self._stop.wait(0.5)
@@ -218,15 +221,24 @@ class IndexWatcher:
                 continue
             self.apply_changes(repo, held.paths)
 
-    def _poll_commits(self, repos: Sequence[EnrolledRepository]) -> None:
+    def _poll_commits(self, repos: Sequence[EnrolledRepository], now: float) -> None:
         indexer = self._indexer_factory()
         for repo in repos:
+            if repo.id.value in self._pending:
+                continue
+            interval_s = max(repo.policy.indexing.debounce_ms, _COMMIT_POLL_MIN_MS) / 1000.0
+            last = self._commit_poll_at.get(repo.id.value)
+            if last is not None and now - last < interval_s:
+                continue
+            self._commit_poll_at[repo.id.value] = now
             try:
                 root = Path(repo.realpath).resolve()
                 current = head_commit(root)
-                indexed = indexer.status(repo.id.value, policy=repo.policy).commit
-                if indexed != current:
-                    indexer.incremental(repo.id.value, root, repo.policy)
+                indexed_commit, indexed_dirty = indexer.indexed_revision(repo.id.value)
+                current_dirty = list_dirty_paths(root)
+                if current == indexed_commit and set(current_dirty) == set(indexed_dirty):
+                    continue
+                self._note(repo.id.value, (root / ".git" / "HEAD",), now)
             except Exception:
                 self._log.exception("index watch commit poll failed")
 
@@ -248,7 +260,7 @@ class IndexWatcher:
 
 def _repo_watch_enabled(repo: EnrolledRepository, indexer: IndexingService) -> bool:
     try:
-        return indexer.status(repo.id.value, policy=repo.policy).watch_enabled
+        return indexer.watch_enabled(repo.id.value, policy=repo.policy)
     except Exception:
         return repo.policy.indexing.watch
 
