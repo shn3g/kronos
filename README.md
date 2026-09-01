@@ -29,12 +29,10 @@ Contributor tests belong in [CONTRIBUTING.md](CONTRIBUTING.md). Walkthrough: [do
 ## Inside the app
 
 1. If no model is connected, Kronos asks for one before the main window. Keys go into the operating system secret store.
-2. Chat is the main window. File, Edit, View, and Help are in the menu bar. The left icon bar switches Chat, Workspaces, Index, and Settings.
-3. Open a git folder from File or the workspace control. Kronos registers it in local SQLite. It does not write `.kronos/` into the tree at enrol.
-4. Enable Kronos shows a preview of `.kronos/config.yaml`, workflow, and CODEOWNERS. You commit those on your repo.
-5. Connections: two GitHub Apps (controller + isolated reviewer) and optional Telegram.
-6. On enrol: empty lesson store; per-repo hybrid index under app cache (FTS5 always; optional local ONNX vectors if weights are on disk, never downloaded). Isolation by repository id.
-7. Leave `freeze: true` and `mode: observe` or `shadow` until you want writes.
+2. Chat is the main window. File, Edit, View, and Help are in the menu bar. The left icon bar switches Chat, Workspaces, Index, and Settings. You can hide that bar and the Changes inspector from View.
+3. Open a git folder from File or the workspace control. Kronos indexes it locally. Chat can search, read, and write files inside that folder.
+4. Changes from chat writes show in the right inspector. Health ticks cover engine, model, workspace, index, and secrets.
+5. Memories live in Settings. Unattended work can become a Goal from chat.
 
 **Skills:** global library under `skills/core/` shipped with Kronos. **Lessons:** per enrolled repo, empty at first, propose is not activate.
 

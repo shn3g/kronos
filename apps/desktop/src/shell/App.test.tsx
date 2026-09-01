@@ -202,6 +202,7 @@ describe("App shell", () => {
   beforeEach(() => {
     window.localStorage.removeItem(ACTIVE_WORKSPACE_STORAGE_KEY);
     window.localStorage.removeItem("kronos.activityBarCollapsed");
+    window.localStorage.removeItem("kronos.inspectorCollapsed");
   });
 
   it("shows engine unavailable by default without an injected client", async () => {
@@ -300,6 +301,61 @@ describe("App shell", () => {
     await user.click(screen.getByRole("menuitem", { name: /^View$/ }));
     await user.click(screen.getByRole("menuitem", { name: /hide activity bar/i }));
     expect(screen.queryByRole("navigation", { name: /activity/i })).not.toBeInTheDocument();
+    expect(document.querySelector(".app-body")).toHaveAttribute("data-rail-collapsed", "true");
+
+    await user.click(screen.getByRole("menuitem", { name: /^View$/ }));
+    await user.click(screen.getByRole("menuitem", { name: /hide inspector/i }));
+    expect(screen.queryByRole("complementary", { name: /session details/i })).not.toBeInTheDocument();
+    expect(document.querySelector(".app-columns")).toHaveAttribute(
+      "data-inspector-collapsed",
+      "true",
+    );
+  });
+
+  it("puts Models under File and Cut Copy Paste under Edit", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        engineClient={clientOf({ status: "ready", version: "0.1.0" })}
+        modelsClient={assignedModels()}
+        chatClient={quietChat()}
+        repositoriesClient={quietRepos()}
+        homeClient={quietHome()}
+        goalsClient={quietGoals()}
+        settingsClient={quietSettings()}
+      />,
+    );
+
+    await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.click(screen.getByRole("menuitem", { name: /^File$/ }));
+    expect(screen.getByRole("menuitem", { name: /^models$/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: /^Edit$/ }));
+    expect(screen.getByRole("menuitem", { name: /^cut$/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^copy$/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^paste$/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^select all$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /^models$/i })).not.toBeInTheDocument();
+  });
+
+  it("opens settings from the modifier comma shortcut and hides the inspector with Ctrl+Shift+J", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        engineClient={clientOf({ status: "ready", version: "0.1.0" })}
+        modelsClient={assignedModels()}
+        chatClient={quietChat()}
+        repositoriesClient={quietRepos()}
+        homeClient={quietHome()}
+        goalsClient={quietGoals()}
+        settingsClient={quietSettings()}
+      />,
+    );
+
+    await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.keyboard("{Control>}{Shift>}j{/Shift}{/Control}");
+    expect(screen.queryByRole("complementary", { name: /session details/i })).not.toBeInTheDocument();
+    await user.keyboard("{Control>},{/Control}");
+    expect(await screen.findByRole("heading", { name: /^settings$/i })).toBeInTheDocument();
   });
 
   it("loads the workspace switcher and live Changes plus Goals from the engine", async () => {
@@ -319,5 +375,11 @@ describe("App shell", () => {
     await user.click(screen.getByRole("tab", { name: /goals/i }));
     expect(await screen.findByText("Fix onboarding")).toBeInTheDocument();
     expect(screen.getByText("queued")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /health/i }));
+    expect(await screen.findByText("Engine")).toBeInTheDocument();
+    expect(screen.getByText("Model")).toBeInTheDocument();
+    expect(screen.getAllByText("Ready").length).toBeGreaterThanOrEqual(4);
+    expect(screen.getByText(/the local engine is running/i)).toBeInTheDocument();
   });
 });

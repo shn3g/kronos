@@ -18,9 +18,10 @@ const ROLES: ModelRole[] = ["planner", "coder", "reviewer", "embedding"];
 interface ModelsPageProps {
   engineClient: EngineClient;
   modelsClient?: ModelsClient;
+  headingLevel?: "h1" | "h2";
 }
 
-export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
+export function ModelsPage({ engineClient, modelsClient, headingLevel = "h1" }: ModelsPageProps) {
   const client = modelsClient ?? productionModels;
   const [ready, setReady] = useState(false);
   const [snapshot, setSnapshot] = useState<ModelsSnapshot | null>(null);
@@ -68,11 +69,13 @@ export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
     };
   }, [client, ready]);
 
+  const Title = headingLevel === "h2" ? "h2" : "h1";
+  const titleClass = headingLevel === "h2" ? "section-title" : "page-title";
+
   if (!ready) {
     return (
       <section className="models">
-        <p className="page-kicker">Models</p>
-        <h1 className="page-title">Models</h1>
+        <Title className={titleClass}>Models</Title>
         <p className="page-body">
           Connect a compatible engine to assign model profiles. Routing stays closed until the
           local engine is ready.
@@ -129,8 +132,7 @@ export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
 
   return (
     <section className="models">
-      <p className="page-kicker">Models</p>
-      <h1 className="page-title">Models</h1>
+      <Title className={titleClass}>Models</Title>
       <p className="page-body">
         Assign explicit planner, coder, reviewer, and embedding profiles. Kronos never silently
         falls back to an unapproved or paid model.

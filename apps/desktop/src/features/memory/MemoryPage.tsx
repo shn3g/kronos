@@ -13,11 +13,12 @@ export type { MemoryClient } from "./client";
 interface MemoryPageProps {
   engineClient: EngineClient;
   memoryClient?: MemoryClient;
+  headingLevel?: "h1" | "h2";
 }
 
 const productionMemory = createProductionMemoryClient();
 
-export function MemoryPage({ engineClient, memoryClient }: MemoryPageProps) {
+export function MemoryPage({ engineClient, memoryClient, headingLevel = "h1" }: MemoryPageProps) {
   const client = memoryClient ?? productionMemory;
   const [ready, setReady] = useState(false);
   const [records, setRecords] = useState<MemoryRecord[]>([]);
@@ -60,11 +61,13 @@ export function MemoryPage({ engineClient, memoryClient }: MemoryPageProps) {
     };
   }, [client, ready]);
 
+  const Title = headingLevel === "h2" ? "h2" : "h1";
+  const titleClass = headingLevel === "h2" ? "section-title" : "page-title";
+
   if (!ready) {
     return (
       <section className="memory-page">
-        <p className="page-kicker">Memory</p>
-        <h1 className="page-title">Memory</h1>
+        <Title className={titleClass}>Memory</Title>
         <p className="page-body">
           Connect a compatible engine to inspect episodic and procedural records. Learning stays
           closed until the local engine is ready.
@@ -86,8 +89,7 @@ export function MemoryPage({ engineClient, memoryClient }: MemoryPageProps) {
 
   return (
     <section className="memory-page">
-      <p className="page-kicker">Memory</p>
-      <h1 className="page-title">Memory</h1>
+      <Title className={titleClass}>Memory</Title>
       <p className="page-body">
         Records stay human-readable with source SHAs, outcomes, and confidence. Imported lessons
         arrive as disabled candidates. Propose is not activate.

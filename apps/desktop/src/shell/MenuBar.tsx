@@ -7,10 +7,12 @@ export type MenuId = "file" | "edit" | "view" | "help" | null;
 interface MenuBarProps {
   historyOpen: boolean;
   activityCollapsed: boolean;
+  inspectorCollapsed: boolean;
   onNewChat: () => void;
   onOpenWorkspace: () => void;
   onToggleHistory: () => void;
   onToggleActivityBar: () => void;
+  onToggleInspector: () => void;
   onOpenSettings: () => void;
   onOpenModels: () => void;
 }
@@ -18,10 +20,12 @@ interface MenuBarProps {
 export function MenuBar({
   historyOpen,
   activityCollapsed,
+  inspectorCollapsed,
   onNewChat,
   onOpenWorkspace,
   onToggleHistory,
   onToggleActivityBar,
+  onToggleInspector,
   onOpenSettings,
   onOpenModels,
 }: MenuBarProps) {
@@ -66,6 +70,13 @@ export function MenuBar({
           }}
         />
         <MenuItem
+          label="Models"
+          onSelect={() => {
+            setOpen(null);
+            onOpenModels();
+          }}
+        />
+        <MenuItem
           label="Settings"
           onSelect={() => {
             setOpen(null);
@@ -82,10 +93,31 @@ export function MenuBar({
         }}
       >
         <MenuItem
-          label="Models"
+          label="Cut"
           onSelect={() => {
             setOpen(null);
-            onOpenModels();
+            runEditCommand("cut");
+          }}
+        />
+        <MenuItem
+          label="Copy"
+          onSelect={() => {
+            setOpen(null);
+            runEditCommand("copy");
+          }}
+        />
+        <MenuItem
+          label="Paste"
+          onSelect={() => {
+            setOpen(null);
+            runEditCommand("paste");
+          }}
+        />
+        <MenuItem
+          label="Select all"
+          onSelect={() => {
+            setOpen(null);
+            runEditCommand("selectAll");
           }}
         />
       </Menu>
@@ -111,6 +143,13 @@ export function MenuBar({
             onToggleActivityBar();
           }}
         />
+        <MenuItem
+          label={inspectorCollapsed ? "Show inspector" : "Hide inspector"}
+          onSelect={() => {
+            setOpen(null);
+            onToggleInspector();
+          }}
+        />
       </Menu>
       <Menu
         id={helpId}
@@ -121,7 +160,9 @@ export function MenuBar({
         }}
       >
         <p className="menu-help">
-          Kronos is a locally installed desktop app for coding agents on your git folders.
+          Kronos is a locally installed desktop app for coding agents on your git folders. Ctrl+N
+          or Cmd+N starts a new chat. Ctrl+B or Cmd+B hides the activity bar. Ctrl+Shift+J or
+          Cmd+Shift+J hides Changes.
         </p>
       </Menu>
     </div>
@@ -170,4 +211,12 @@ function MenuItem({ label, onSelect }: MenuItemProps) {
       {label}
     </button>
   );
+}
+
+function runEditCommand(command: "cut" | "copy" | "paste" | "selectAll"): void {
+  try {
+    document.execCommand(command);
+  } catch {
+    return;
+  }
 }

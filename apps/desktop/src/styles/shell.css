@@ -48,6 +48,10 @@
   flex: 1;
 }
 
+.app-body[data-rail-collapsed="true"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .app-stage {
   display: flex;
   min-width: 0;
@@ -62,6 +66,10 @@
   flex: 1;
 }
 
+.app-columns[data-inspector-collapsed="true"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .app-main {
   display: flex;
   min-width: 0;
@@ -74,12 +82,18 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+  padding: 24px 28px 40px;
 }
 
 .app-main__panel--chat {
   display: flex;
   overflow: hidden;
   flex-direction: column;
+  padding: 0;
+}
+
+.app-main__panel--settings {
+  max-width: 44rem;
 }
 
 .app-main__panel[hidden] {
@@ -213,6 +227,11 @@
   border-radius: 4px;
   background: var(--void-raised);
   color: var(--ink);
+}
+
+.title-bar .btn-quiet {
+  padding: 4px 8px;
+  font-size: 12px;
 }
 
 .inspector {
@@ -396,14 +415,26 @@
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  padding: 16px;
+  width: 100%;
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 16px 20px 18px;
 }
 
 .chat-empty {
-  margin: auto;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
   max-width: 28rem;
   text-align: center;
   color: var(--body);
+}
+
+.chat-empty .btn-quiet {
+  margin-top: 16px;
 }
 
 .chat-empty__title {
@@ -466,88 +497,41 @@
 
 .chat-composer {
   display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-items: flex-end;
-  margin-top: auto;
-  padding-top: 12px;
+  flex-shrink: 0;
+  margin-top: 12px;
+  padding: 10px 10px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.03);
+}
+
+.chat-composer:focus-within {
+  border-color: var(--hairline-strong);
 }
 
 .chat-composer__input {
   flex: 1;
-  min-height: 64px;
+  min-height: 44px;
+  max-height: 200px;
   resize: none;
-  padding: 8px 10px;
-  border: 1px solid var(--hairline);
-  border-radius: 8px;
-  background: var(--void);
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
   color: var(--ink);
+  font: inherit;
+  line-height: 1.45;
 }
 
-.chrome-sidebar {
-  display: none;
+.chat-composer__input:focus {
+  outline: none;
 }
 
-.chrome-sidebar {
+.chat-composer__toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 28px;
-  padding: 28px 18px 24px;
-  border-right: 1px solid var(--hairline);
-  background: rgb(0 0 0 / 0.28);
-}
-
-.brand__mark {
-  margin: 0;
-  color: var(--ink);
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: -0.03em;
-}
-
-.brand__meta {
-  margin: 6px 0 0;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 400;
-}
-
-.chrome-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.chrome-nav__link {
-  display: block;
-  padding: 8px 10px;
-  border-radius: 8px;
-  color: var(--muted);
-  text-decoration: none;
-  font-weight: 500;
-}
-
-.chrome-nav__link:hover {
-  color: var(--ink);
-  background: rgb(255 255 255 / 0.04);
-}
-
-.chrome-nav__link[aria-current="page"] {
-  color: var(--ink);
-  background: rgb(255 255 255 / 0.06);
-}
-
-.chrome-stage {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.chrome-topbar {
-  display: flex;
-  align-items: center;
-  min-height: 56px;
-  padding: 12px 28px;
-  border-bottom: 1px solid var(--hairline);
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .engine-status {
@@ -579,11 +563,6 @@
   background: var(--ink);
 }
 
-.chrome-main {
-  padding: 48px 56px 64px;
-  max-width: 880px;
-}
-
 .page-kicker {
   margin: 0 0 12px;
   color: var(--muted);
@@ -600,6 +579,25 @@
   font-weight: 600;
   letter-spacing: -0.04em;
   line-height: 1.15;
+}
+
+.section-title {
+  margin: 28px 0 12px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.memory-page .section-title,
+.models .section-title {
+  margin-top: 8px;
+}
+
+.settings-page + .memory-page,
+.memory-page + .models {
+  margin-top: 32px;
+  padding-top: 28px;
+  border-top: 1px solid var(--hairline);
 }
 
 .page-body {
@@ -669,6 +667,11 @@
   border: 1px solid var(--hairline-strong);
   background: var(--ink);
   color: var(--void);
+}
+
+.btn-primary:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
 }
 
 .btn-quiet {
@@ -999,10 +1002,6 @@
     border-left: 0;
     border-top: 1px solid var(--hairline);
     min-height: 180px;
-  }
-
-  .chrome-main {
-    padding: 32px 20px 48px;
   }
 }
 

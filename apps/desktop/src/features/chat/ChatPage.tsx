@@ -234,11 +234,14 @@ export function ChatPage({
             ref={composerRef}
             className="chat-composer__input"
             value={draft}
-            placeholder="Ask Kronos…"
+            placeholder="Ask Kronos"
             aria-label="Ask Kronos"
-            rows={3}
+            rows={2}
             onChange={(event) => {
               setDraft(event.target.value);
+              const node = event.target;
+              node.style.height = "auto";
+              node.style.height = `${Math.min(200, Math.max(44, node.scrollHeight))}px`;
             }}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
@@ -247,19 +250,21 @@ export function ChatPage({
               }
             }}
           />
-          <button
-            type="button"
-            className={busy ? "btn-quiet" : "btn-primary"}
-            disabled={busy}
-            onClick={() => void onSend()}
-          >
-            {busy ? "Working" : "Send"}
-          </button>
-          {busy ? (
-            <button type="button" className="btn-primary" onClick={() => void onStop()}>
-              Stop
+          <span className="chat-composer__toolbar">
+            <button
+              type="button"
+              className={busy ? "btn-quiet" : "btn-primary"}
+              disabled={busy || draft.trim() === ""}
+              onClick={() => void onSend()}
+            >
+              {busy ? "Working" : "Send"}
             </button>
-          ) : null}
+            {busy ? (
+              <button type="button" className="btn-primary" onClick={() => void onStop()}>
+                Stop
+              </button>
+            ) : null}
+          </span>
         </label>
       </section>
     </div>

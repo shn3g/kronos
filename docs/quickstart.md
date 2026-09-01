@@ -20,14 +20,13 @@ cd engine && pip install -e ".[dev]" && cd ..
 pnpm tauri build
 ```
 
-## Enable a repository
+## First run
 
-1. Open Kronos. Engine ready requires the sidecar (`python -m kronos_engine` on PATH).
-2. Workspaces: pick your git folder, Enrol. Kronos registers it in local SQLite. It does not write `.kronos/` into the tree at enrol.
-3. Enable Kronos shows a preview of `.kronos/config.yaml`, `.github/workflows/kronos-pr.yml`, and CODEOWNERS. Preview does not write the tree. You commit those on your repo. CODEOWNERS must cover `.kronos/**`.
-4. Connections: two GitHub Apps (controller + isolated reviewer) and optional Telegram. Models: your keys in OS secret storage.
-5. On enrol: empty lesson store; per-repo hybrid index under app cache (FTS5 always; optional local ONNX vectors if weights are on disk, never downloaded). Isolation by repository id.
-6. Leave `freeze: true` and `mode: observe` or `shadow` until you want writes.
+1. Open Kronos. The window waits for the local engine (`python -m kronos_engine` on PATH).
+2. Connect a model if none is assigned. Keys go into the operating system secret store.
+3. Chat is ready without a folder. Open a git folder from File or the workspace control when you want indexing and file edits.
+4. Kronos registers enrolled folders in local SQLite. It does not write `.kronos/` into the tree at enrol.
+5. Optional later: enable a committed `.kronos/config.yaml`, GitHub Apps, and Telegram. Leave `freeze: true` and `mode: observe` or `shadow` until you want autonomous git writes.
 
 The integration branch comes from committed `.kronos/config.yaml`. The in-app template default is `main`. The protected default branch is `policy.branches.protected` (template default `main`).
 

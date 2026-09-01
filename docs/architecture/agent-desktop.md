@@ -4,8 +4,8 @@ Kronos is a locally installed desktop app (Tauri WebView, also previewable in a 
 
 ## Shell
 
-- Application menu: File, Edit, View, Help.
-- Collapsible icon activity bar on the left.
+- Application menu: File, Edit, View, Help. File holds New chat, Open workspace, Models, and Settings. Edit is Cut, Copy, Paste, and Select all.
+- Collapsible icon activity bar on the left. View can also hide the Changes inspector.
 - Chat is the main stage. Conversation history is a View toggle, not a permanent column.
 - Workspace switcher lives in the title bar.
 - A right drawer holds Changes, Goals/Runs, and Health as tabs. Changes is the default tab. Goals stay visible without forcing a goal form on every chat.

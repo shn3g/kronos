@@ -48,4 +48,36 @@ describe("SettingsPage", () => {
     expect(screen.queryByLabelText(/private key/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
+
+  it("shows a health panel with green ticks for engine and model", async () => {
+    render(
+      <SettingsPage
+        engineClient={engine("ready")}
+        settingsClient={clients({
+          doctor: async () => ({
+            ready: true,
+            findings: [],
+            checks: [
+              {
+                id: "engine",
+                label: "Engine",
+                ok: true,
+                detail: "The local engine is running.",
+              },
+              {
+                id: "model",
+                label: "Model",
+                ok: true,
+                detail: "A planner model is assigned.",
+              },
+            ],
+          }),
+        })}
+      />,
+    );
+
+    expect(await screen.findByRole("heading", { name: /^health$/i })).toBeInTheDocument();
+    expect(screen.getByText(/the local engine is running/i)).toBeInTheDocument();
+    expect(screen.getAllByText("Ready")).toHaveLength(2);
+  });
 });

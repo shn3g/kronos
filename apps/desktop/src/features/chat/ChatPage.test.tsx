@@ -42,6 +42,19 @@ function chatClient(overrides: Partial<ChatClient> = {}): ChatClient {
 }
 
 describe("ChatPage", () => {
+  it("keeps Send disabled until the composer has text", async () => {
+    render(
+      <ChatPage
+        chatClient={chatClient()}
+        repositoryId={null}
+        historyOpen={false}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: /^send$/i })).toBeDisabled();
+  });
+
   it("shows the user message before the model returns, then tool cards and the reply", async () => {
     const user = userEvent.setup();
     let finish!: (value: {

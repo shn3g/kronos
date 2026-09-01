@@ -86,7 +86,6 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
   if (!ready) {
     return (
       <section className="index-page">
-        <p className="page-kicker">Index</p>
         <h1 className="page-title">Index</h1>
         <p className="page-body">
           Connect a compatible engine to inspect repository indexes. Retrieval stays closed until
@@ -124,7 +123,6 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
 
   return (
     <section className="index-page">
-      <p className="page-kicker">Index</p>
       <h1 className="page-title">Index</h1>
       <p className="page-body">
         Isolated sparse, dense, and graph retrieval per enrolled repository. Vectors stay

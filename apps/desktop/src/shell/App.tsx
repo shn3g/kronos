@@ -34,6 +34,7 @@ import { ConnectModelGate } from "./ConnectModelGate";
 import { CheckingModelGate, EngineGate } from "./EngineGate";
 import { InspectorDrawer, type InspectorTab } from "./InspectorDrawer";
 import { MenuBar } from "./MenuBar";
+import { shellShortcutFromKeyboard } from "./shellShortcut";
 import { useSessionContext } from "./useSessionContext";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
@@ -45,6 +46,18 @@ const productionHome = createProductionHomeClient();
 const productionGoals = createProductionGoalsClient();
 const productionSettings = createProductionSettingsClient();
 const ACTIVITY_BAR_STORAGE_KEY = "kronos.activityBarCollapsed";
+const INSPECTOR_STORAGE_KEY = "kronos.inspectorCollapsed";
+
+function readFlag(key: string): boolean {
+  if (typeof window === "undefined" || typeof window.localStorage === "undefined") {
+    return false;
+  }
+  return window.localStorage.getItem(key) === "1";
+}
+
+function persistFlag(key: string, value: boolean): void {
+  window.localStorage.setItem(key, value ? "1" : "0");
+}
 
 interface AppProps {
   engineClient?: EngineClient;
@@ -81,12 +94,12 @@ export function App({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("changes");
   const [newChatRequest, setNewChatRequest] = useState(0);
-  const [activityCollapsed, setActivityCollapsed] = useState(() => {
-    if (typeof window === "undefined" || typeof window.localStorage === "undefined") {
-      return false;
-    }
-    return window.localStorage.getItem(ACTIVITY_BAR_STORAGE_KEY) === "1";
-  });
+  const [activityCollapsed, setActivityCollapsed] = useState(() =>
+    readFlag(ACTIVITY_BAR_STORAGE_KEY),
+  );
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(() =>
+    readFlag(INSPECTOR_STORAGE_KEY),
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -134,6 +147,57 @@ export function App({
     goalsClient: goals,
     settingsClient: settings,
   });
+
+  function startNewChat(): void {
+    setActivity("chat");
+    setNewChatRequest((current) => current + 1);
+  }
+
+  function toggleActivityBar(): void {
+    setActivityCollapsed((current) => {
+      const next = !current;
+      persistFlag(ACTIVITY_BAR_STORAGE_KEY, next);
+      return next;
+    });
+  }
+
+  function toggleInspector(): void {
+    setInspectorCollapsed((current) => {
+      const next = !current;
+      persistFlag(INSPECTOR_STORAGE_KEY, next);
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    if (!engineReady || !modelKnown || !modelReady) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent) => {
+      const action = shellShortcutFromKeyboard(event);
+      if (!action) {
+        return;
+      }
+      event.preventDefault();
+      if (action === "new-chat") {
+        startNewChat();
+        return;
+      }
+      if (action === "toggle-activity-bar") {
+        toggleActivityBar();
+        return;
+      }
+      if (action === "toggle-inspector") {
+        toggleInspector();
+        return;
+      }
+      setActivity("settings");
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [engineReady, modelKnown, modelReady]);
 
   if (engineState.status !== "ready") {
     return (
@@ -187,23 +251,16 @@ export function App({
       <MenuBar
         historyOpen={historyOpen}
         activityCollapsed={activityCollapsed}
-        onNewChat={() => {
-          setActivity("chat");
-          setNewChatRequest((current) => current + 1);
-        }}
+        inspectorCollapsed={inspectorCollapsed}
+        onNewChat={startNewChat}
         onOpenWorkspace={() => {
           setActivity("workspaces");
         }}
         onToggleHistory={() => {
           setHistoryOpen((open) => !open);
         }}
-        onToggleActivityBar={() => {
-          setActivityCollapsed((current) => {
-            const next = !current;
-            window.localStorage.setItem(ACTIVITY_BAR_STORAGE_KEY, next ? "1" : "0");
-            return next;
-          });
-        }}
+        onToggleActivityBar={toggleActivityBar}
+        onToggleInspector={toggleInspector}
         onOpenSettings={() => {
           setActivity("settings");
         }}
@@ -211,7 +268,7 @@ export function App({
           setActivity("settings");
         }}
       />
-      <div className="app-body">
+      <div className="app-body" data-rail-collapsed={activityCollapsed ? "true" : "false"}>
         <ActivityBar active={activity} collapsed={activityCollapsed} onSelect={setActivity} />
         <div className="app-stage">
           <header className="title-bar">
@@ -225,7 +282,10 @@ export function App({
             />
             <EngineStatus client={engine} />
           </header>
-          <div className="app-columns">
+          <div
+            className="app-columns"
+            data-inspector-collapsed={inspectorCollapsed ? "true" : "false"}
+          >
             <main id="main" className="app-main" tabIndex={-1}>
               <div hidden={activity !== "chat"} className="app-main__panel app-main__panel--chat">
                 <ChatPage
@@ -253,20 +313,22 @@ export function App({
                 </div>
               ) : null}
               {activity === "settings" ? (
-                <div className="app-main__panel">
+                <div className="app-main__panel app-main__panel--settings">
                   <SettingsPage engineClient={engine} settingsClient={settings} />
-                  <MemoryPage engineClient={engine} />
-                  <ModelsPage engineClient={engine} modelsClient={models} />
+                  <MemoryPage engineClient={engine} headingLevel="h2" />
+                  <ModelsPage engineClient={engine} modelsClient={models} headingLevel="h2" />
                 </div>
               ) : null}
             </main>
-            <InspectorDrawer
-              tab={inspectorTab}
-              onTab={setInspectorTab}
-              changes={session.changes}
-              goals={session.goals}
-              checks={session.checks}
-            />
+            {inspectorCollapsed ? null : (
+              <InspectorDrawer
+                tab={inspectorTab}
+                onTab={setInspectorTab}
+                changes={session.changes}
+                goals={session.goals}
+                checks={session.checks}
+              />
+            )}
           </div>
         </div>
       </div>
