@@ -233,6 +233,61 @@ describe("ChatPage", () => {
     expect(await screen.findByText(/stopped/i)).toBeInTheDocument();
   });
 
+  it("stops the current turn when Escape is pressed", async () => {
+    const user = userEvent.setup();
+    const cancelTurn = vi.fn(async () => undefined);
+    const getSession = vi.fn(async () => ({
+      session: {
+        id: "chat_1",
+        title: "New chat",
+        repositoryId: null,
+        updatedAt: "t",
+      },
+      messages: [
+        {
+          id: "u1",
+          role: "user" as const,
+          content: "Go",
+          toolName: null,
+          toolStatus: null,
+        },
+        {
+          id: "a1",
+          role: "assistant" as const,
+          content: "Stopped. Ask again when you want to continue.",
+          toolName: null,
+          toolStatus: null,
+        },
+      ],
+    }));
+    const sendMessage = vi.fn(
+      () =>
+        new Promise<{
+          messages: Array<{
+            id: string;
+            role: "user" | "assistant" | "tool";
+            content: string;
+            toolName: string | null;
+            toolStatus: string | null;
+          }>;
+        }>(() => undefined),
+    );
+    render(
+      <ChatPage
+        chatClient={chatClient({ sendMessage, cancelTurn, getSession })}
+        repositoryId={null}
+        historyOpen={false}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "Go");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    await screen.findByRole("button", { name: /^stop$/i });
+    await user.keyboard("{Escape}");
+    expect(cancelTurn).toHaveBeenCalledWith("chat_1");
+  });
+
   it("shows streamed assistant text while send is still in flight", async () => {
     const user = userEvent.setup();
     let polls = 0;

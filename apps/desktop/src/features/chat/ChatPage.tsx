@@ -247,6 +247,23 @@ export function ChatPage({
     }
   }
 
+  useEffect(() => {
+    if (!busy) {
+      return;
+    }
+    function onKey(event: KeyboardEvent): void {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      void onStop();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [busy]);
+
   return (
     <div className="chat-layout">
       {historyOpen ? (

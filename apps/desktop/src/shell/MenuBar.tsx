@@ -162,7 +162,7 @@ export function MenuBar({
         <p className="menu-help">
           Kronos is a locally installed desktop app for coding agents on your git folders. Ctrl+N
           or Cmd+N starts a new chat. Ctrl+B or Cmd+B hides the activity bar. Ctrl+Shift+J or
-          Cmd+Shift+J hides Changes.
+          Cmd+Shift+J hides Changes. Escape stops the current turn.
         </p>
       </Menu>
     </div>
