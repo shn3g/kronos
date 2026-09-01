@@ -292,6 +292,71 @@ async def test_workspace_terminal_peek_streams_output_and_fail_closed(
 
 
 @pytest.mark.asyncio
+async def test_workspace_terminal_shell_session_fail_closed(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    import asyncio
+
+    http, headers, repo = client
+    enrolled = await http.post("/repositories", headers=headers, json={"path": str(repo)})
+    repo_id = enrolled.json()["repository"]["id"]
+
+    unauth = await http.post(f"/repositories/{repo_id}/terminal/sessions")
+    assert unauth.status_code == 401
+
+    missing = await http.post("/repositories/repo_missing/terminal/sessions", headers=headers)
+    assert missing.status_code == 404
+
+    started = await http.post(f"/repositories/{repo_id}/terminal/sessions", headers=headers)
+    assert started.status_code == 200
+    assert started.json()["running"] is True
+    try:
+        unauth_in = await http.post(
+            f"/repositories/{repo_id}/terminal/sessions/input",
+            json={"line": "echo hello-shell"},
+        )
+        assert unauth_in.status_code == 401
+
+        first = await http.post(
+            f"/repositories/{repo_id}/terminal/sessions/input",
+            headers=headers,
+            json={"line": "echo hello-shell"},
+        )
+        assert first.status_code == 200
+        assert first.json()["ok"] is True
+
+        seen_first = False
+        for _ in range(80):
+            peeked = await http.get(f"/repositories/{repo_id}/terminal/runs", headers=headers)
+            if peeked.status_code == 200 and "hello-shell" in peeked.json().get("output", ""):
+                assert peeked.json()["running"] is True
+                seen_first = True
+                break
+            await asyncio.sleep(0.05)
+        assert seen_first is True
+
+        second = await http.post(
+            f"/repositories/{repo_id}/terminal/sessions/input",
+            headers=headers,
+            json={"line": "echo second-line"},
+        )
+        assert second.status_code == 200
+        seen_second = False
+        for _ in range(80):
+            peeked = await http.get(f"/repositories/{repo_id}/terminal/runs", headers=headers)
+            output = peeked.json().get("output", "")
+            if "hello-shell" in output and "second-line" in output and peeked.json()["running"] is True:
+                seen_second = True
+                break
+            await asyncio.sleep(0.05)
+        assert seen_second is True
+    finally:
+        stopped = await http.post(f"/repositories/{repo_id}/terminal/runs/cancel", headers=headers)
+        assert stopped.status_code == 200
+        assert stopped.json()["ok"] is True
+
+
+@pytest.mark.asyncio
 async def test_workspace_file_write_fail_closed(
     client: tuple[AsyncClient, dict[str, str], Path],
 ) -> None:

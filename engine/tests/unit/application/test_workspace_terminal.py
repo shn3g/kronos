@@ -160,3 +160,65 @@ def test_peek_returns_none_when_nothing_is_running() -> None:
     from kronos_engine.application.workspace_terminal import peek_workspace_command
 
     assert peek_workspace_command("terminal:missing") is None
+
+
+def test_workspace_shell_stays_open_and_accepts_another_line(tmp_path: Path) -> None:
+    import time
+
+    from kronos_engine.application.workspace_terminal import (
+        cancel_workspace_command,
+        peek_workspace_command,
+        start_workspace_shell,
+        write_workspace_shell,
+    )
+
+    repo = init_git_repo(tmp_path / "alpha", files={"README.md": "hello\n"})
+    run_key = "terminal:repo_shell"
+    started = start_workspace_shell(repo, run_key=run_key)
+    try:
+        assert started["running"] is True
+        assert write_workspace_shell(run_key, "echo hello-shell\n") is True
+        first = _wait_for_output(run_key, "hello-shell", timeout_seconds=4)
+        assert first["running"] is True
+        assert write_workspace_shell(run_key, "echo second-line\n") is True
+        second = _wait_for_output(run_key, "second-line", timeout_seconds=4)
+        assert "hello-shell" in second["output"]
+        assert second["running"] is True
+    finally:
+        assert cancel_workspace_command(run_key) is True
+    assert peek_workspace_command(run_key) is None
+    assert write_workspace_shell(run_key, "echo after-stop\n") is False
+
+
+def test_start_workspace_shell_reuses_a_live_session(tmp_path: Path) -> None:
+    from kronos_engine.application.workspace_terminal import (
+        cancel_workspace_command,
+        start_workspace_shell,
+        write_workspace_shell,
+    )
+
+    repo = init_git_repo(tmp_path / "alpha", files={"README.md": "hello\n"})
+    run_key = "terminal:repo_reuse"
+    first = start_workspace_shell(repo, run_key=run_key)
+    try:
+        assert write_workspace_shell(run_key, "echo keep-me\n") is True
+        _wait_for_output(run_key, "keep-me", timeout_seconds=4)
+        again = start_workspace_shell(repo, run_key=run_key)
+        assert again["running"] is True
+        assert "keep-me" in again["output"]
+    finally:
+        cancel_workspace_command(run_key)
+
+
+def _wait_for_output(run_key: str, needle: str, *, timeout_seconds: float) -> dict[str, object]:
+    import time
+
+    from kronos_engine.application.workspace_terminal import peek_workspace_command
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        snapshot = peek_workspace_command(run_key)
+        if snapshot is not None and needle in snapshot["output"]:
+            return dict(snapshot)
+        time.sleep(0.05)
+    raise AssertionError(f"did not see {needle!r} in live shell output")

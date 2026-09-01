@@ -81,6 +81,7 @@ from kronos_engine.api.models import (
     TerminalCancelResponse,
     TerminalRunRequest,
     TerminalRunResponse,
+    TerminalShellInputRequest,
     VersionResponse,
     WorkspaceFileContentsResponse,
     WorkspaceFileItem,
@@ -127,7 +128,9 @@ from kronos_engine.application.workspace_terminal import (
     cancel_workspace_command,
     peek_workspace_command,
     run_workspace_command,
+    start_workspace_shell,
     terminal_run_key,
+    write_workspace_shell,
 )
 from kronos_engine.config.repository import (
     EnrolmentPreview,
@@ -967,6 +970,43 @@ def create_app(
         with repository_service() as repos:
             _load(repos, repository_id)
         return TerminalCancelResponse(ok=cancel_workspace_command(terminal_run_key(repository_id)))
+
+    @app.post(
+        "/repositories/{repository_id}/terminal/sessions",
+        response_model=TerminalRunResponse,
+    )
+    def start_repository_terminal_shell(
+        repository_id: str,
+        _: None = Depends(require_auth),
+    ) -> TerminalRunResponse:
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+        result = start_workspace_shell(Path(record.realpath), run_key=terminal_run_key(repository_id))
+        return TerminalRunResponse(
+            command=result["command"],
+            exit_code=result["exit_code"],
+            timed_out=result["timed_out"],
+            cancelled=result["cancelled"],
+            running=result["running"],
+            output=result["output"],
+        )
+
+    @app.post(
+        "/repositories/{repository_id}/terminal/sessions/input",
+        response_model=TerminalCancelResponse,
+    )
+    def write_repository_terminal_shell(
+        repository_id: str,
+        body: TerminalShellInputRequest,
+        _: None = Depends(require_auth),
+    ) -> TerminalCancelResponse:
+        with repository_service() as repos:
+            _load(repos, repository_id)
+        payload = body.line if body.line.endswith("\n") else f"{body.line}\n"
+        ok = write_workspace_shell(terminal_run_key(repository_id), payload)
+        if not ok:
+            raise HTTPException(status_code=409, detail="No live terminal session. Start the shell first.")
+        return TerminalCancelResponse(ok=True)
 
     @app.get("/repositories/{repository_id}/index", response_model=IndexStatusResponse)
     def index_status(repository_id: str, _: None = Depends(require_auth)) -> IndexStatusResponse:

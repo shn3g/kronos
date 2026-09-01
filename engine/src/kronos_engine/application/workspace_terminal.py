@@ -57,12 +57,60 @@ def peek_workspace_command(run_key: str) -> TerminalRun | None:
 
 def cancel_workspace_command(run_key: str) -> bool:
     with _ACTIVE_LOCK:
-        active = _ACTIVE.get(run_key)
+        active = _ACTIVE.pop(run_key, None)
         if active is None:
             return False
         active.cancelled = True
         process = active.process
     _kill_process_tree(process)
+    return True
+
+
+def start_workspace_shell(root: Path, *, run_key: str) -> TerminalRun:
+    cwd = root.resolve()
+    with _ACTIVE_LOCK:
+        existing = _ACTIVE.get(run_key)
+        if existing is not None and existing.process.poll() is None:
+            return _snapshot(existing, running=True)
+        previous = _ACTIVE.pop(run_key, None)
+    if previous is not None:
+        _kill_process_tree(previous.process)
+        _join_reader(previous)
+    process = _spawn_interactive(cwd=cwd)
+    chunks: list[str] = []
+    lock = Lock()
+    reader = Thread(target=_pump_stdout, args=(process, chunks, lock), daemon=True)
+    active = _ActiveRun(
+        process=process,
+        command="shell",
+        chunks=chunks,
+        lock=lock,
+        reader=reader,
+    )
+    reader.start()
+    with _ACTIVE_LOCK:
+        _ACTIVE[run_key] = active
+    return _snapshot(active, running=process.poll() is None)
+
+
+def write_workspace_shell(run_key: str, data: str) -> bool:
+    if data == "":
+        return False
+    with _ACTIVE_LOCK:
+        active = _ACTIVE.get(run_key)
+        if active is None or active.process.poll() is not None:
+            return False
+        stdin = active.process.stdin
+        stripped = data.strip()
+        if stripped != "":
+            active.command = stripped
+    if stdin is None:
+        return False
+    try:
+        stdin.write(data)
+        stdin.flush()
+    except OSError:
+        return False
     return True
 
 
@@ -177,6 +225,24 @@ def _snapshot(active: _ActiveRun, *, running: bool) -> TerminalRun:
         "running": running,
         "output": _clip_output(output),
     }
+
+
+def _spawn_interactive(*, cwd: Path) -> subprocess.Popen[str]:
+    shared: dict[str, object] = {
+        "cwd": cwd,
+        "stdin": subprocess.PIPE,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.STDOUT,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "bufsize": 1,
+        "env": _child_env(),
+        **_windows_process_flags(),
+    }
+    if os.name == "nt":
+        return subprocess.Popen(["cmd.exe", "/Q", "/K"], **shared)  # noqa: S603
+    return subprocess.Popen(["/bin/sh"], start_new_session=True, **shared)  # noqa: S603
 
 
 def _spawn_shell(command: str, *, cwd: Path) -> subprocess.Popen[str]:

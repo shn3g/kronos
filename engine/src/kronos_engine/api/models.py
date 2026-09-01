@@ -57,6 +57,10 @@ class TerminalCancelResponse(BaseModel):
     ok: bool
 
 
+class TerminalShellInputRequest(BaseModel):
+    line: str
+
+
 class WorkspaceFileItem(BaseModel):
     path: str
 
