@@ -10,6 +10,7 @@ Kronos is a locally installed desktop app (Tauri WebView, also previewable in a 
 - Workspace switcher lives in the title bar.
 - A right drawer holds Changes, Goals/Runs, and Health as tabs. Changes is the default tab. Goals stay visible without forcing a goal form on every chat.
 - Files edits one text file at a time. There is no tabbed IDE.
+- File → Go to file, or Ctrl+P / Cmd+P, jumps to a path in the current workspace. Unsaved Files edits stay when you switch to Chat.
 
 ## First run
 
@@ -27,7 +28,7 @@ This is how we design in Cursor, not a Kronos product. Sources: Cursor Agents Wi
 
 - Progressive specification: no Goal form on every message. Short follow-ups stay in the same thread.
 - Persistent plan: Goals tab is the place for unattended work, matching developers who pin a plan when a chat gets long.
-- Review on the right: Changes is the default inspector tab (Cursor diffs, VS Code Changes panel). It lists the live git working tree. This turn shows files chat wrote and has not committed. All shows every dirty file. Revert restores the last chat write, or HEAD if chat did not write that file. Commit records a local git commit of the visible list and does not push. Open reads the file in Files for editing. Save or Ctrl+S writes it through the same workspace write path as chat Apply. Ask in chat mentions the selected file. Click a file mention in chat, or an inline path in a reply, to open it in Files. Search contents uses the local index. The composer shows an estimated token count against a 32,000 token window. At 80 percent it asks you to start a new chat. Terminal is a View toggle and Ctrl+` panel. It opens a persistent shell in the current workspace folder and does not pass engine secrets into that process. Type a line and press Enter. Output stays as you send more lines. Up and Down recall previous lines from this session. Stop, or Escape in the command box, ends the shell.
+- Review on the right: Changes is the default inspector tab (Cursor diffs, VS Code Changes panel). It lists the live git working tree. This turn shows files chat wrote and has not committed. All shows every dirty file. Revert restores the last chat write, or HEAD if chat did not write that file. Commit records a local git commit of the visible list and does not push. Open reads the file in Files for editing. Save or Ctrl+S writes it through the same workspace write path as chat Apply. Ctrl+P or File → Go to file jumps to a path without walking the tree. Ask in chat mentions the selected file. Click a file mention in chat, or an inline path in a reply, to open it in Files. Search contents uses the local index. The composer shows an estimated token count against a 32,000 token window. At 80 percent it asks you to start a new chat. Terminal is a View toggle and Ctrl+` panel. It opens a persistent shell in the current workspace folder and does not pass engine secrets into that process. Type a line and press Enter. Output stays as you send more lines. Up and Down recall previous lines from this session. Stop, or Escape in the command box, ends the shell.
 - History is a View toggle, not a permanent column.
 
 ## Health

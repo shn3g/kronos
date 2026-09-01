@@ -20,6 +20,7 @@ import {
 } from "../features/models/client";
 import { plannerDisplayName } from "../features/models/plannerLabel";
 import { FilesPage } from "../features/files/FilesPage";
+import { GoToFilePalette } from "../features/files/GoToFilePalette";
 import { safeWorkspaceRelPath } from "../features/files/workspacePath";
 import { TerminalPage } from "../features/terminal/TerminalPage";
 import { createProductionIndexClient, type IndexClient } from "../features/index/client";
@@ -112,6 +113,7 @@ export function App({
     readFlag(INSPECTOR_STORAGE_KEY),
   );
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const [goToFileOpen, setGoToFileOpen] = useState(false);
   const [revertError, setRevertError] = useState<string | null>(null);
   const [revertingPath, setRevertingPath] = useState<string | null>(null);
   const revertingRef = useRef(false);
@@ -277,6 +279,10 @@ export function App({
         toggleTerminal();
         return;
       }
+      if (action === "go-to-file") {
+        setGoToFileOpen(true);
+        return;
+      }
       setActivity("settings");
     };
     window.addEventListener("keydown", onKey, true);
@@ -345,6 +351,9 @@ export function App({
         onOpenWorkspace={() => {
           setActivity("workspaces");
         }}
+        onGoToFile={() => {
+          setGoToFileOpen(true);
+        }}
         onToggleHistory={() => {
           setHistoryOpen((open) => !open);
         }}
@@ -411,27 +420,25 @@ export function App({
                   />
                 </div>
               ) : null}
-              {activity === "files" ? (
-                <div className="app-main__panel app-main__panel--files">
-                  <FilesPage
-                    engineClient={engine}
-                    repositoryId={session.workspaceId}
-                    repositoriesClient={repos}
-                    indexClient={index}
-                    onOpenWorkspace={() => {
-                      setActivity("workspaces");
-                    }}
-                    onAskInChat={(path) => {
-                      setMentionRequest((current) => ({ path, nonce: current.nonce + 1 }));
-                      setActivity("chat");
-                    }}
-                    onWroteFile={() => {
-                      void session.refresh();
-                    }}
-                    revealRequest={fileReveal}
-                  />
-                </div>
-              ) : null}
+              <div hidden={activity !== "files"} className="app-main__panel app-main__panel--files">
+                <FilesPage
+                  engineClient={engine}
+                  repositoryId={session.workspaceId}
+                  repositoriesClient={repos}
+                  indexClient={index}
+                  onOpenWorkspace={() => {
+                    setActivity("workspaces");
+                  }}
+                  onAskInChat={(path) => {
+                    setMentionRequest((current) => ({ path, nonce: current.nonce + 1 }));
+                    setActivity("chat");
+                  }}
+                  onWroteFile={() => {
+                    void session.refresh();
+                  }}
+                  revealRequest={fileReveal}
+                />
+              </div>
               {activity === "settings" ? (
                 <div className="app-main__panel app-main__panel--settings">
                   <SettingsPage engineClient={engine} settingsClient={settings} />
@@ -473,6 +480,18 @@ export function App({
           </section>
         </div>
       </div>
+      <GoToFilePalette
+        open={goToFileOpen}
+        repositoryId={workspaceId}
+        repositoriesClient={repos}
+        onClose={() => {
+          setGoToFileOpen(false);
+        }}
+        onOpenWorkspace={() => {
+          setActivity("workspaces");
+        }}
+        onSelect={revealWorkspaceFile}
+      />
     </div>
   );
 }

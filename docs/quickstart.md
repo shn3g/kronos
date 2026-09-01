@@ -24,7 +24,7 @@ pnpm tauri build
 
 1. Open Kronos. The window waits for the local engine (`python -m kronos_engine` on PATH).
 2. Connect a model if none is assigned. Keys go into the operating system secret store.
-3. Chat is ready without a folder. Open a git folder from File or the workspace control when you want indexing and file edits. AGENTS.md, .cursorrules, and files under .cursor/rules in that folder are followed on every chat turn. Paste a screenshot into chat to ask about the UI.
+3. Chat is ready without a folder. Open a git folder from File or the workspace control when you want indexing and file edits. Ctrl+P jumps to a file in that folder. AGENTS.md, .cursorrules, and files under .cursor/rules in that folder are followed on every chat turn. Paste a screenshot into chat to ask about the UI.
 4. Kronos registers enrolled folders in local SQLite. It does not write `.kronos/` into the tree at enrol.
 5. Optional later: enable a committed `.kronos/config.yaml`, GitHub Apps, and Telegram. Leave `freeze: true` and `mode: observe` or `shadow` until you want autonomous git writes.
 

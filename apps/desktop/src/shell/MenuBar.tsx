@@ -12,6 +12,7 @@ interface MenuBarProps {
   terminalOpen: boolean;
   onNewChat: () => void;
   onOpenWorkspace: () => void;
+  onGoToFile: () => void;
   onToggleHistory: () => void;
   onToggleActivityBar: () => void;
   onToggleInspector: () => void;
@@ -27,6 +28,7 @@ export function MenuBar({
   terminalOpen,
   onNewChat,
   onOpenWorkspace,
+  onGoToFile,
   onToggleHistory,
   onToggleActivityBar,
   onToggleInspector,
@@ -72,6 +74,13 @@ export function MenuBar({
           onSelect={() => {
             setOpen(null);
             onOpenWorkspace();
+          }}
+        />
+        <MenuItem
+          label="Go to file"
+          onSelect={() => {
+            setOpen(null);
+            onGoToFile();
           }}
         />
         <MenuItem
@@ -180,10 +189,10 @@ export function MenuBar({
       >
         <p className="menu-help">
           Kronos is a locally installed desktop app for coding agents on your git folders. Ctrl+N
-          or Cmd+N starts a new chat. Ctrl+B or Cmd+B hides the activity bar. Ctrl+Shift+J or
-          Cmd+Shift+J hides Changes. Ctrl+` or Cmd+` shows Terminal. In Terminal, the shell stays
-          open. Type a line and press Enter. Up and Down recall previous lines. Stop, or Escape in
-          the command box, ends the shell. Escape also
+          or Cmd+N starts a new chat. Ctrl+P or Cmd+P jumps to a file. Ctrl+B or Cmd+B hides the
+          activity bar. Ctrl+Shift+J or Cmd+Shift+J hides Changes. Ctrl+` or Cmd+` shows Terminal.
+          In Terminal, the shell stays open. Type a line and press Enter. Up and Down recall
+          previous lines. Stop, or Escape in the command box, ends the shell. Escape also
           stops the current chat turn.
           Revert in Changes restores the last chat write for that file, or the last committed
           version if chat did not write it. Commit records a local git commit. This turn lists

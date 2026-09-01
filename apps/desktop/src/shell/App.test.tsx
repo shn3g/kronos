@@ -414,6 +414,7 @@ describe("App shell", () => {
     await user.click(screen.getByRole("menuitem", { name: /^File$/ }));
     expect(screen.getByRole("menuitem", { name: /^models$/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^save$/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^go to file$/i })).toBeInTheDocument();
     await user.click(screen.getByRole("menuitem", { name: /^Edit$/ }));
     expect(screen.getByRole("menuitem", { name: /^cut$/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^copy$/i })).toBeInTheDocument();
@@ -736,5 +737,76 @@ describe("App shell", () => {
       "export function App() {}\n",
     );
     expect(readWorkspaceFile).toHaveBeenCalledWith("repo_alpha", "src/App.tsx");
+  });
+
+  it("opens a workspace file from Go to file with Ctrl+P", async () => {
+    const user = userEvent.setup();
+    const session = liveSession();
+    const readWorkspaceFile = vi.fn(async (_id: string, path: string) => ({
+      path,
+      content: "print(1)\n",
+      binary: false,
+    }));
+    render(
+      <App
+        engineClient={clientOf({ status: "ready", version: "0.1.0" })}
+        modelsClient={assignedModels()}
+        chatClient={quietChat()}
+        repositoriesClient={{
+          ...session.repositoriesClient,
+          listWorkspaceFiles: async () => [{ path: "src/app.py" }, { path: "README.md" }],
+          readWorkspaceFile,
+        }}
+        homeClient={session.homeClient}
+        goalsClient={session.goalsClient}
+        settingsClient={session.settingsClient}
+      />,
+    );
+
+    await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.keyboard("{Control>}p{/Control}");
+    await screen.findByRole("option", { name: "src/app.py" });
+    await user.type(screen.getByRole("combobox", { name: /go to file/i }), "app");
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Files" })).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "src/app.py" })).toHaveValue("print(1)\n");
+    expect(readWorkspaceFile).toHaveBeenCalledWith("repo_alpha", "src/app.py");
+    expect(screen.queryByRole("dialog", { name: /go to file/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps unsaved Files edits when switching back from Chat", async () => {
+    const user = userEvent.setup();
+    const session = liveSession();
+    render(
+      <App
+        engineClient={clientOf({ status: "ready", version: "0.1.0" })}
+        modelsClient={assignedModels()}
+        chatClient={quietChat()}
+        repositoriesClient={{
+          ...session.repositoriesClient,
+          listWorkspaceFiles: async () => [{ path: "src/app.py" }],
+          readWorkspaceFile: async () => ({
+            path: "src/app.py",
+            content: "print(1)\n",
+            binary: false,
+          }),
+        }}
+        homeClient={session.homeClient}
+        goalsClient={session.goalsClient}
+        settingsClient={session.settingsClient}
+      />,
+    );
+
+    await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.click(screen.getByRole("button", { name: /^files$/i }));
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    const open = await screen.findByRole("textbox", { name: "src/app.py" });
+    await user.type(open, "x");
+    await user.click(screen.getByRole("button", { name: /^chat$/i }));
+    expect(await screen.findByRole("textbox", { name: /ask kronos/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^files$/i }));
+    expect(await screen.findByRole("textbox", { name: "src/app.py" })).toHaveValue("print(1)\nx");
   });
 });
