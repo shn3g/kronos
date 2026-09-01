@@ -34,3 +34,10 @@ def test_parse_tool_call_allows_write_file_and_search_memory() -> None:
     memory = parse_tool_call('```tool\n{"name": "search_memory", "query": "staff guard"}\n```')
     assert memory is not None
     assert memory.name == "search_memory"
+
+
+def test_parse_tool_call_allows_run_command() -> None:
+    call = parse_tool_call('```tool\n{"name": "run_command", "command": "python probe.py"}\n```')
+    assert call is not None
+    assert call.name == "run_command"
+    assert call.arguments["command"] == "python probe.py"

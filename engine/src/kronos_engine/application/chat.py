@@ -18,6 +18,7 @@ from kronos_engine.application.chat_tools import ToolCall, ToolParseError, parse
 from kronos_engine.application.goals import GoalService
 from kronos_engine.application.repositories import RepositoryNotFound, RepositoryService
 from kronos_engine.application.workspace_changes import restore_working_path
+from kronos_engine.application.workspace_terminal import run_workspace_command
 from kronos_engine.domain.entities import RepositoryId
 from kronos_engine.domain.goals import GoalSource, GoalSpec
 from kronos_engine.indexing.service import IndexingService
@@ -26,6 +27,7 @@ from kronos_engine.state.chat import ChatMessageRow, ChatSessionRow, SqliteChatS
 
 MAX_TOOL_ROUNDS = 6
 MAX_WRITE_CHARS = 200_000
+MAX_RUN_COMMANDS_PER_TURN = 3
 STOP_MESSAGE = "Stopped. Ask again when you want to continue."
 SYSTEM_PROMPT = """You are Kronos, a locally installed coding agent. Answer in plain language.
 When you need a tool, emit only a fenced JSON block:
@@ -35,8 +37,10 @@ When you need a tool, emit only a fenced JSON block:
 ```
 
 Tools: search_index (query), read_file (path), write_file (path, content),
-search_memory (query), create_goal (title, success_criteria), list_goals.
+run_command (command), search_memory (query), create_goal (title, success_criteria),
+list_goals.
 Stay inside the current workspace. Do not claim you edited files unless write_file succeeded.
+run_command runs in the workspace folder. Prefer tests and local tools. Do not push.
 If you do not need a tool, reply without a tool fence."""
 
 _CANCEL: dict[str, Event] = {}
@@ -125,6 +129,7 @@ class ChatService:
         self._clock = clock
         self._memory_conn = memory_conn
         self._events = events
+        self._run_commands_this_turn = 0
 
     def create_session(self, *, repository_id: str | None = None) -> ChatSessionView:
         now = self._now()
@@ -211,6 +216,7 @@ class ChatService:
         return tuple(_message_view(item) for item in self._store.list_messages(session.id))
 
     def _run_agent(self, session_id: str, repository_id: str | None, cancel: Event) -> None:
+        self._run_commands_this_turn = 0
         for _ in range(MAX_TOOL_ROUNDS):
             if cancel.is_set():
                 self._record_stop(session_id, "")
@@ -353,6 +359,8 @@ class ChatService:
                 call.arguments.get("path", ""),
                 call.arguments.get("content", ""),
             )
+        if call.name == "run_command":
+            return self._run_command(repository_id, call.arguments.get("command", ""))
         if call.name == "create_goal":
             return self._create_goal(repository_id, call.arguments)
         return "unknown tool"
@@ -419,6 +427,34 @@ class ChatService:
             unified_write_patch(path=as_posix, before=before, after=content),
         )
         return f"Wrote {as_posix} ({len(content)} characters)."
+
+    def _run_command(self, repository_id: str, command: str) -> str:
+        if self._run_commands_this_turn >= MAX_RUN_COMMANDS_PER_TURN:
+            return (
+                f"This turn already ran {MAX_RUN_COMMANDS_PER_TURN} commands. "
+                "Ask again if you need another."
+            )
+        if self._repos is None:
+            return "Workspace is not available."
+        stripped = command.strip()
+        if stripped == "":
+            return "A command is required."
+        try:
+            record = self._repos.get(RepositoryId(repository_id))
+        except (RepositoryNotFound, LookupError, ValueError):
+            return "Workspace was not found."
+        self._run_commands_this_turn += 1
+        result = run_workspace_command(Path(record.realpath), stripped)
+        if result["timed_out"]:
+            header = "The command timed out."
+        elif result["exit_code"] is None:
+            header = "Finished."
+        else:
+            header = f"Exit {result['exit_code']}"
+        output = result["output"].strip()
+        if output == "":
+            return header
+        return f"{header}\n\n{output}"
 
     def _refresh_written_path(
         self, repository_id: str, root: Path, record: object, rel_path: str

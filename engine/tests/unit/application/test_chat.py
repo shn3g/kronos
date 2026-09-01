@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 from __future__ import annotations
 
+import json
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -420,3 +422,92 @@ def test_send_message_does_not_attach_escaped_mention(tmp_path: Path) -> None:
     service.send_message(session.id, "See @../secret.txt", repository_id="repo_alpha")
     _turns, system = completer.prompts[0]
     assert "nope" not in system
+
+
+def _python_script(root: Path, name: str, source: str) -> str:
+    (root / name).write_text(source, encoding="utf-8")
+    return f'"{sys.executable}" {name}'
+
+
+def test_run_command_uses_workspace_cwd_and_needs_a_command(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "marker.txt").write_text("from-workspace\n", encoding="utf-8")
+    command = _python_script(
+        repo,
+        "probe.py",
+        "from pathlib import Path\nprint(Path('marker.txt').read_text())\n",
+    )
+    fence = "```tool\n" + json.dumps({"name": "run_command", "command": command}) + "\n```"
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    service = ChatService(
+        SqliteChatStore(conn),
+        ScriptedCompleter(
+            [
+                fence,
+                "The marker is in the workspace.",
+            ]
+        ),
+        repos=_RepoLookup(repo),
+    )
+    session = service.create_session()
+    messages = service.send_message(session.id, "Run probe.py", repository_id="repo_alpha")
+    tool = next(item for item in messages if item.tool_name == "run_command")
+    assert tool.tool_status == "ok"
+    assert "from-workspace" in tool.content
+    assert "Exit 0" in tool.content
+
+    blank = ChatService(
+        SqliteChatStore(conn),
+        ScriptedCompleter(
+            [
+                '```tool\n{"name": "run_command", "command": "   "}\n```',
+                "I need a command.",
+            ]
+        ),
+        repos=_RepoLookup(repo),
+    )
+    blank_messages = blank.send_message(session.id, "Empty command", repository_id="repo_alpha")
+    blank_tool = [item for item in blank_messages if item.tool_name == "run_command"][-1]
+    assert "command is required" in blank_tool.content.lower()
+
+
+def test_run_command_needs_an_open_workspace(tmp_path: Path) -> None:
+    service = _service(
+        tmp_path,
+        [
+            '```tool\n{"name": "run_command", "command": "echo hi"}\n```',
+            "Open a folder first.",
+        ],
+    )
+    session = service.create_session()
+    messages = service.send_message(session.id, "Run echo")
+    tool = next(item for item in messages if item.tool_name == "run_command")
+    assert "git folder" in tool.content.lower()
+
+
+def test_run_command_caps_how_many_commands_run_in_one_turn(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    command = _python_script(
+        repo,
+        "tick.py",
+        "from pathlib import Path\n"
+        "p = Path('ticks.txt')\n"
+        "prior = p.read_text(encoding='utf-8') if p.exists() else ''\n"
+        "p.write_text(prior + 'x', encoding='utf-8')\n",
+    )
+    fence = "```tool\n" + json.dumps({"name": "run_command", "command": command}) + "\n```"
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    service = ChatService(
+        SqliteChatStore(conn),
+        ScriptedCompleter([fence, fence, fence, fence, "Done."]),
+        repos=_RepoLookup(repo),
+    )
+    session = service.create_session()
+    messages = service.send_message(session.id, "Tick four times", repository_id="repo_alpha")
+    assert (repo / "ticks.txt").read_text(encoding="utf-8") == "xxx"
+    tool_bodies = [item.content for item in messages if item.tool_name == "run_command"]
+    assert any("3 commands" in body for body in tool_bodies)

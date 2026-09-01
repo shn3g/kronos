@@ -11,7 +11,15 @@ from typing import Any
 TOOL_FENCE = re.compile(r"```tool\s*(\{.*?\})\s*```", re.DOTALL)
 
 ALLOWED_TOOLS = frozenset(
-    {"search_index", "read_file", "write_file", "create_goal", "list_goals", "search_memory"}
+    {
+        "search_index",
+        "read_file",
+        "write_file",
+        "create_goal",
+        "list_goals",
+        "search_memory",
+        "run_command",
+    }
 )
 
 
