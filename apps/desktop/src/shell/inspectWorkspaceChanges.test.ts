@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, it } from "vitest";
-import { inspectWorkspaceChanges } from "./inspectWorkspaceChanges";
+import { inspectWorkspaceChanges, visibleInspectorChanges } from "./inspectWorkspaceChanges";
 
 describe("inspectWorkspaceChanges", () => {
   it("keeps the latest write per path and lists newest files first", () => {
@@ -38,5 +38,15 @@ describe("inspectWorkspaceChanges", () => {
       "repo_alpha",
     );
     expect(changes).toEqual([{ path: "a.py", summary: "Wrote a.py", patch: "" }]);
+  });
+
+  it("limits This turn to chat writes and keeps All unchanged", () => {
+    const changes = [
+      { path: "src/App.tsx", summary: "Modified src/App.tsx", patch: "+a\n", fromChat: true },
+      { path: "notes.md", summary: "Modified notes.md", patch: "+b\n", fromChat: false },
+    ];
+
+    expect(visibleInspectorChanges(changes, "turn")).toEqual([changes[0]]);
+    expect(visibleInspectorChanges(changes, "all")).toEqual(changes);
   });
 });

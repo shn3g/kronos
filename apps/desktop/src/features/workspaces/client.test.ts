@@ -86,6 +86,7 @@ describe("createProductionRepositoriesClient", () => {
               summary: "Modified src/App.tsx",
               patch: "-old\n+new\n",
               status: "M",
+              from_chat: true,
             },
           ],
         }),
@@ -98,6 +99,7 @@ describe("createProductionRepositoriesClient", () => {
         summary: "Modified src/App.tsx",
         patch: "-old\n+new\n",
         status: "M",
+        fromChat: true,
       },
     ]);
   });

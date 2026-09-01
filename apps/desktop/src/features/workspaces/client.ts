@@ -38,6 +38,7 @@ export interface WorkspaceFileChange {
   summary: string;
   patch: string;
   status: string;
+  fromChat: boolean;
 }
 
 export interface RepositoriesClient {
@@ -168,6 +169,7 @@ function mapChange(raw: unknown): WorkspaceFileChange {
     summary: stringField(item, "summary"),
     patch: stringField(item, "patch"),
     status: stringField(item, "status"),
+    fromChat: item.from_chat === true,
   };
 }
 

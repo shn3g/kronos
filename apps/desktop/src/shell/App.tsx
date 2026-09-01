@@ -210,8 +210,8 @@ export function App({
     }
   }
 
-  async function commitChanges(message: string): Promise<void> {
-    if (!session.workspaceId || committingRef.current || session.changes.length === 0) {
+  async function commitChanges(message: string, paths: string[]): Promise<void> {
+    if (!session.workspaceId || committingRef.current || paths.length === 0) {
       return;
     }
     committingRef.current = true;
@@ -219,11 +219,7 @@ export function App({
     setCommitError(null);
     setRevertError(null);
     try {
-      await repos.commitFiles(
-        session.workspaceId,
-        message,
-        session.changes.map((item) => item.path),
-      );
+      await repos.commitFiles(session.workspaceId, message, paths);
       await session.refresh();
     } catch {
       setCommitError("Could not commit those files. Check the message and try again.");
@@ -401,8 +397,8 @@ export function App({
                 }}
                 revertError={revertError}
                 revertingPath={revertingPath}
-                onCommit={(message) => {
-                  void commitChanges(message);
+                onCommit={(message, paths) => {
+                  void commitChanges(message, paths);
                 }}
                 commitError={commitError}
                 committing={committing}

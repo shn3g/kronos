@@ -164,7 +164,8 @@ export function MenuBar({
           or Cmd+N starts a new chat. Ctrl+B or Cmd+B hides the activity bar. Ctrl+Shift+J or
           Cmd+Shift+J hides Changes. Escape stops the current turn. Revert in Changes restores
           the last chat write for that file, or the last committed version if chat did not write
-          it. Commit records a local git commit. Kronos does not push.
+          it. Commit records a local git commit. This turn lists files chat wrote. All lists every
+          dirty file. Kronos does not push.
         </p>
       </Menu>
     </div>

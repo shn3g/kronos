@@ -260,6 +260,28 @@
   border-bottom: 1px solid var(--hairline);
 }
 
+.inspector__scope {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.inspector__scope-btn {
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.inspector__scope-btn[aria-checked="true"] {
+  border-color: var(--hairline-strong);
+  background: var(--void-raised);
+  color: var(--ink);
+}
+
 .inspector__tab {
   flex: 1;
   border: 0;

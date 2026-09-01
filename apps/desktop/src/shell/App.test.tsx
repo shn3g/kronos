@@ -158,6 +158,7 @@ function liveSession() {
           summary: "guard staff before calendar",
           patch: "",
           status: "M",
+          fromChat: true,
         },
       ],
     },
@@ -471,6 +472,7 @@ describe("App shell", () => {
         summary: "guard staff before calendar",
         patch: "",
         status: "M",
+        fromChat: true,
       },
     ];
     const revertWrite = vi.fn(async () => {
@@ -537,6 +539,7 @@ describe("App shell", () => {
         summary: "guard staff before calendar",
         patch: "",
         status: "M",
+        fromChat: true,
       },
     ];
     const commitFiles = vi.fn(async () => {

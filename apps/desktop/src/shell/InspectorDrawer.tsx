@@ -3,6 +3,10 @@
 import { useState } from "react";
 import type { HealthCheck } from "../features/health/checks";
 import { HealthList } from "../features/health/HealthList";
+import {
+  visibleInspectorChanges,
+  type ChangeListScope,
+} from "./inspectWorkspaceChanges";
 
 export type InspectorTab = "changes" | "goals" | "health";
 
@@ -10,6 +14,7 @@ export interface InspectorChange {
   path: string;
   summary: string;
   patch?: string;
+  fromChat?: boolean;
 }
 
 interface InspectorDrawerProps {
@@ -21,7 +26,7 @@ interface InspectorDrawerProps {
   onRevert?: (path: string) => void;
   revertError?: string | null;
   revertingPath?: string | null;
-  onCommit?: (message: string) => void;
+  onCommit?: (message: string, paths: string[]) => void;
   commitError?: string | null;
   committing?: boolean;
 }
@@ -39,6 +44,10 @@ export function InspectorDrawer({
   commitError = null,
   committing = false,
 }: InspectorDrawerProps) {
+  const [pickedScope, setPickedScope] = useState<ChangeListScope | null>(null);
+  const hasTurn = changes.some((item) => item.fromChat === true);
+  const scope: ChangeListScope = pickedScope ?? (hasTurn ? "turn" : "all");
+  const visible = visibleInspectorChanges(changes, scope);
   return (
     <aside className="inspector" aria-label="Session details">
       <div className="inspector__tabs" role="tablist" aria-label="Inspector">
@@ -63,22 +72,53 @@ export function InspectorDrawer({
                   {commitError ?? revertError}
                 </p>
               ) : null}
-              {onCommit ? (
-                <CommitForm
-                  committing={committing}
-                  onCommit={onCommit}
-                />
-              ) : null}
-              <ul className="inspector__list">
-                {changes.map((item) => (
-                  <ChangeRow
-                    key={`${item.path}:${item.summary}`}
-                    item={item}
-                    onRevert={onRevert}
-                    reverting={revertingPath === item.path}
-                  />
-                ))}
-              </ul>
+              <div className="inspector__scope" role="radiogroup" aria-label="Change list">
+                <ScopeButton
+                  selected={scope === "turn"}
+                  onClick={() => {
+                    setPickedScope("turn");
+                  }}
+                >
+                  This turn
+                </ScopeButton>
+                <ScopeButton
+                  selected={scope === "all"}
+                  onClick={() => {
+                    setPickedScope("all");
+                  }}
+                >
+                  All
+                </ScopeButton>
+              </div>
+              {visible.length === 0 ? (
+                <p className="inspector__empty">
+                  No chat writes in the working tree. Choose All to see other edits.
+                </p>
+              ) : (
+                <>
+                  {onCommit ? (
+                    <CommitForm
+                      committing={committing}
+                      onCommit={(message) => {
+                        onCommit(
+                          message,
+                          visible.map((item) => item.path),
+                        );
+                      }}
+                    />
+                  ) : null}
+                  <ul className="inspector__list">
+                    {visible.map((item) => (
+                      <ChangeRow
+                        key={`${item.path}:${item.summary}`}
+                        item={item}
+                        onRevert={onRevert}
+                        reverting={revertingPath === item.path}
+                      />
+                    ))}
+                  </ul>
+                </>
+              )}
             </>
           )
         ) : null}
@@ -204,6 +244,28 @@ interface TabButtonProps {
   selected: boolean;
   onClick: () => void;
   children: string;
+}
+
+function ScopeButton({
+  selected,
+  onClick,
+  children,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  children: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      className="inspector__scope-btn"
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
 }
 
 function TabButton({ selected, onClick, children }: TabButtonProps) {

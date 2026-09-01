@@ -90,7 +90,38 @@ describe("InspectorDrawer", () => {
     await user.type(screen.getByRole("textbox", { name: /commit message/i }), "Fix App");
     expect(commit).toBeEnabled();
     await user.click(commit);
-    expect(onCommit).toHaveBeenCalledWith("Fix App");
+    expect(onCommit).toHaveBeenCalledWith("Fix App", ["src/App.tsx"]);
+  });
+
+  it("hides non-chat edits until All is chosen", async () => {
+    const user = userEvent.setup();
+    render(
+      <InspectorDrawer
+        tab="changes"
+        onTab={() => undefined}
+        changes={[
+          {
+            path: "src/App.tsx",
+            summary: "Modified src/App.tsx",
+            patch: "+agent\n",
+            fromChat: true,
+          },
+          {
+            path: "notes.md",
+            summary: "Modified notes.md",
+            patch: "+local\n",
+            fromChat: false,
+          },
+        ]}
+        goals={[]}
+        checks={[]}
+      />,
+    );
+
+    expect(screen.getByText("src/App.tsx")).toBeInTheDocument();
+    expect(screen.queryByText("notes.md")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: /^all$/i }));
+    expect(screen.getByText("notes.md")).toBeInTheDocument();
   });
 
   it("lists workspace diffs and goal titles with text status", async () => {

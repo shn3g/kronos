@@ -28,3 +28,15 @@ export function inspectWorkspaceChanges(
   }
   return changes;
 }
+
+export type ChangeListScope = "turn" | "all";
+
+export function visibleInspectorChanges(
+  changes: InspectorChange[],
+  scope: ChangeListScope,
+): InspectorChange[] {
+  if (scope === "all") {
+    return changes;
+  }
+  return changes.filter((item) => item.fromChat === true);
+}
