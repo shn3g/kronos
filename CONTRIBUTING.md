@@ -16,6 +16,7 @@ Hermes is not a dependency. Do not add Hermes packages, submodules, or runtime i
    - Visual Studio 2022 with the C++ workload on Windows (GitHub `windows-latest` provides this; a machine without MSVC can still run `pnpm test`, `pnpm test:e2e`, and engine pytest)
 3. Run `pnpm install` at the repository root.
 4. From `engine/`, install the engine package in development mode: `pip install -e ".[dev]"`.
+5. For a native desktop window wrapping the Vite dev server: `pnpm tauri dev`.
 
 Windows, macOS, and Linux are first-class targets.
 
