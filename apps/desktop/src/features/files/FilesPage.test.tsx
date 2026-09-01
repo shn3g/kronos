@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineClient } from "../../engine/client";
@@ -291,18 +291,18 @@ describe("FilesPage", () => {
     const search = vi.fn(async () => [
       {
         path: "src/app.py",
-        startLine: 1,
+        startLine: 2,
         endLine: 4,
         commit: "abc123",
         symbol: "connect",
         rankSources: ["sparse"],
         trust: "tracked",
-        text: "def connect",
+        text: "def connect():\n    pass",
       },
     ]);
     const readWorkspaceFile = vi.fn(async (_id: string, path: string) => ({
       path,
-      content: "print(1)\n",
+      content: "print(0)\ndef connect():\n    pass\n",
       binary: false,
     }));
     render(
@@ -331,9 +331,45 @@ describe("FilesPage", () => {
     await user.type(await screen.findByRole("searchbox", { name: /search contents/i }), "connect");
     await user.click(screen.getByRole("button", { name: /^search$/i }));
     expect(search).toHaveBeenCalledWith("repo_alpha", "connect");
-    await user.click(await screen.findByRole("button", { name: "src/app.py" }));
+    const hit = await screen.findByRole("button", { name: /src\/app\.py:2/i });
+    expect(hit).toHaveTextContent("def connect(): pass");
+    await user.click(hit);
     expect(readWorkspaceFile).toHaveBeenCalledWith("repo_alpha", "src/app.py");
-    expect(await screen.findByRole("textbox", { name: "src/app.py" })).toHaveValue("print(1)\n");
+    const editor = await screen.findByRole("textbox", { name: "src/app.py" });
+    expect(editor).toHaveValue("print(0)\ndef connect():\n    pass\n");
+    expect(editor).toHaveProperty("selectionStart", 9);
+    expect(editor).toHaveProperty("selectionEnd", 23);
+  });
+
+  it("focuses workspace search when Find in files is requested", async () => {
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos()}
+        indexClient={{
+          status: async () => ({
+            repositoryId: "repo_alpha",
+            commit: "abc123",
+            chunkCount: 4,
+            denseAvailable: false,
+            indexPath: "C:/cache/indexes/repo_alpha",
+            ready: true,
+          }),
+          rebuild: async () => {
+            throw new Error("rebuild should not run");
+          },
+          search: async () => [],
+        }}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await screen.findByRole("searchbox", { name: /search contents/i });
+    window.dispatchEvent(new Event("kronos-find-in-files"));
+    await waitFor(() => {
+      expect(screen.getByRole("searchbox", { name: /search contents/i })).toHaveFocus();
+    });
   });
 
   it("shows a specific error when content search fails", async () => {

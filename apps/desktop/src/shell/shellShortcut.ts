@@ -6,7 +6,8 @@ export type ShellShortcut =
   | "toggle-inspector"
   | "toggle-terminal"
   | "open-settings"
-  | "go-to-file";
+  | "go-to-file"
+  | "find-in-files";
 
 interface ShortcutKeys {
   key: string;
@@ -36,6 +37,9 @@ export function shellShortcutFromKeyboard(event: ShortcutKeys): ShellShortcut | 
   }
   if (key === "p" && !event.shiftKey) {
     return "go-to-file";
+  }
+  if (key === "f" && event.shiftKey) {
+    return "find-in-files";
   }
   if (key === "," && !event.shiftKey) {
     return "open-settings";

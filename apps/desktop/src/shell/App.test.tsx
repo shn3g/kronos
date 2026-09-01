@@ -422,6 +422,7 @@ describe("App shell", () => {
     expect(screen.getByRole("menuitem", { name: /^paste$/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^select all$/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^find$/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^find in files$/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^replace$/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^go to line$/i })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /^models$/i })).not.toBeInTheDocument();
@@ -777,6 +778,44 @@ describe("App shell", () => {
     expect(await screen.findByRole("textbox", { name: "src/app.py" })).toHaveValue("print(1)\n");
     expect(readWorkspaceFile).toHaveBeenCalledWith("repo_alpha", "src/app.py");
     expect(screen.queryByRole("dialog", { name: /go to file/i })).not.toBeInTheDocument();
+  });
+
+  it("opens workspace search from Find in files with Ctrl+Shift+F", async () => {
+    const user = userEvent.setup();
+    const session = liveSession();
+    render(
+      <App
+        engineClient={clientOf({ status: "ready", version: "0.1.0" })}
+        modelsClient={assignedModels()}
+        chatClient={quietChat()}
+        repositoriesClient={{
+          ...session.repositoriesClient,
+          listWorkspaceFiles: async () => [{ path: "src/app.py" }],
+        }}
+        homeClient={session.homeClient}
+        goalsClient={session.goalsClient}
+        settingsClient={session.settingsClient}
+        indexClient={{
+          status: async () => ({
+            repositoryId: "repo_alpha",
+            commit: "abc123",
+            chunkCount: 1,
+            denseAvailable: false,
+            indexPath: "C:/cache/indexes/repo_alpha",
+            ready: true,
+          }),
+          rebuild: async () => {
+            throw new Error("rebuild should not run");
+          },
+          search: async () => [],
+        }}
+      />,
+    );
+
+    await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.keyboard("{Control>}{Shift>}f{/Shift}{/Control}");
+    expect(await screen.findByRole("heading", { level: 1, name: "Files" })).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: /search contents/i })).toHaveFocus();
   });
 
   it("keeps unsaved Files edits when switching back from Chat", async () => {

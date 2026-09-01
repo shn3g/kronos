@@ -21,7 +21,7 @@ import {
 import { plannerDisplayName } from "../features/models/plannerLabel";
 import { FilesPage } from "../features/files/FilesPage";
 import { GoToFilePalette } from "../features/files/GoToFilePalette";
-import { FIND_IN_FILE_EVENT, GO_TO_LINE_EVENT, REPLACE_IN_FILE_EVENT } from "../features/files/fileEditor";
+import { FIND_IN_FILE_EVENT, FIND_IN_FILES_EVENT, GO_TO_LINE_EVENT, REPLACE_IN_FILE_EVENT } from "../features/files/fileEditor";
 import { safeWorkspaceRelPath } from "../features/files/workspacePath";
 import { TerminalPage } from "../features/terminal/TerminalPage";
 import { createProductionIndexClient, type IndexClient } from "../features/index/client";
@@ -284,6 +284,11 @@ export function App({
         setGoToFileOpen(true);
         return;
       }
+      if (action === "find-in-files") {
+        setActivity("files");
+        window.dispatchEvent(new Event(FIND_IN_FILES_EVENT));
+        return;
+      }
       setActivity("settings");
     };
     window.addEventListener("keydown", onKey, true);
@@ -358,6 +363,10 @@ export function App({
         onFindInFile={() => {
           setActivity("files");
           window.dispatchEvent(new Event(FIND_IN_FILE_EVENT));
+        }}
+        onFindInFiles={() => {
+          setActivity("files");
+          window.dispatchEvent(new Event(FIND_IN_FILES_EVENT));
         }}
         onReplaceInFile={() => {
           setActivity("files");

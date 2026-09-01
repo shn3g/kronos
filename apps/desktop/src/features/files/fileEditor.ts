@@ -2,8 +2,10 @@
 
 export const SAVE_FILE_EVENT = "kronos-save-file";
 export const FIND_IN_FILE_EVENT = "kronos-find-in-file";
+export const FIND_IN_FILES_EVENT = "kronos-find-in-files";
 export const REPLACE_IN_FILE_EVENT = "kronos-replace-in-file";
 export const GO_TO_LINE_EVENT = "kronos-go-to-line";
+export const WORKSPACE_SEARCH_SNIPPET_LIMIT = 120;
 
 export interface FileFindMatch {
   start: number;
@@ -163,4 +165,21 @@ export function selectionForLineColumn(
 
 export function goToLineStatusLabel(line: number, lineCount: number): string {
   return `Line ${line} of ${lineCount}`;
+}
+
+export function workspaceSearchHitLabel(path: string, startLine: number): string {
+  const safe = path.trim();
+  if (safe === "") {
+    return "";
+  }
+  const line = Number.isInteger(startLine) && startLine > 0 ? startLine : 1;
+  return `${safe}:${line}`;
+}
+
+export function workspaceSearchHitSnippet(text: string): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  if (line.length <= WORKSPACE_SEARCH_SNIPPET_LIMIT) {
+    return line;
+  }
+  return `${line.slice(0, WORKSPACE_SEARCH_SNIPPET_LIMIT - 3)}...`;
 }

@@ -554,25 +554,48 @@
 
 .files-page__hits {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 2px;
+  max-height: 9rem;
+  overflow: auto;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .files-page__hit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
   border: 1px solid var(--hairline);
   border-radius: 6px;
-  padding: 4px 8px;
+  padding: 6px 8px;
   background: transparent;
   color: var(--ink);
   cursor: pointer;
   font-size: 12px;
+  text-align: left;
 }
 
 .files-page__hit:hover {
   background: rgb(255 255 255 / 0.05);
+}
+
+.files-page__hit-path {
+  color: var(--ink);
+}
+
+.files-page__hit-snip {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 768px) {

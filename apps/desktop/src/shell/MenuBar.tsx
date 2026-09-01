@@ -14,6 +14,7 @@ interface MenuBarProps {
   onOpenWorkspace: () => void;
   onGoToFile: () => void;
   onFindInFile: () => void;
+  onFindInFiles: () => void;
   onReplaceInFile: () => void;
   onGoToLine: () => void;
   onToggleHistory: () => void;
@@ -33,6 +34,7 @@ export function MenuBar({
   onOpenWorkspace,
   onGoToFile,
   onFindInFile,
+  onFindInFiles,
   onReplaceInFile,
   onGoToLine,
   onToggleHistory,
@@ -155,6 +157,13 @@ export function MenuBar({
           }}
         />
         <MenuItem
+          label="Find in files"
+          onSelect={() => {
+            setOpen(null);
+            onFindInFiles();
+          }}
+        />
+        <MenuItem
           label="Replace"
           onSelect={() => {
             setOpen(null);
@@ -221,6 +230,7 @@ export function MenuBar({
           In Terminal, the shell stays open as a real TTY. Type in the panel. Stop ends the shell.
           Escape stops the current chat turn. Ctrl+F or Cmd+F finds text in the open file.
           Match case limits that search to the same letter case.
+          Ctrl+Shift+F or Cmd+Shift+F searches the workspace index. Click a hit to open that line.
           Ctrl+H or Cmd+H replaces text in the open file. Ctrl+G or Cmd+G jumps to a line.
           Revert in Changes restores the last chat write for that file, or the last committed
           version if chat did not write it. Commit records a local git commit. This turn lists

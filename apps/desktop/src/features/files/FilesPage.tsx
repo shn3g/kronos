@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
 import type { EngineClient } from "../../engine/client";
 import type { IndexClient, IndexHit } from "../index/client";
 import {
@@ -13,6 +13,7 @@ import {
   fileDraftIsDirty,
   fileFindStatusLabel,
   FIND_IN_FILE_EVENT,
+  FIND_IN_FILES_EVENT,
   findInFileText,
   GO_TO_LINE_EVENT,
   goToLineStatusLabel,
@@ -24,6 +25,8 @@ import {
   replaceInFileMatch,
   SAVE_FILE_EVENT,
   selectionForLineColumn,
+  workspaceSearchHitLabel,
+  workspaceSearchHitSnippet,
 } from "./fileEditor";
 import {
   fileTreeFromPaths,
@@ -87,6 +90,7 @@ export function FilesPage({
   const findInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const goToLineInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const findOpenRef = useRef(false);
   const goToLineOpenRef = useRef(false);
   const [findOpen, setFindOpen] = useState(false);
@@ -98,6 +102,8 @@ export function FilesPage({
   const [goToLineQuery, setGoToLineQuery] = useState("");
   const [goToLineStatus, setGoToLineStatus] = useState("");
   const [findIndex, setFindIndex] = useState(0);
+  const [revealTarget, setRevealTarget] = useState<{ path: string; line: number } | null>(null);
+  const [searchFocusTick, setSearchFocusTick] = useState(0);
   dirtyRef.current = dirty;
   findOpenRef.current = findOpen;
   goToLineOpenRef.current = goToLineOpen;
@@ -149,6 +155,7 @@ export function FilesPage({
     setGoToLineQuery("");
     setGoToLineStatus("");
     setFindIndex(0);
+    setRevealTarget(null);
   }, [repositoryId]);
 
   function openPath(path: string): void {
@@ -171,6 +178,18 @@ export function FilesPage({
     setSavedContent(null);
     setLoadingPreview(true);
     setExpanded((current) => expandAncestors(current, safe));
+  }
+
+  function openSearchHit(path: string, startLine: number): void {
+    const safe = safeWorkspaceRelPath(path);
+    if (safe === "") {
+      return;
+    }
+    const line = Number.isInteger(startLine) && startLine > 0 ? startLine : 1;
+    setFindOpen(false);
+    setReplaceOpen(false);
+    setRevealTarget({ path: safe, line });
+    openPath(safe);
   }
 
   useEffect(() => {
@@ -316,6 +335,34 @@ export function FilesPage({
     }
   }, [activeFind, findMatches, findOpen, draft]);
 
+  useLayoutEffect(() => {
+    if (
+      revealTarget === null ||
+      draft === null ||
+      loadingPreview ||
+      selectedPath !== revealTarget.path
+    ) {
+      return;
+    }
+    const node = editorRef.current;
+    if (node === null) {
+      return;
+    }
+    const next = selectionForLineColumn(draft, revealTarget.line, null);
+    node.focus();
+    node.selectionStart = next.start;
+    node.selectionEnd = next.end;
+    setRevealTarget(null);
+  }, [draft, loadingPreview, revealTarget, selectedPath]);
+
+  useEffect(() => {
+    if (searchFocusTick === 0) {
+      return;
+    }
+    searchInputRef.current?.focus();
+    searchInputRef.current?.select();
+  }, [searchFocusTick]);
+
   useEffect(() => {
     function filesHidden(): boolean {
       return pageRef.current === null || pageRef.current.closest("[hidden]") !== null;
@@ -394,15 +441,20 @@ export function FilesPage({
       closeFind();
       setGoToLineOpen(true);
     }
+    function onMenuFindInFiles(): void {
+      setSearchFocusTick((current) => current + 1);
+    }
     window.addEventListener("keydown", onKey, true);
     window.addEventListener(SAVE_FILE_EVENT, onMenuSave);
     window.addEventListener(FIND_IN_FILE_EVENT, onMenuFind);
+    window.addEventListener(FIND_IN_FILES_EVENT, onMenuFindInFiles);
     window.addEventListener(REPLACE_IN_FILE_EVENT, onMenuReplace);
     window.addEventListener(GO_TO_LINE_EVENT, onMenuGoToLine);
     return () => {
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener(SAVE_FILE_EVENT, onMenuSave);
       window.removeEventListener(FIND_IN_FILE_EVENT, onMenuFind);
+      window.removeEventListener(FIND_IN_FILES_EVENT, onMenuFindInFiles);
       window.removeEventListener(REPLACE_IN_FILE_EVENT, onMenuReplace);
       window.removeEventListener(GO_TO_LINE_EVENT, onMenuGoToLine);
     };
@@ -534,6 +586,55 @@ export function FilesPage({
           />
         </label>
       </header>
+      {indexClient ? (
+        <form
+          className="files-page__search"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void onSearch();
+          }}
+        >
+          <label className="files-page__filter" htmlFor="files-search">
+            Search contents
+            <input
+              ref={searchInputRef}
+              id="files-search"
+              type="search"
+              role="searchbox"
+              value={searchQuery}
+              onChange={(event) => {
+                setSearchQuery(event.target.value);
+              }}
+            />
+          </label>
+          <button type="submit" className="btn-quiet" disabled={searching}>
+            Search
+          </button>
+        </form>
+      ) : null}
+      {searchError ? <p className="wizard__error">{searchError}</p> : null}
+      {searchHits.length > 0 ? (
+        <ul className="files-page__hits">
+          {searchHits.map((hit) => {
+            const title = workspaceSearchHitLabel(hit.path, hit.startLine);
+            const snippet = workspaceSearchHitSnippet(hit.text);
+            return (
+              <li key={`${hit.path}:${hit.startLine}`}>
+                <button
+                  type="button"
+                  className="files-page__hit"
+                  onClick={() => {
+                    openSearchHit(hit.path, hit.startLine);
+                  }}
+                >
+                  <span className="files-page__hit-path">{title}</span>
+                  {snippet === "" ? null : <span className="files-page__hit-snip">{snippet}</span>}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
       {listError ? <p className="wizard__error">{listError}</p> : null}
       <div className="files-page__split">
         <div className="files-page__pane">
@@ -825,49 +926,6 @@ export function FilesPage({
           ) : null}
         </div>
       </div>
-      {indexClient ? (
-        <form
-          className="files-page__search"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void onSearch();
-          }}
-        >
-          <label className="files-page__filter" htmlFor="files-search">
-            Search contents
-            <input
-              id="files-search"
-              type="search"
-              role="searchbox"
-              value={searchQuery}
-              onChange={(event) => {
-                setSearchQuery(event.target.value);
-              }}
-            />
-          </label>
-          <button type="submit" className="btn-quiet" disabled={searching}>
-            Search
-          </button>
-        </form>
-      ) : null}
-      {searchError ? <p className="wizard__error">{searchError}</p> : null}
-      {searchHits.length > 0 ? (
-        <ul className="files-page__hits">
-          {searchHits.map((hit) => (
-            <li key={`${hit.path}:${hit.startLine}`}>
-              <button
-                type="button"
-                className="files-page__hit"
-                onClick={() => {
-                  openPath(hit.path);
-                }}
-              >
-                {hit.path}
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
     </section>
   );
 }

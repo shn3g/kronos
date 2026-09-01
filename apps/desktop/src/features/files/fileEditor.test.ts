@@ -12,6 +12,8 @@ import {
   replaceAllInFileText,
   replaceInFileMatch,
   selectionForLineColumn,
+  workspaceSearchHitLabel,
+  workspaceSearchHitSnippet,
 } from "./fileEditor";
 
 describe("fileDraftIsDirty", () => {
@@ -162,5 +164,21 @@ describe("selectionForLineColumn", () => {
       end: 11,
       line: 3,
     });
+  });
+});
+
+describe("workspaceSearchHitLabel", () => {
+  it("names a hit as path and 1-based line", () => {
+    expect(workspaceSearchHitLabel("src/app.py", 2)).toBe("src/app.py:2");
+    expect(workspaceSearchHitLabel("  README.md  ", 0)).toBe("README.md:1");
+    expect(workspaceSearchHitLabel("", 4)).toBe("");
+  });
+});
+
+describe("workspaceSearchHitSnippet", () => {
+  it("collapses a hit to one short line of text", () => {
+    expect(workspaceSearchHitSnippet("  def connect():\n    pass  ")).toBe("def connect(): pass");
+    expect(workspaceSearchHitSnippet("   ")).toBe("");
+    expect(workspaceSearchHitSnippet("a".repeat(130)).length).toBe(120);
   });
 });
