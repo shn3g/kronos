@@ -195,6 +195,7 @@ def create_app(
         try:
             watcher = IndexWatcher(
                 list_repos=_list_watched_repos,
+                indexer=IndexingService(settings.paths),
                 indexer_factory=_live_indexer,
             )
             watcher.start()

@@ -251,6 +251,88 @@ def test_watcher_honors_per_repo_debounce_ms(tmp_path: Path) -> None:
     assert fast_delay < slow_delay
 
 
+def test_idle_ticks_do_not_invoke_indexer_factory_each_pump(tmp_path: Path) -> None:
+    paths = kronos_paths(tmp_path)
+    root = init_git_repo(tmp_path / "factory-idle", files={"src/mod.py": "IDLE_TOKEN = 1\n"})
+    service = IndexingService(paths, embeddings=_CountingEmbedder())
+    record = replace(
+        _record(root, "repo_factory_idle"),
+        policy=replace(
+            indexing_policy(),
+            indexing=replace(indexing_policy().indexing, debounce_ms=40),
+        ),
+    )
+    service.rebuild(record.id.value, root, record.policy)
+    factory_calls = {"n": 0}
+
+    def factory() -> IndexingService:
+        factory_calls["n"] += 1
+        return service
+
+    ticks = {"n": 0}
+    pending: list[set[tuple[object, str]]] = []
+    started = threading.Event()
+
+    def fake_watch(
+        *_watch_paths: Path | str,
+        stop_event: threading.Event | None = None,
+        **_kwargs: object,
+    ) -> Iterator[set[tuple[object, str]]]:
+        while stop_event is None or not stop_event.is_set():
+            started.set()
+            ticks["n"] += 1
+            if pending:
+                yield pending.pop(0)
+                continue
+            yield set()
+            if stop_event is None:
+                return
+            stop_event.wait(0.02)
+
+    watcher = IndexWatcher(
+        list_repos=lambda: (record,),
+        indexer=service,
+        indexer_factory=factory,
+        watch=fake_watch,
+    )
+    watcher.start()
+    assert started.wait(1.0)
+    deadline = time.time() + 0.4
+    while time.time() < deadline:
+        if ticks["n"] >= 8:
+            break
+        time.sleep(0.02)
+    assert ticks["n"] >= 8
+    idle_calls = factory_calls["n"]
+    assert idle_calls < ticks["n"]
+    assert idle_calls == 0
+
+    (root / "src/mod.py").write_text("FACTORY_REFRESH_TOKEN = 2\n", encoding="utf-8")
+    pending.append({("modified", str(root / "src/mod.py"))})
+    deadline = time.time() + 3.0
+    while time.time() < deadline:
+        if service.search(record.id.value, "FACTORY_REFRESH_TOKEN", mode="sparse").items:
+            break
+        time.sleep(0.02)
+    watcher.stop()
+    assert service.search(record.id.value, "FACTORY_REFRESH_TOKEN", mode="sparse").items
+    assert factory_calls["n"] >= 1
+
+    solo_calls = {"n": 0}
+
+    def solo_factory() -> IndexingService:
+        solo_calls["n"] += 1
+        return service
+
+    solo = IndexWatcher(list_repos=lambda: (record,), indexer_factory=solo_factory)
+    origin = time.monotonic()
+    for step in range(10):
+        repos = solo._watched_repos()
+        solo._poll_commits(repos, origin + step * 0.05)
+    assert solo_calls["n"] <= 1
+    assert solo_calls["n"] < 10
+
+
 def test_commit_poll_compares_revision_without_status_or_list_chunks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

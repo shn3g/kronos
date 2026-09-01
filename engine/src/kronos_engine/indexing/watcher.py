@@ -76,6 +76,7 @@ class IndexWatcher:
         watch: WatchFactory | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
+        self._meta_indexer = indexer
         if indexer_factory is not None:
             self._indexer_factory = indexer_factory
         elif indexer is not None:
@@ -90,6 +91,7 @@ class IndexWatcher:
         self._thread: threading.Thread | None = None
         self._pending: dict[str, _Pending] = {}
         self._commit_poll_at: dict[str, float] = {}
+        self._probes: dict[str, IndexingService] = {}
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -112,6 +114,7 @@ class IndexWatcher:
         self._thread = None
         self._pending.clear()
         self._commit_poll_at.clear()
+        self._probes.clear()
 
     def is_alive(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
@@ -120,7 +123,7 @@ class IndexWatcher:
         self, repo: EnrolledRepository, changed: Iterable[Path | str]
     ) -> None:
         try:
-            if not _repo_watch_enabled(repo, self._indexer_factory()):
+            if not _repo_watch_enabled(repo, self._probe(repo.id.value)):
                 return
             root = Path(repo.realpath).resolve()
             relatives: list[str] = []
@@ -222,7 +225,6 @@ class IndexWatcher:
             self.apply_changes(repo, held.paths)
 
     def _poll_commits(self, repos: Sequence[EnrolledRepository], now: float) -> None:
-        indexer = self._indexer_factory()
         for repo in repos:
             if repo.id.value in self._pending:
                 continue
@@ -234,7 +236,9 @@ class IndexWatcher:
             try:
                 root = Path(repo.realpath).resolve()
                 current = head_commit(root)
-                indexed_commit, indexed_dirty = indexer.indexed_revision(repo.id.value)
+                indexed_commit, indexed_dirty = self._probe(repo.id.value).indexed_revision(
+                    repo.id.value
+                )
                 current_dirty = list_dirty_paths(root)
                 if current == indexed_commit and set(current_dirty) == set(indexed_dirty):
                     continue
@@ -252,10 +256,21 @@ class IndexWatcher:
         for record in records:
             if record.status is not RepositoryStatus.ACTIVE:
                 continue
-            if not _repo_watch_enabled(record, self._indexer_factory()):
+            if not _repo_watch_enabled(record, self._probe(record.id.value)):
                 continue
             watched.append(record)
         return tuple(watched)
+
+    def _probe(self, repo_id: str) -> IndexingService:
+        held = self._probes.get(repo_id)
+        if held is not None:
+            return held
+        if self._meta_indexer is not None:
+            self._probes[repo_id] = self._meta_indexer
+            return self._meta_indexer
+        created = self._indexer_factory()
+        self._probes[repo_id] = created
+        return created
 
 
 def _repo_watch_enabled(repo: EnrolledRepository, indexer: IndexingService) -> bool:
