@@ -297,7 +297,6 @@ def create_app(
             logging.getLogger("kronos.engine").exception("memory embedding backfill failed")
 
     embedding_startup.append(_warm_embeddings)
-    _warm_embeddings()
 
     def _ops_flags() -> OpsSettings:
         conn = database.connect()

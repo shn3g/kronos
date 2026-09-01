@@ -76,3 +76,5 @@ def test_composition_and_app_resolve_the_embedding_role() -> None:
     assert "resolve_embedder" in composition
     assert "resolve_embedder" in app
     assert "backfill_memory_vectors" in app
+    assert "embedding_startup.append(_warm_embeddings)" in app
+    assert app.count("_warm_embeddings()") == 1

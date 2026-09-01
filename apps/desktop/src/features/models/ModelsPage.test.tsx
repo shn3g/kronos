@@ -179,4 +179,54 @@ describe("ModelsPage", () => {
     expect(await screen.findByText(/embedding backend/i)).toBeInTheDocument();
     expect(screen.getByText(/local onnx/i)).toBeInTheDocument();
   });
+
+  it("reloads embedding backend after saving assignments", async () => {
+    const user = userEvent.setup();
+    let assigned = false;
+    const snapshot = vi.fn(async () => ({
+      detected: [],
+      profiles: [
+        { id: "prof_local", displayName: "Local llama3", role: "coder", billed: false },
+        { id: "prof_embed", displayName: "Remote embed", role: "embedding", billed: false },
+      ],
+      assignments: {
+        planner: "prof_local",
+        coder: "prof_local",
+        reviewer: "prof_local",
+        embedding: "prof_embed",
+      },
+      embeddingBackend: assigned
+        ? {
+            kind: "openai_compatible" as const,
+            modelId: "nomic-embed-text",
+            displayName: "Remote embed",
+          }
+        : {
+            kind: "onnx" as const,
+            modelId: "all-MiniLM-L6-v2",
+            displayName: "Local ONNX",
+          },
+    }));
+    const assign = vi.fn(async (assignments: Record<ModelRole, string>) => {
+      assigned = true;
+      return {
+        planner: assignments.planner,
+        coder: assignments.coder,
+        reviewer: assignments.reviewer,
+        embedding: assignments.embedding,
+      };
+    });
+    render(
+      <ModelsPage
+        engineClient={engine("ready")}
+        modelsClient={modelsClient({ snapshot, assign })}
+      />,
+    );
+
+    expect(await screen.findByText(/local onnx/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /save assignments/i }));
+    expect(assign).toHaveBeenCalled();
+    expect(await screen.findByText(/openai-compatible/i)).toBeInTheDocument();
+    expect(snapshot.mock.calls.length).toBeGreaterThan(1);
+  });
 });

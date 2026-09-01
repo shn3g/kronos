@@ -106,3 +106,79 @@ def test_http_and_parse_failures_return_none_without_raising() -> None:
         transport=_Transport(error=OSError("offline")),
     )
     assert exploding.embed(["hello"], kind="document") is None
+
+
+def _embed_payload(payload: object) -> list[list[float]] | None:
+    adapter = OpenAICompatibleEmbeddingAdapter(
+        base_url="https://api.openai.com/v1",
+        model_id="text-embedding-3-small",
+        billed=False,
+        secret=None,
+        transport=_Transport(payload=payload),  # type: ignore[arg-type]
+    )
+    try:
+        result = adapter.embed(["alpha", "beta"], kind="document")
+    except Exception as exc:
+        raise AssertionError(f"embed raised {type(exc).__name__}: {exc}") from exc
+    if result is None:
+        return None
+    return [list(row) for row in result]
+
+
+def test_malformed_embedding_values_return_none_without_raising() -> None:
+    assert _embed_payload(["not", "a", "dict"]) is None
+    assert (
+        _embed_payload(
+            {
+                "data": [
+                    {"embedding": [1.0, float("nan")], "index": 0},
+                    {"embedding": [0.0, 1.0], "index": 1},
+                ]
+            }
+        )
+        is None
+    )
+    assert (
+        _embed_payload(
+            {
+                "data": [
+                    {"embedding": [1.0, float("inf")], "index": 0},
+                    {"embedding": [0.0, 1.0], "index": 1},
+                ]
+            }
+        )
+        is None
+    )
+    assert (
+        _embed_payload(
+            {
+                "data": [
+                    {"embedding": [1.0], "index": 0},
+                    {"embedding": [1.0, 2.0], "index": 1},
+                ]
+            }
+        )
+        is None
+    )
+    assert (
+        _embed_payload(
+            {
+                "data": [
+                    {"embedding": [1.0, 2.0], "index": 0},
+                    {"embedding": [3.0, 4.0], "index": 0},
+                ]
+            }
+        )
+        is None
+    )
+    assert (
+        _embed_payload(
+            {
+                "data": [
+                    {"embedding": [1.0, 2.0], "index": 0},
+                    {"embedding": [3.0, 4.0], "index": 5},
+                ]
+            }
+        )
+        is None
+    )

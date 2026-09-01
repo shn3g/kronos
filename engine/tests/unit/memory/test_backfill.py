@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import struct
+from collections.abc import Callable
 from pathlib import Path
 
 from kronos_engine.memory.procedural import backfill_memory_vectors, persist_record
@@ -80,3 +81,63 @@ def test_backfill_is_noop_without_embedder_and_skips_existing_vectors(tmp_path: 
         for row in conn.execute("SELECT record_id FROM memory_vectors")
     }
     assert ids == {"mem-existing", "mem-missing"}
+
+
+class _CappedEmbedder:
+    def __init__(self, *, fail_prefix: str | None = None, boom_first: bool = False) -> None:
+        self.sizes: list[int] = []
+        self.fail_prefix = fail_prefix
+        self.boom_first = boom_first
+
+    def available(self, kind: str) -> bool:
+        return kind == "document"
+
+    def embed(self, texts: list[str], *, kind: str) -> list[list[float]] | None:
+        _ = kind
+        payload = list(texts)
+        self.sizes.append(len(payload))
+        if self.boom_first and len(self.sizes) == 1:
+            raise RuntimeError("endpoint timeout")
+        if self.fail_prefix is not None and any(
+            text.startswith(self.fail_prefix) for text in payload
+        ):
+            return None
+        return [[1.0, 0.25] for _ in payload]
+
+
+def _insert_lessons(
+    conn: object, count: int, text_for: Callable[[int], str]
+) -> None:
+    for index in range(count):
+        persist_record(conn, _record(f"mem-{index:03d}", text_for(index)), embeddings=None)
+
+
+def test_backfill_batches_requests_and_continues_after_failed_batch(tmp_path: Path) -> None:
+    conn = Database(tmp_path / "kronos.sqlite3").connect()
+
+    def text_for(index: int) -> str:
+        if 64 <= index < 128:
+            return f"fail-{index}"
+        return f"ok-{index}"
+
+    _insert_lessons(conn, 130, text_for)
+    embedder = _CappedEmbedder(fail_prefix="fail-")
+    filled = backfill_memory_vectors(conn, embedder)
+    assert embedder.sizes == [64, 64, 2]
+    assert filled == 66
+    stored = conn.execute("SELECT COUNT(*) AS n FROM memory_vectors").fetchone()["n"]
+    assert stored == 66
+
+
+def test_backfill_survives_embed_exception_in_a_batch(tmp_path: Path) -> None:
+    conn = Database(tmp_path / "kronos.sqlite3").connect()
+    _insert_lessons(conn, 65, lambda index: f"ok-{index}")
+    embedder = _CappedEmbedder(boom_first=True)
+    try:
+        filled = backfill_memory_vectors(conn, embedder)
+    except Exception as exc:
+        raise AssertionError(f"backfill raised {type(exc).__name__}: {exc}") from exc
+    assert embedder.sizes == [64, 1]
+    assert filled == 1
+    stored = conn.execute("SELECT COUNT(*) AS n FROM memory_vectors").fetchone()["n"]
+    assert stored == 1

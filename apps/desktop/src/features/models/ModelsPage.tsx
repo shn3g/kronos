@@ -114,15 +114,14 @@ export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
     setError(null);
     setSaved(false);
     try {
-      const next = confirmShared
-        ? await client.assign(assignments, { confirmSharedRoles: true })
-        : await client.assign(assignments);
-      setAssignments({
-        planner: next.planner ?? "",
-        coder: next.coder ?? "",
-        reviewer: next.reviewer ?? "",
-        embedding: next.embedding ?? "",
-      });
+      if (confirmShared) {
+        await client.assign(assignments, { confirmSharedRoles: true });
+      } else {
+        await client.assign(assignments);
+      }
+      const refreshed = await client.snapshot();
+      setSnapshot(refreshed);
+      setAssignments(assignmentsFromSnapshot(refreshed));
       setSaved(true);
     } catch {
       setError("Could not save model assignments.");

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from math import isfinite
 from urllib.parse import urlparse
 
 from kronos_engine.adapters.models.openai_compatible import HttpTransport, UrllibTransport
@@ -50,35 +51,51 @@ class OpenAICompatibleEmbeddingAdapter:
             return None
         if status != 200:
             return None
-        return _parse_embeddings(payload, expected=len(texts))
+        try:
+            return _parse_embeddings(payload, expected=len(texts))
+        except Exception:
+            return None
 
 
 def _is_http_url(url: str) -> bool:
     return urlparse(url).scheme.lower() in {"http", "https"}
 
 
-def _parse_embeddings(payload: dict[str, object], *, expected: int) -> list[list[float]] | None:
-    data = payload.get("data")
-    if not isinstance(data, list):
-        return None
-    rows: list[tuple[int, list[float]]] = []
-    for position, item in enumerate(data):
-        if not isinstance(item, dict):
+def _parse_embeddings(payload: object, *, expected: int) -> list[list[float]] | None:
+    try:
+        if not isinstance(payload, dict):
             return None
-        raw_index = item.get("index", position)
-        if not isinstance(raw_index, int) or isinstance(raw_index, bool):
+        data = payload.get("data")
+        if not isinstance(data, list):
             return None
-        embedding = item.get("embedding")
-        if not isinstance(embedding, list) or not embedding:
-            return None
-        values: list[float] = []
-        for value in embedding:
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
+        rows: list[tuple[int, list[float]]] = []
+        for position, item in enumerate(data):
+            if not isinstance(item, dict):
                 return None
-            values.append(float(value))
-        rows.append((raw_index, values))
-    rows.sort(key=lambda pair: pair[0])
-    vectors = [vector for _index, vector in rows]
-    if len(vectors) != expected:
+            raw_index = item.get("index", position)
+            if not isinstance(raw_index, int) or isinstance(raw_index, bool) or raw_index < 0:
+                return None
+            embedding = item.get("embedding")
+            if not isinstance(embedding, list) or not embedding:
+                return None
+            values: list[float] = []
+            for value in embedding:
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    return None
+                number = float(value)
+                if not isfinite(number):
+                    return None
+                values.append(number)
+            rows.append((raw_index, values))
+        rows.sort(key=lambda pair: pair[0])
+        if [index for index, _vector in rows] != list(range(expected)):
+            return None
+        vectors = [vector for _index, vector in rows]
+        if expected == 0:
+            return []
+        width = len(vectors[0])
+        if width == 0 or any(len(vector) != width for vector in vectors):
+            return None
+        return vectors
+    except Exception:
         return None
-    return vectors

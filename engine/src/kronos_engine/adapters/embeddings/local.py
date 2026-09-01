@@ -18,6 +18,7 @@ DOCUMENT_FILENAME = "all-MiniLM-L6-v2.onnx"
 CODE_FILENAME = "code.onnx"
 TOKENIZER_FILENAME = "tokenizer.json"
 DEFAULT_SEQUENCE_LENGTH = 256
+_KNOWN_ONNX_INPUTS = frozenset({"input_ids", "attention_mask", "token_type_ids", "position_ids"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,11 +54,20 @@ class LocalEmbeddingAdapter:
         )
         self._sessions: dict[str, object] = {}
         self._tokenizer: object | None = None
+        self._tokenize_failed = False
 
     def available(self, kind: str) -> bool:
-        return self._load_session(kind) is not None and self._load_tokenizer() is not None
+        if self._tokenize_failed:
+            return False
+        session = self._load_session(kind)
+        tokenizer = self._load_tokenizer()
+        if session is None or tokenizer is None:
+            return False
+        return _onnx_inputs_supported(session)
 
     def embed(self, texts: Sequence[str], *, kind: str) -> Sequence[Sequence[float]] | None:
+        if self._tokenize_failed:
+            return None
         session = self._load_session(kind)
         tokenizer = self._load_tokenizer()
         if session is None or tokenizer is None:
@@ -66,8 +76,11 @@ class LocalEmbeddingAdapter:
         get_inputs = getattr(session, "get_inputs", None)
         if run is None or get_inputs is None:
             return None
-        inputs = list(get_inputs())
-        if not inputs:
+        try:
+            inputs = list(get_inputs())
+        except Exception:
+            return None
+        if not _onnx_inputs_supported(session):
             return None
         try:
             numpy = cast(Any, importlib.import_module("numpy"))
@@ -77,18 +90,13 @@ class LocalEmbeddingAdapter:
         try:
             input_ids, attention_mask = _tokenize(tokenizer, texts, seq_len)
         except Exception:
+            self._tokenize_failed = True
             return None
         ids = numpy.asarray(input_ids, dtype=numpy.int64)
         mask = numpy.asarray(attention_mask, dtype=numpy.int64)
-        feeds: dict[str, Any] = {}
-        for spec in inputs:
-            name = str(getattr(spec, "name", ""))
-            if name == "attention_mask":
-                feeds[name] = mask
-            elif name == "token_type_ids":
-                feeds[name] = numpy.zeros_like(ids)
-            else:
-                feeds[name] = ids
+        feeds = _onnx_feeds(inputs, ids, mask, numpy)
+        if feeds is None:
+            return None
         try:
             outputs = run(None, feeds)
         except Exception:
@@ -111,6 +119,8 @@ class LocalEmbeddingAdapter:
         return None
 
     def _load_tokenizer(self) -> object | None:
+        if self._tokenize_failed:
+            return None
         if self._tokenizer is not None:
             return self._tokenizer
         path = self._models_dir / TOKENIZER_FILENAME
@@ -120,6 +130,11 @@ class LocalEmbeddingAdapter:
             tokenizers = cast(Any, importlib.import_module("tokenizers"))
             loaded: object = tokenizers.Tokenizer.from_file(str(path.resolve()))
         except Exception:
+            return None
+        try:
+            _tokenize(loaded, ["probe"], DEFAULT_SEQUENCE_LENGTH)
+        except Exception:
+            self._tokenize_failed = True
             return None
         self._tokenizer = loaded
         return loaded
@@ -156,6 +171,47 @@ class LocalEmbeddingAdapter:
 
 def _is_minilm(spec: EmbeddingModelConfig) -> bool:
     return spec.model_id == DOCUMENT_MODEL_ID or spec.filename == DOCUMENT_FILENAME
+
+
+def _onnx_input_names(session: object) -> list[str] | None:
+    get_inputs = getattr(session, "get_inputs", None)
+    if get_inputs is None:
+        return None
+    try:
+        specs = list(get_inputs())
+    except Exception:
+        return None
+    return [str(getattr(spec, "name", "")) for spec in specs]
+
+
+def _onnx_inputs_supported(session: object) -> bool:
+    names = _onnx_input_names(session)
+    if not names:
+        return False
+    return all(name in _KNOWN_ONNX_INPUTS for name in names) and "input_ids" in names
+
+
+def _onnx_feeds(inputs: Sequence[Any], ids: Any, mask: Any, numpy: Any) -> dict[str, Any] | None:
+    feeds: dict[str, Any] = {}
+    batch, seq_len = int(ids.shape[0]), int(ids.shape[1])
+    positions = numpy.broadcast_to(
+        numpy.arange(seq_len, dtype=numpy.int64),
+        (batch, seq_len),
+    ).copy()
+    token_types = numpy.zeros_like(ids)
+    for spec in inputs:
+        name = str(getattr(spec, "name", ""))
+        if name == "input_ids":
+            feeds[name] = ids
+        elif name == "attention_mask":
+            feeds[name] = mask
+        elif name == "token_type_ids":
+            feeds[name] = token_types
+        elif name == "position_ids":
+            feeds[name] = positions
+        else:
+            return None
+    return feeds
 
 
 def _sequence_length(inputs: Sequence[Any]) -> int:
