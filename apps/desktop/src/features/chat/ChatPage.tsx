@@ -36,9 +36,16 @@ export function ChatPage({
   const [error, setError] = useState<string | null>(null);
   const [mentionPaths, setMentionPaths] = useState<string[]>([]);
   const [mentionHighlight, setMentionHighlight] = useState(0);
+  const [mentionHint, setMentionHint] = useState<"building" | "empty" | null>(null);
   const inflightSessionId = useRef<string | null>(null);
   const threadRef = useRef<HTMLOListElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+
+  function closeMentionPicker(): void {
+    setMentionPaths([]);
+    setMentionHighlight(0);
+    setMentionHint(null);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -106,29 +113,38 @@ export function ChatPage({
 
   useEffect(() => {
     if (!indexClient || !repositoryId) {
-      setMentionPaths([]);
-      setMentionHighlight(0);
+      closeMentionPicker();
       return;
     }
     const cursor = composerRef.current?.selectionStart ?? draft.length;
     const mention = mentionQueryAtCursor(draft, cursor);
     if (!mention || mention.query === "") {
-      setMentionPaths([]);
-      setMentionHighlight(0);
+      closeMentionPicker();
       return;
     }
     let cancelled = false;
-    void indexClient.search(repositoryId, mention.query).then(
-      (hits) => {
-        if (!cancelled) {
-          setMentionPaths(uniqueMentionPaths(hits).slice(0, 8));
-          setMentionHighlight(0);
+    void Promise.all([
+      indexClient.status(repositoryId),
+      indexClient.search(repositoryId, mention.query),
+    ]).then(
+      ([status, hits]) => {
+        if (cancelled) {
+          return;
+        }
+        const paths = uniqueMentionPaths(hits).slice(0, 8);
+        setMentionPaths(paths);
+        setMentionHighlight(0);
+        if (paths.length > 0) {
+          setMentionHint(null);
+        } else if (!status.ready) {
+          setMentionHint("building");
+        } else {
+          setMentionHint("empty");
         }
       },
       () => {
         if (!cancelled) {
-          setMentionPaths([]);
-          setMentionHighlight(0);
+          closeMentionPicker();
         }
       },
     );
@@ -154,8 +170,7 @@ export function ChatPage({
     setMessages([]);
     setDraft("");
     setError(null);
-    setMentionPaths([]);
-    setMentionHighlight(0);
+    closeMentionPicker();
   }
 
   async function onSend() {
@@ -173,8 +188,7 @@ export function ChatPage({
     setBusy(true);
     setError(null);
     setDraft("");
-    setMentionPaths([]);
-    setMentionHighlight(0);
+    closeMentionPicker();
     setMessages((current) => [...current, pending]);
     if (activeId) {
       inflightSessionId.current = activeId;
@@ -204,8 +218,7 @@ export function ChatPage({
     }
     const next = insertMention(draft, mention.start, mention.query, path);
     setDraft(next);
-    setMentionPaths([]);
-    setMentionHighlight(0);
+    closeMentionPicker();
     requestAnimationFrame(() => {
       const node = composerRef.current;
       if (!node) {
@@ -304,6 +317,13 @@ export function ChatPage({
         ) : null}
         {error ? <p className="wizard__error">{error}</p> : null}
         <div className="chat-composer-wrap">
+          {mentionHint ? (
+            <p className="chat-mentions chat-mentions--hint" role="status">
+              {mentionHint === "building"
+                ? "The search index is still building."
+                : "No matching files."}
+            </p>
+          ) : null}
           {mentionPaths.length > 0 ? (
             <ul className="chat-mentions" id="chat-mentions" role="listbox" aria-label="Workspace files">
               {mentionPaths.map((path, index) => (
@@ -348,10 +368,9 @@ export function ChatPage({
                 node.style.height = `${Math.min(200, Math.max(44, node.scrollHeight))}px`;
               }}
               onKeyDown={(event) => {
-                if (event.key === "Escape" && mentionPaths.length > 0) {
+                if (event.key === "Escape" && (mentionPaths.length > 0 || mentionHint)) {
                   event.preventDefault();
-                  setMentionPaths([]);
-                  setMentionHighlight(0);
+                  closeMentionPicker();
                   return;
                 }
                 if (event.key === "ArrowDown" && mentionPaths.length > 0) {

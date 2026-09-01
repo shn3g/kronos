@@ -663,6 +663,12 @@
   background: var(--void-raised);
 }
 
+.chat-mentions--hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .chat-mentions__item {
   display: block;
   width: 100%;

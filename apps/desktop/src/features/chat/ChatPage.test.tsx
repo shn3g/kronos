@@ -437,4 +437,50 @@ describe("ChatPage", () => {
     await user.keyboard("{ArrowDown}{Enter}");
     expect(box).toHaveValue("Fix @src/main.tsx ");
   });
+
+  it("explains when the workspace index is still building during an @ mention", async () => {
+    const user = userEvent.setup();
+    const search = vi.fn(async () => []);
+    render(
+      <ChatPage
+        chatClient={chatClient()}
+        repositoryId="repo_alpha"
+        historyOpen={false}
+        indexClient={{
+          ...indexClient(search),
+          status: async () => ({
+            repositoryId: "repo_alpha",
+            commit: null,
+            chunkCount: 0,
+            denseAvailable: false,
+            indexPath: "/tmp/index",
+            ready: false,
+          }),
+        }}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "Look at @app");
+    expect(await screen.findByText("The search index is still building.")).toBeInTheDocument();
+    expect(search).toHaveBeenCalled();
+  });
+
+  it("says when no indexed files match an @ mention", async () => {
+    const user = userEvent.setup();
+    render(
+      <ChatPage
+        chatClient={chatClient()}
+        repositoryId="repo_alpha"
+        historyOpen={false}
+        indexClient={indexClient(async () => [])}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "Look at @zzzz");
+    expect(await screen.findByText("No matching files.")).toBeInTheDocument();
+  });
 });
