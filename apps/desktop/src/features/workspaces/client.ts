@@ -51,6 +51,13 @@ export interface WorkspaceFileContents {
   binary: boolean;
 }
 
+export interface WorkspaceTerminalRun {
+  command: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  output: string;
+}
+
 export interface RepositoriesClient {
   list(): Promise<EnrolledRepository[]>;
   inspect(path: string): Promise<InspectResult>;
@@ -63,6 +70,7 @@ export interface RepositoriesClient {
   commitFiles(id: string, message: string, paths: string[]): Promise<void>;
   listWorkspaceFiles(id: string): Promise<WorkspaceListedFile[]>;
   readWorkspaceFile(id: string, path: string): Promise<WorkspaceFileContents>;
+  runWorkspaceCommand(id: string, command: string): Promise<WorkspaceTerminalRun>;
 }
 
 export async function pickRepositoryFolder(): Promise<string | null> {
@@ -136,6 +144,17 @@ export function createProductionRepositoriesClient(
         path: stringField(payload, "path") || path,
         content: stringField(payload, "content"),
         binary: payload.binary === true,
+      };
+    },
+    async runWorkspaceCommand(id: string, command: string) {
+      const payload = await jsonRequest(request, "POST", `/repositories/${id}/terminal/runs`, {
+        command,
+      });
+      return {
+        command: stringField(payload, "command") || command,
+        exitCode: typeof payload.exit_code === "number" ? payload.exit_code : null,
+        timedOut: payload.timed_out === true,
+        output: stringField(payload, "output"),
       };
     },
   };

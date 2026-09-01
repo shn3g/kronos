@@ -8,11 +8,13 @@ interface MenuBarProps {
   historyOpen: boolean;
   activityCollapsed: boolean;
   inspectorCollapsed: boolean;
+  terminalOpen: boolean;
   onNewChat: () => void;
   onOpenWorkspace: () => void;
   onToggleHistory: () => void;
   onToggleActivityBar: () => void;
   onToggleInspector: () => void;
+  onToggleTerminal: () => void;
   onOpenSettings: () => void;
   onOpenModels: () => void;
 }
@@ -21,11 +23,13 @@ export function MenuBar({
   historyOpen,
   activityCollapsed,
   inspectorCollapsed,
+  terminalOpen,
   onNewChat,
   onOpenWorkspace,
   onToggleHistory,
   onToggleActivityBar,
   onToggleInspector,
+  onToggleTerminal,
   onOpenSettings,
   onOpenModels,
 }: MenuBarProps) {
@@ -150,6 +154,13 @@ export function MenuBar({
             onToggleInspector();
           }}
         />
+        <MenuItem
+          label={terminalOpen ? "Hide terminal" : "Terminal"}
+          onSelect={() => {
+            setOpen(null);
+            onToggleTerminal();
+          }}
+        />
       </Menu>
       <Menu
         id={helpId}
@@ -162,10 +173,10 @@ export function MenuBar({
         <p className="menu-help">
           Kronos is a locally installed desktop app for coding agents on your git folders. Ctrl+N
           or Cmd+N starts a new chat. Ctrl+B or Cmd+B hides the activity bar. Ctrl+Shift+J or
-          Cmd+Shift+J hides Changes. Escape stops the current turn. Revert in Changes restores
-          the last chat write for that file, or the last committed version if chat did not write
-          it. Commit records a local git commit. This turn lists files chat wrote. All lists every
-          dirty file. Kronos does not push.
+          Cmd+Shift+J hides Changes. Ctrl+` or Cmd+` shows Terminal. Escape stops the current turn.
+          Revert in Changes restores the last chat write for that file, or the last committed
+          version if chat did not write it. Commit records a local git commit. This turn lists
+          files chat wrote. All lists every dirty file. Kronos does not push.
         </p>
       </Menu>
     </div>

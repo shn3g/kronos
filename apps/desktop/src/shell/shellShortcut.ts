@@ -4,6 +4,7 @@ export type ShellShortcut =
   | "new-chat"
   | "toggle-activity-bar"
   | "toggle-inspector"
+  | "toggle-terminal"
   | "open-settings";
 
 interface ShortcutKeys {
@@ -28,6 +29,9 @@ export function shellShortcutFromKeyboard(event: ShortcutKeys): ShellShortcut | 
   }
   if (key === "j" && event.shiftKey) {
     return "toggle-inspector";
+  }
+  if (key === "`" && !event.shiftKey) {
+    return "toggle-terminal";
   }
   if (key === "," && !event.shiftKey) {
     return "open-settings";

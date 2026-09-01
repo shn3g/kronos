@@ -103,6 +103,7 @@ function quietRepos(): RepositoriesClient {
     commitFiles: unused,
     listWorkspaceFiles: async () => [],
     readWorkspaceFile: unused,
+    runWorkspaceCommand: unused,
   };
 }
 
@@ -381,6 +382,12 @@ describe("App shell", () => {
       "data-inspector-collapsed",
       "true",
     );
+
+    expect(screen.queryByRole("region", { name: /terminal/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: /^View$/ }));
+    await user.click(screen.getByRole("menuitem", { name: /^terminal$/i }));
+    expect(await screen.findByRole("region", { name: /terminal/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Terminal" })).toBeInTheDocument();
   });
 
   it("puts Models under File and Cut Copy Paste under Edit", async () => {
@@ -425,6 +432,8 @@ describe("App shell", () => {
     await screen.findByRole("textbox", { name: /ask kronos/i });
     await user.keyboard("{Control>}{Shift>}j{/Shift}{/Control}");
     expect(screen.queryByRole("complementary", { name: /session details/i })).not.toBeInTheDocument();
+    await user.keyboard("{Control>}`{/Control}");
+    expect(await screen.findByRole("region", { name: /terminal/i })).toBeInTheDocument();
     await user.keyboard("{Control>},{/Control}");
     expect(await screen.findByRole("heading", { name: /^settings$/i })).toBeInTheDocument();
   });

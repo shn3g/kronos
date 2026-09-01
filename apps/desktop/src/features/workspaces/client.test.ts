@@ -149,4 +149,28 @@ describe("createProductionRepositoriesClient", () => {
       binary: false,
     });
   });
+
+  it("runs a workspace command through the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path, body) => {
+      expect(method).toBe("POST");
+      expect(path).toBe("/repositories/repo_alpha/terminal/runs");
+      expect(body).toEqual({ command: "python probe.py" });
+      return {
+        status: 200,
+        body: JSON.stringify({
+          command: "python probe.py",
+          exit_code: 0,
+          timed_out: false,
+          output: "from-workspace\n",
+        }),
+      };
+    });
+
+    await expect(client.runWorkspaceCommand("repo_alpha", "python probe.py")).resolves.toEqual({
+      command: "python probe.py",
+      exitCode: 0,
+      timedOut: false,
+      output: "from-workspace\n",
+    });
+  });
 });

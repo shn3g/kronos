@@ -13,6 +13,7 @@ describe("shellShortcutFromKeyboard", () => {
     expect(
       shellShortcutFromKeyboard({ ...base, key: "j", shiftKey: true }),
     ).toBe("toggle-inspector");
+    expect(shellShortcutFromKeyboard({ ...base, key: "`" })).toBe("toggle-terminal");
   });
 
   it("ignores keys without a modifier and ignores Alt combinations", () => {

@@ -20,6 +20,7 @@ import {
 } from "../features/models/client";
 import { plannerDisplayName } from "../features/models/plannerLabel";
 import { FilesPage } from "../features/files/FilesPage";
+import { TerminalPage } from "../features/terminal/TerminalPage";
 import { createProductionIndexClient, type IndexClient } from "../features/index/client";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import {
@@ -108,6 +109,7 @@ export function App({
   const [inspectorCollapsed, setInspectorCollapsed] = useState(() =>
     readFlag(INSPECTOR_STORAGE_KEY),
   );
+  const [terminalOpen, setTerminalOpen] = useState(false);
   const [revertError, setRevertError] = useState<string | null>(null);
   const [revertingPath, setRevertingPath] = useState<string | null>(null);
   const revertingRef = useRef(false);
@@ -192,6 +194,10 @@ export function App({
     });
   }
 
+  function toggleTerminal(): void {
+    setTerminalOpen((open) => !open);
+  }
+
   async function revertChange(path: string): Promise<void> {
     if (!session.workspaceId || revertingRef.current) {
       return;
@@ -250,6 +256,10 @@ export function App({
       }
       if (action === "toggle-inspector") {
         toggleInspector();
+        return;
+      }
+      if (action === "toggle-terminal") {
+        toggleTerminal();
         return;
       }
       setActivity("settings");
@@ -313,6 +323,7 @@ export function App({
         historyOpen={historyOpen}
         activityCollapsed={activityCollapsed}
         inspectorCollapsed={inspectorCollapsed}
+        terminalOpen={terminalOpen}
         onNewChat={startNewChat}
         onOpenWorkspace={() => {
           setActivity("workspaces");
@@ -322,6 +333,7 @@ export function App({
         }}
         onToggleActivityBar={toggleActivityBar}
         onToggleInspector={toggleInspector}
+        onToggleTerminal={toggleTerminal}
         onOpenSettings={() => {
           setActivity("settings");
         }}
@@ -419,6 +431,16 @@ export function App({
               />
             )}
           </div>
+          <section className="app-terminal" hidden={!terminalOpen} aria-label="Terminal">
+            <TerminalPage
+              engineClient={engine}
+              repositoryId={session.workspaceId}
+              repositoriesClient={repos}
+              onOpenWorkspace={() => {
+                setActivity("workspaces");
+              }}
+            />
+          </section>
         </div>
       </div>
     </div>
