@@ -12,6 +12,7 @@ from httpx import ASGITransport, AsyncClient
 from tests.support.git_fixtures import init_git_repo
 from tests.support.secrets import InMemorySecretStore
 
+from kronos_engine.adapters.secrets.os_store import SecretStoreError
 from kronos_engine.api.app import create_app
 from kronos_engine.config.paths import resolve_paths
 from kronos_engine.config.settings import Settings
@@ -171,6 +172,93 @@ async def test_answer_without_orchestrator_is_conflict(
     assert response.status_code in {400, 409}
     detail = response.json()["detail"]
     assert "Models page" in str(detail)
+
+
+@pytest.mark.asyncio
+async def test_billed_orchestrator_without_secret_is_conflict(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    http, headers, tmp_path = client
+    root = init_git_repo(tmp_path / "alpha", files={"README.md": "alpha\n"})
+    repo_id = await _enrol(http, headers, root)
+    created = await http.post(f"/repositories/{repo_id}/conversations", json={}, headers=headers)
+    cid = created.json()["id"]
+    provider = await http.post(
+        "/models/providers",
+        headers=headers,
+        json={
+            "kind": "openai_compatible",
+            "display_name": "OpenAI",
+            "base_url": "https://api.openai.com/v1",
+            "billed": True,
+        },
+    )
+    assert provider.status_code == 200
+    profiles = {item["role"]: item["id"] for item in provider.json()["profiles"]}
+    assigned = await http.put("/models/assignments", headers=headers, json=profiles)
+    assert assigned.status_code == 200
+    response = await http.post(
+        f"/conversations/{cid}/messages",
+        json={"content": "What is add?"},
+        headers=headers,
+    )
+    assert response.status_code == 409
+    assert "Models page" in str(response.json()["detail"])
+
+
+@pytest.mark.asyncio
+async def test_secret_store_error_on_chat_is_conflict(tmp_path: Path) -> None:
+    class _BoomStore:
+        def __init__(self) -> None:
+            self.values: dict[str, str] = {}
+
+        def put(self, name: str, value: str) -> None:
+            self.values[name] = value
+
+        def get(self, name: str) -> str | None:
+            raise SecretStoreError("OS credential storage could not read the secret")
+
+        def delete(self, name: str) -> None:
+            self.values.pop(name, None)
+
+    database = Database(tmp_path / "data" / "kronos.sqlite3")
+    app = create_app(_settings(tmp_path), database, secret_store=_BoomStore())
+    http = AsyncClient(
+        transport=ASGITransport(app=app, client=("127.0.0.1", 50000)),
+        base_url="http://127.0.0.1",
+    )
+    headers = {"Authorization": "Bearer install-token"}
+    try:
+        root = init_git_repo(tmp_path / "alpha", files={"README.md": "alpha\n"})
+        repo_id = await _enrol(http, headers, root)
+        created = await http.post(
+            f"/repositories/{repo_id}/conversations", json={}, headers=headers
+        )
+        cid = created.json()["id"]
+        provider = await http.post(
+            "/models/providers",
+            headers=headers,
+            json={
+                "kind": "openai_compatible",
+                "display_name": "OpenAI",
+                "base_url": "https://api.openai.com/v1",
+                "billed": True,
+                "api_key": "sk-paid",
+            },
+        )
+        assert provider.status_code == 200
+        profiles = {item["role"]: item["id"] for item in provider.json()["profiles"]}
+        assigned = await http.put("/models/assignments", headers=headers, json=profiles)
+        assert assigned.status_code == 200
+        response = await http.post(
+            f"/conversations/{cid}/messages",
+            json={"content": "What is add?"},
+            headers=headers,
+        )
+        assert response.status_code == 409
+        assert "Models page" in str(response.json()["detail"])
+    finally:
+        await http.aclose()
 
 
 async def _read_sse(response: object) -> dict[str, object]:

@@ -10,12 +10,13 @@ from dataclasses import dataclass, replace
 from typing import Protocol
 
 from kronos_engine.adapters.models.openai_compatible import HttpTransport, OpenAICompatibleProvider
+from kronos_engine.adapters.secrets.os_store import SecretStoreError
 from kronos_engine.application.goals import GoalService
 from kronos_engine.application.planning import PlanningService
 from kronos_engine.application.repositories import RepositoryService
 from kronos_engine.domain.entities import RepositoryId
 from kronos_engine.domain.goals import GoalSource, GoalSpec
-from kronos_engine.domain.models import ModelProfile
+from kronos_engine.domain.models import CostCeilingExceeded, ModelProfile, assert_cost_allowed
 from kronos_engine.indexing.context import ContextPack, assemble_context, estimate_tokens
 from kronos_engine.memory.procedural import retrieve_records
 from kronos_engine.memory.records import MemoryRecord
@@ -150,10 +151,11 @@ class ChatService:
 
     def stream_message(self, conversation_id: str, content: str) -> Iterator[str | ChatTurn]:
         conversation = self._store.get(conversation_id)
+        self._sync_progress(conversation_id)
         history = [
             item
             for item in self._store.list_messages(conversation_id)
-            if item.role in {"user", "assistant"}
+            if item.role in {"user", "assistant", "system"}
         ]
         self._store.add_message(conversation_id, role="user", content=content)
         slash_body = _slash_goal_body(content)
@@ -178,36 +180,33 @@ class ChatService:
             prompt=content,
             messages=_completion_messages(history, content, packed),
         )
-        pieces: list[str] = []
         usage: int | None = None
         if self._complete is not None:
             result = self._complete(request, secret)
             usage = result.usage.tokens
-            if result.text:
-                pieces.append(result.text)
-                yield result.text
+            raw = result.text
         else:
             adapter = OpenAICompatibleProvider(
                 base_url=provider.base_url or "",
                 billed=provider.billed,
                 transport=self._transport,
             )
-            for token in adapter.stream(request, secret):
-                pieces.append(token)
-                yield token
-        raw = "".join(pieces)
+            pieces = list(adapter.stream(request, secret))
+            raw = "".join(pieces)
         envelope = _parse_envelope(raw)
         if envelope is not None and envelope.get("intent") == "goal":
             title = _string_field(envelope, "title") or _title_and_criteria(content)[0]
             criteria = _string_field(envelope, "success_criteria") or content
             turn = self._create_goal_turn(conversation, title, criteria)
             turn = replace(turn, model=profile.model_id, token_count=usage)
+            if turn.content:
+                yield turn.content
             self._persist_assistant(conversation_id, turn)
             yield turn
             return
         answer = raw
         if envelope is not None and envelope.get("intent") == "answer":
-            extracted = _string_field(envelope, "content")
+            extracted = _string_field(envelope, "text") or _string_field(envelope, "content")
             if extracted:
                 answer = extracted
         citations = tuple(
@@ -222,6 +221,8 @@ class ChatService:
             model=profile.model_id,
             token_count=usage,
         )
+        if answer:
+            yield answer
         self._persist_assistant(conversation_id, turn)
         yield turn
 
@@ -304,10 +305,18 @@ class ChatService:
         provider = providers.get(profile.provider_id)
         if provider is None or not provider.base_url:
             raise OrchestratorNotConfigured()
-        raw = self._secrets.get(provider.secret_ref)
+        try:
+            raw = self._secrets.get(provider.secret_ref)
+        except SecretStoreError as error:
+            raise OrchestratorNotConfigured() from error
         if not raw and provider.billed:
             raise OrchestratorNotConfigured()
         secret = ScopedSecret(value=raw, ttl_seconds=_SECRET_TTL_SECONDS) if raw else None
+        billed = provider.billed or profile.billed
+        try:
+            assert_cost_allowed(profile.limits, estimated_cost=0.0, billed=billed)
+        except CostCeilingExceeded as error:
+            raise OrchestratorNotConfigured() from error
         if cap_tokens:
             capped = min(ANSWER_TOKEN_CAP, profile.limits.max_tokens)
             profile = replace(profile, limits=replace(profile.limits, max_tokens=capped))

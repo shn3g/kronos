@@ -125,7 +125,7 @@ from kronos_engine.domain.goals import (
     GoalValidationError,
     InvalidTransition,
 )
-from kronos_engine.domain.models import ModelProfile, ResourceLimits
+from kronos_engine.domain.models import CostCeilingExceeded, ModelProfile, ResourceLimits
 from kronos_engine.domain.policy import PolicyError, policy_to_dict
 from kronos_engine.domain.tasks import SchemaError, WipExceeded
 from kronos_engine.domain.version import client_is_compatible
@@ -907,13 +907,16 @@ def create_app(
         body: ChatMessageRequest,
         _: None = Depends(require_auth),
     ) -> StreamingResponse:
-        with chat_service() as service:
-            try:
-                service.prepare_reply(conversation_id, body.content)
-            except LookupError as error:
-                raise HTTPException(status_code=404, detail="not found") from error
-            except OrchestratorNotConfigured as error:
-                raise HTTPException(status_code=409, detail=str(error)) from error
+        try:
+            with chat_service() as service:
+                try:
+                    service.prepare_reply(conversation_id, body.content)
+                except LookupError as error:
+                    raise HTTPException(status_code=404, detail="not found") from error
+        except (OrchestratorNotConfigured, SecretStoreError, CostCeilingExceeded) as error:
+            raise HTTPException(
+                status_code=409, detail=_orchestrator_conflict_detail(error)
+            ) from error
 
         def generate() -> Iterator[str]:
             with chat_service() as service:
@@ -1767,6 +1770,13 @@ def _goal_model(goal: GoalRecord) -> GoalModel:
         schedule=goal.schedule,
         max_attempts=goal.max_attempts,
     )
+
+
+def _orchestrator_conflict_detail(error: BaseException) -> str:
+    text = str(error)
+    if "Models page" in text:
+        return text
+    return "No orchestrator model is configured. Assign a model on the Models page."
 
 
 def _conversation_model(record: ConversationRecord) -> ConversationModel:
