@@ -94,13 +94,17 @@ export function FilesPage({
   const [goToLineOpen, setGoToLineOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [replaceText, setReplaceText] = useState("");
+  const [matchCase, setMatchCase] = useState(false);
   const [goToLineQuery, setGoToLineQuery] = useState("");
   const [goToLineStatus, setGoToLineStatus] = useState("");
   const [findIndex, setFindIndex] = useState(0);
   dirtyRef.current = dirty;
   findOpenRef.current = findOpen;
   goToLineOpenRef.current = goToLineOpen;
-  const findMatches = useMemo(() => findInFileText(draft ?? "", findQuery), [draft, findQuery]);
+  const findMatches = useMemo(
+    () => findInFileText(draft ?? "", findQuery, { caseSensitive: matchCase }),
+    [draft, findQuery, matchCase],
+  );
   const activeFind =
     findMatches.length === 0 ? 0 : Math.min(findIndex, findMatches.length - 1);
 
@@ -141,6 +145,7 @@ export function FilesPage({
     setGoToLineOpen(false);
     setFindQuery("");
     setReplaceText("");
+    setMatchCase(false);
     setGoToLineQuery("");
     setGoToLineStatus("");
     setFindIndex(0);
@@ -486,7 +491,7 @@ export function FilesPage({
     if (draft === null || !canEdit) {
       return;
     }
-    const next = replaceAllInFileText(draft, findQuery, replaceText);
+    const next = replaceAllInFileText(draft, findQuery, replaceText, { caseSensitive: matchCase });
     setDraft(next.content);
     setFindIndex(0);
   }
@@ -666,6 +671,18 @@ export function FilesPage({
                     }
                   }}
                 />
+              </label>
+              <label className="files-page__check" htmlFor="files-match-case">
+                <input
+                  id="files-match-case"
+                  type="checkbox"
+                  checked={matchCase}
+                  onChange={(event) => {
+                    setMatchCase(event.target.checked);
+                    setFindIndex(0);
+                  }}
+                />
+                Match case
               </label>
               {replaceOpen ? (
                 <label className="files-page__filter" htmlFor="files-replace">

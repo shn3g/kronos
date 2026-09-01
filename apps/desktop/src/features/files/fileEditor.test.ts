@@ -62,6 +62,12 @@ describe("findInFileText", () => {
   it("returns nothing when the query is not in the file", () => {
     expect(findInFileText("print(1)\n", "zzz")).toEqual([]);
   });
+
+  it("can require the same letter case", () => {
+    expect(findInFileText("Alpha\nalpha\n", "alpha", { caseSensitive: true })).toEqual([
+      { start: 6, end: 11 },
+    ]);
+  });
 });
 
 describe("nextFileFindIndex", () => {
@@ -111,6 +117,13 @@ describe("replaceAllInFileText", () => {
   it("does nothing when the query is empty or nothing matches", () => {
     expect(replaceAllInFileText("alpha", "  ", "x")).toEqual({ content: "alpha", count: 0 });
     expect(replaceAllInFileText("alpha", "zzz", "x")).toEqual({ content: "alpha", count: 0 });
+  });
+
+  it("can replace only the same letter case", () => {
+    expect(replaceAllInFileText("Alpha\nalpha\n", "alpha", "beta", { caseSensitive: true })).toEqual({
+      content: "Alpha\nbeta\n",
+      count: 1,
+    });
   });
 });
 

@@ -597,4 +597,33 @@ describe("FilesPage", () => {
     expect(editor).toHaveProperty("selectionEnd", 10);
     expect(screen.getByText("Line 2 of 4")).toBeInTheDocument();
   });
+
+  it("can require the same letter case when finding in the open file", async () => {
+    const user = userEvent.setup();
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos({
+          readWorkspaceFile: async () => ({
+            path: "src/app.py",
+            content: "Alpha\nalpha\n",
+            binary: false,
+          }),
+        })}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    const editor = await screen.findByRole("textbox", { name: "src/app.py" });
+    await user.keyboard("{Control>}f{/Control}");
+    await user.type(await screen.findByRole("searchbox", { name: /find in file/i }), "alpha");
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: /match case/i }));
+    expect(screen.getByText("1 of 1")).toBeInTheDocument();
+    expect(editor).toHaveProperty("selectionStart", 6);
+    expect(editor).toHaveProperty("selectionEnd", 11);
+  });
 });

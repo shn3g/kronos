@@ -221,6 +221,7 @@ export function MenuBar({
           In Terminal, the shell stays open. Type a line and press Enter. Up and Down recall
           previous lines. Stop, or Escape in the command box, ends the shell. Escape also
           stops the current chat turn. Ctrl+F or Cmd+F finds text in the open file.
+          Match case limits that search to the same letter case.
           Ctrl+H or Cmd+H replaces text in the open file. Ctrl+G or Cmd+G jumps to a line.
           Revert in Changes restores the last chat write for that file, or the last committed
           version if chat did not write it. Commit records a local git commit. This turn lists

@@ -460,6 +460,22 @@
   min-width: 5.5rem;
 }
 
+.files-page__check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 2px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.files-page__check input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .files-page__search {
   display: flex;
   flex-shrink: 0;

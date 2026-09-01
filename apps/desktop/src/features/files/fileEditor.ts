@@ -10,6 +10,10 @@ export interface FileFindMatch {
   end: number;
 }
 
+export interface FileFindOptions {
+  caseSensitive?: boolean;
+}
+
 export function fileDraftIsDirty(saved: string | null, draft: string | null): boolean {
   if (saved === null || draft === null) {
     return false;
@@ -36,12 +40,18 @@ export function editorLineLabels(content: string): string[] {
   return Array.from({ length: Math.max(1, count) }, (_, index) => String(index + 1));
 }
 
-export function findInFileText(content: string, query: string): FileFindMatch[] {
-  const needle = query.trim().toLowerCase();
-  if (needle === "") {
+export function findInFileText(
+  content: string,
+  query: string,
+  options: FileFindOptions = {},
+): FileFindMatch[] {
+  const trimmed = query.trim();
+  if (trimmed === "") {
     return [];
   }
-  const haystack = content.toLowerCase();
+  const caseSensitive = options.caseSensitive === true;
+  const needle = caseSensitive ? trimmed : trimmed.toLowerCase();
+  const haystack = caseSensitive ? content : content.toLowerCase();
   const matches: FileFindMatch[] = [];
   let from = 0;
   while (from <= haystack.length) {
@@ -90,8 +100,9 @@ export function replaceAllInFileText(
   content: string,
   query: string,
   replacement: string,
+  options: FileFindOptions = {},
 ): { content: string; count: number } {
-  const matches = findInFileText(content, query);
+  const matches = findInFileText(content, query, options);
   if (matches.length === 0) {
     return { content, count: 0 };
   }
