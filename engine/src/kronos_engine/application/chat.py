@@ -15,6 +15,7 @@ from uuid import uuid4
 from kronos_engine.application.chat_diff import unified_write_patch
 from kronos_engine.application.chat_mentions import mentioned_workspace_paths
 from kronos_engine.application.chat_tools import ToolCall, ToolParseError, parse_tool_call
+from kronos_engine.application.chat_workspace_instructions import workspace_instruction_text
 from kronos_engine.application.goals import GoalService
 from kronos_engine.application.repositories import RepositoryNotFound, RepositoryService
 from kronos_engine.application.workspace_changes import restore_working_path
@@ -41,6 +42,7 @@ run_command (command), search_memory (query), create_goal (title, success_criter
 list_goals.
 Stay inside the current workspace. Do not claim you edited files unless write_file succeeded.
 run_command runs in the workspace folder. Prefer tests and local tools. Do not push.
+Follow workspace instructions when they are provided.
 If you do not need a tool, reply without a tool fence."""
 
 _CANCEL: dict[str, Event] = {}
@@ -553,6 +555,9 @@ class ChatService:
 
     def _system_prompt(self, turns: Sequence[ChatTurn], repository_id: str | None) -> str:
         prompt = SYSTEM_PROMPT
+        instructions = self._workspace_instructions(repository_id)
+        if instructions != "":
+            prompt = f"{prompt}\n\nWorkspace instructions:\n{instructions}"
         query = _latest_user_text(turns)
         if self._memory_conn is not None and query != "":
             records = retrieve_records(self._memory_conn, query, None, limit=5)
@@ -563,6 +568,15 @@ class ChatService:
         if mentioned == "":
             return prompt
         return f"{prompt}\n\nMentioned files:\n{mentioned}"
+
+    def _workspace_instructions(self, repository_id: str | None) -> str:
+        if not repository_id or self._repos is None:
+            return ""
+        try:
+            record = self._repos.get(RepositoryId(repository_id))
+        except (RepositoryNotFound, LookupError, ValueError):
+            return ""
+        return workspace_instruction_text(Path(record.realpath))
 
     def _mentioned_file_context(self, query: str, repository_id: str | None) -> str:
         if not repository_id or self._repos is None or query == "":

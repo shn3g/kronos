@@ -511,3 +511,108 @@ def test_run_command_caps_how_many_commands_run_in_one_turn(tmp_path: Path) -> N
     assert (repo / "ticks.txt").read_text(encoding="utf-8") == "xxx"
     tool_bodies = [item.content for item in messages if item.tool_name == "run_command"]
     assert any("3 commands" in body for body in tool_bodies)
+
+
+def test_send_message_attaches_workspace_instructions_to_system_prompt(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "AGENTS.md").write_text("Never commit to main.\n", encoding="utf-8")
+    (repo / "src").mkdir()
+    (repo / "src" / "AGENTS.md").write_text("Nested secret rule.\n", encoding="utf-8")
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    completer = ScriptedCompleter(["Understood."])
+    service = ChatService(
+        SqliteChatStore(conn),
+        completer,
+        repos=_RepoLookup(repo),
+    )
+    session = service.create_session()
+    service.send_message(session.id, "What should I remember?", repository_id="repo_alpha")
+    _turns, system = completer.prompts[0]
+    assert "Workspace instructions:" in system
+    assert "AGENTS.md" in system
+    assert "Never commit to main." in system
+    assert "Nested secret rule." not in system
+
+
+def test_send_message_attaches_cursor_rule_files(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    rules = repo / ".cursor" / "rules"
+    rules.mkdir(parents=True)
+    (rules / "python.mdc").write_text("Use type hints.\n", encoding="utf-8")
+    (repo / ".cursorrules").write_text("No em dashes in UI copy.\n", encoding="utf-8")
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    completer = ScriptedCompleter(["Understood."])
+    service = ChatService(
+        SqliteChatStore(conn),
+        completer,
+        repos=_RepoLookup(repo),
+    )
+    session = service.create_session()
+    service.send_message(session.id, "How should I write code?", repository_id="repo_alpha")
+    _turns, system = completer.prompts[0]
+    assert "No em dashes in UI copy." in system
+    assert "Use type hints." in system
+    assert ".cursor/rules/python.mdc" in system
+
+
+def test_send_message_omits_workspace_instructions_when_none_exist(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    completer = ScriptedCompleter(["Hello."])
+    service = ChatService(
+        SqliteChatStore(conn),
+        completer,
+        repos=_RepoLookup(repo),
+    )
+    session = service.create_session()
+    service.send_message(session.id, "Hi", repository_id="repo_alpha")
+    _turns, system = completer.prompts[0]
+    assert "Workspace instructions:" not in system
+
+
+def test_send_message_skips_nested_cursor_rule_directories(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    rules = repo / ".cursor" / "rules"
+    nested = rules / "team"
+    nested.mkdir(parents=True)
+    (nested / "extra.md").write_text("Do not include nested.\n", encoding="utf-8")
+    (rules / "root.md").write_text("Keep this.\n", encoding="utf-8")
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    completer = ScriptedCompleter(["Understood."])
+    service = ChatService(
+        SqliteChatStore(conn),
+        completer,
+        repos=_RepoLookup(repo),
+    )
+    session = service.create_session()
+    service.send_message(session.id, "Which rules apply?", repository_id="repo_alpha")
+    _turns, system = completer.prompts[0]
+    assert "Keep this." in system
+    assert "Do not include nested." not in system
+
+
+def test_send_message_caps_workspace_instruction_size(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "AGENTS.md").write_text("A" * 50_000, encoding="utf-8")
+    database = Database(tmp_path / "kronos.sqlite3")
+    conn = database.connect()
+    completer = ScriptedCompleter(["Trimmed."])
+    service = ChatService(
+        SqliteChatStore(conn),
+        completer,
+        repos=_RepoLookup(repo),
+    )
+    session = service.create_session()
+    service.send_message(session.id, "Go", repository_id="repo_alpha")
+    _turns, system = completer.prompts[0]
+    assert system.count("A") <= 12_000
+    assert "Workspace instructions:" in system
