@@ -76,6 +76,7 @@ export interface RepositoriesClient {
   runWorkspaceCommand(id: string, command: string): Promise<WorkspaceTerminalRun>;
   startWorkspaceShell(id: string): Promise<WorkspaceTerminalRun>;
   writeWorkspaceShell(id: string, line: string): Promise<{ ok: boolean }>;
+  resizeWorkspaceShell(id: string, cols: number, rows: number): Promise<{ ok: boolean }>;
   watchWorkspaceCommand(id: string): Promise<WorkspaceTerminalRun>;
   cancelWorkspaceCommand(id: string): Promise<{ ok: boolean }>;
 }
@@ -169,6 +170,13 @@ export function createProductionRepositoriesClient(
     async writeWorkspaceShell(id: string, line: string) {
       const payload = await jsonRequest(request, "POST", `/repositories/${id}/terminal/sessions/input`, {
         line,
+      });
+      return { ok: payload.ok === true };
+    },
+    async resizeWorkspaceShell(id: string, cols: number, rows: number) {
+      const payload = await jsonRequest(request, "POST", `/repositories/${id}/terminal/sessions/size`, {
+        cols,
+        rows,
       });
       return { ok: payload.ok === true };
     },

@@ -27,6 +27,7 @@ function repos(overrides: Partial<RepositoriesClient> = {}): RepositoriesClient 
     runWorkspaceCommand: unused,
     startWorkspaceShell: unused,
     writeWorkspaceShell: unused,
+    resizeWorkspaceShell: unused,
     cancelWorkspaceCommand: unused,
     watchWorkspaceCommand: unused,
     ...overrides,

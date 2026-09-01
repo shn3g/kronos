@@ -259,6 +259,22 @@ describe("createProductionRepositoriesClient", () => {
     });
   });
 
+  it("resizes a workspace shell through the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path, body) => {
+      expect(method).toBe("POST");
+      expect(path).toBe("/repositories/repo_alpha/terminal/sessions/size");
+      expect(body).toEqual({ cols: 100, rows: 24 });
+      return {
+        status: 200,
+        body: JSON.stringify({ ok: true }),
+      };
+    });
+
+    await expect(client.resizeWorkspaceShell("repo_alpha", 100, 24)).resolves.toEqual({
+      ok: true,
+    });
+  });
+
   it("writes a workspace file through the engine JSON proxy", async () => {
     const client = createProductionRepositoriesClient(async (method, path, body) => {
       expect(method).toBe("PUT");

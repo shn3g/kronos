@@ -42,6 +42,7 @@ function repos(overrides: Partial<RepositoriesClient> = {}): RepositoriesClient 
       output: "",
     }),
     writeWorkspaceShell: async () => ({ ok: true }),
+    resizeWorkspaceShell: async () => ({ ok: true }),
     cancelWorkspaceCommand: unused,
     watchWorkspaceCommand: async () => ({
       command: "shell",
@@ -92,15 +93,17 @@ describe("TerminalPage", () => {
     expect(startWorkspaceShell).not.toHaveBeenCalled();
   });
 
-  it("sends a line to the live shell and keeps the prompt open", async () => {
+  it("sends keystrokes to the live shell and keeps the prompt open", async () => {
     const user = userEvent.setup();
+    const writes: string[] = [];
     let live = "";
-    const writeWorkspaceShell = vi.fn(async (_id: string, line: string) => {
-      live += `${line}\n`;
+    const writeWorkspaceShell = vi.fn(async (_id: string, data: string) => {
+      writes.push(data);
+      live += data;
       return { ok: true };
     });
     const watchWorkspaceCommand = vi.fn(async () => ({
-      command: "echo hello-shell",
+      command: "shell",
       exitCode: null,
       timedOut: false,
       cancelled: false,
@@ -116,26 +119,25 @@ describe("TerminalPage", () => {
       />,
     );
 
-    const input = await screen.findByRole("textbox", { name: /command/i });
-    await user.type(input, "echo hello-shell");
-    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    const terminal = await screen.findByRole("textbox", { name: /^terminal$/i });
+    await user.type(terminal, "echo hello-shell{Enter}");
 
-    expect(writeWorkspaceShell).toHaveBeenCalledWith("repo_alpha", "echo hello-shell");
-    expect(await screen.findByText("echo hello-shell")).toBeInTheDocument();
+    expect(writes.join("")).toBe("echo hello-shell\r");
+    expect(writeWorkspaceShell).toHaveBeenCalledWith("repo_alpha", "e");
+    expect(await screen.findByText(/hello-shell/)).toBeInTheDocument();
     expect(screen.getByText("Shell is open.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^send$/i })).toBeDisabled();
-    expect(input).toHaveValue("");
+    expect(screen.queryByRole("button", { name: /^send$/i })).not.toBeInTheDocument();
   });
 
-  it("keeps earlier output when another line is sent", async () => {
+  it("keeps earlier output when more keys are sent", async () => {
     const user = userEvent.setup();
     let live = "";
-    const writeWorkspaceShell = vi.fn(async (_id: string, line: string) => {
-      live += `${line}\n`;
+    const writeWorkspaceShell = vi.fn(async (_id: string, data: string) => {
+      live += data;
       return { ok: true };
     });
     const watchWorkspaceCommand = vi.fn(async () => ({
-      command: live.trim().split("\n").at(-1) ?? "shell",
+      command: "shell",
       exitCode: null,
       timedOut: false,
       cancelled: false,
@@ -151,12 +153,10 @@ describe("TerminalPage", () => {
       />,
     );
 
-    const input = await screen.findByRole("textbox", { name: /command/i });
-    await user.type(input, "echo hello-shell");
-    await user.click(screen.getByRole("button", { name: /^send$/i }));
-    expect(await screen.findByText("echo hello-shell")).toBeInTheDocument();
-    await user.type(input, "echo second-line");
-    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    const terminal = await screen.findByRole("textbox", { name: /^terminal$/i });
+    await user.type(terminal, "echo hello-shell{Enter}");
+    expect(await screen.findByText(/hello-shell/)).toBeInTheDocument();
+    await user.type(terminal, "echo second-line{Enter}");
     expect(await screen.findByText(/second-line/)).toBeInTheDocument();
     expect(screen.getByText(/hello-shell/)).toBeInTheDocument();
   });
@@ -248,15 +248,14 @@ describe("TerminalPage", () => {
       />,
     );
 
-    const next = screen.getByRole("textbox", { name: /command/i });
-    await user.type(next, "echo again");
-    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    const next = await screen.findByRole("textbox", { name: /^terminal$/i });
+    await user.type(next, "echo again{Enter}");
     expect(
-      await screen.findByText(/could not send that line. check that the engine is running, then try again/i),
+      await screen.findByText(/could not send that key. check that the engine is running, then try again/i),
     ).toBeInTheDocument();
   });
 
-  it("keeps Send disabled until the command box has text", async () => {
+  it("keeps the terminal ready for typing while the shell is open", async () => {
     render(
       <TerminalPage
         engineClient={engine("ready")}
@@ -266,38 +265,7 @@ describe("TerminalPage", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: /^send$/i })).toBeDisabled();
-  });
-
-  it("recalls previous commands with the arrow keys", async () => {
-    const user = userEvent.setup();
-    const writeWorkspaceShell = vi.fn(async () => ({ ok: true }));
-    render(
-      <TerminalPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
-        repositoriesClient={repos({ writeWorkspaceShell })}
-        onOpenWorkspace={() => undefined}
-      />,
-    );
-
-    const input = await screen.findByRole("textbox", { name: /command/i });
-    await user.type(input, "python probe.py");
-    await user.click(screen.getByRole("button", { name: /^send$/i }));
-    expect(writeWorkspaceShell).toHaveBeenCalledWith("repo_alpha", "python probe.py");
-
-    await user.type(input, "echo later");
-    await user.click(screen.getByRole("button", { name: /^send$/i }));
-    expect(writeWorkspaceShell).toHaveBeenCalledWith("repo_alpha", "echo later");
-
-    await user.click(input);
-    await user.keyboard("{ArrowUp}");
-    expect(input).toHaveValue("echo later");
-    await user.keyboard("{ArrowUp}");
-    expect(input).toHaveValue("python probe.py");
-    await user.keyboard("{ArrowDown}");
-    expect(input).toHaveValue("echo later");
-    await user.keyboard("{ArrowDown}");
-    expect(input).toHaveValue("");
+    expect(await screen.findByRole("textbox", { name: /^terminal$/i })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /^send$/i })).not.toBeInTheDocument();
   });
 });

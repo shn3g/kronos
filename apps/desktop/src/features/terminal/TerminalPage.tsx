@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { Terminal } from "@xterm/xterm";
 import type { EngineClient } from "../../engine/client";
 import {
   createProductionRepositoriesClient,
   type RepositoriesClient,
   type WorkspaceTerminalRun,
 } from "../workspaces/client";
+import { ptyInputFromKeyboard, xtermCanvasIsUsable } from "./terminalInput";
 
 const productionRepos = createProductionRepositoriesClient();
 
@@ -25,19 +27,30 @@ export function TerminalPage({
 }: TerminalPageProps) {
   const client = repositoriesClient ?? productionRepos;
   const [ready, setReady] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [run, setRun] = useState<WorkspaceTerminalRun | null>(null);
-  const [history, setHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
-  const [historyStash, setHistoryStash] = useState("");
+  const [xtermMode, setXtermMode] = useState(false);
   const stoppingRef = useRef(false);
-  const outputRef = useRef<HTMLPreElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const termRef = useRef<Terminal | null>(null);
   const runRef = useRef<WorkspaceTerminalRun | null>(null);
   const previousRepoRef = useRef<string | null>(null);
+  const writtenRef = useRef("");
+  const sendPtyRef = useRef<(data: string) => Promise<void>>(async () => undefined);
   runRef.current = run;
+
+  async function sendPty(data: string): Promise<void> {
+    if (!repositoryId || data === "") {
+      return;
+    }
+    try {
+      await client.writeWorkspaceShell(repositoryId, data);
+    } catch {
+      setError("Could not send that key. Check that the engine is running, then try again.");
+    }
+  }
+
+  sendPtyRef.current = sendPty;
 
   useEffect(() => {
     const previous = previousRepoRef.current;
@@ -88,66 +101,6 @@ export function TerminalPage({
     };
   }, [client, ready, repositoryId]);
 
-  async function ensureShell(): Promise<boolean> {
-    if (!repositoryId) {
-      return false;
-    }
-    if (runRef.current?.running === true) {
-      return true;
-    }
-    try {
-      const snapshot = await client.startWorkspaceShell(repositoryId);
-      setRun(snapshot);
-      runRef.current = snapshot;
-      return snapshot.running === true;
-    } catch {
-      setError("Could not start the workspace shell. Check that the engine is running, then try again.");
-      return false;
-    }
-  }
-
-  async function onSend(): Promise<void> {
-    const line = draft.trim();
-    if (line === "" || sending || !repositoryId) {
-      return;
-    }
-    setSending(true);
-    setError(null);
-    setHistory((current) => rememberCommand(current, line));
-    setHistoryIndex(null);
-    setHistoryStash("");
-    try {
-      const live = await ensureShell();
-      if (!live) {
-        return;
-      }
-      await client.writeWorkspaceShell(repositoryId, line);
-      setDraft("");
-      inputRef.current?.focus();
-    } catch {
-      setError("Could not send that line. Check that the engine is running, then try again.");
-    } finally {
-      setSending(false);
-    }
-  }
-
-  async function onStop(): Promise<void> {
-    if (!repositoryId || stoppingRef.current || runRef.current?.running !== true) {
-      return;
-    }
-    stoppingRef.current = true;
-    try {
-      await client.cancelWorkspaceCommand(repositoryId);
-      setRun((current) =>
-        current === null ? current : { ...current, running: false, cancelled: true },
-      );
-    } catch {
-      setError("Could not stop that command. Wait for it to finish, then try again.");
-    } finally {
-      stoppingRef.current = false;
-    }
-  }
-
   useEffect(() => {
     if (!ready || !repositoryId) {
       return;
@@ -170,11 +123,111 @@ export function TerminalPage({
   }, [ready, client, repositoryId]);
 
   useEffect(() => {
-    const node = outputRef.current;
-    if (node) {
-      node.scrollTop = node.scrollHeight;
+    if (!ready || !repositoryId || !xtermCanvasIsUsable()) {
+      return;
     }
-  }, [run?.output]);
+    let cancelled = false;
+    let term: Terminal | null = null;
+    let onFit: (() => void) | null = null;
+    void (async () => {
+      const { Terminal: Xterm } = await import("@xterm/xterm");
+      const { FitAddon } = await import("@xterm/addon-fit");
+      await import("@xterm/xterm/css/xterm.css");
+      const host = hostRef.current;
+      if (cancelled || host === null) {
+        return;
+      }
+      const addon = new FitAddon();
+      term = new Xterm({
+        convertEol: true,
+        cursorBlink: true,
+        fontFamily: 'ui-monospace, "Cascadia Code", Consolas, monospace',
+        fontSize: 13,
+        theme: {
+          background: "#050508",
+          foreground: "#f4f4f6",
+          cursor: "#ececef",
+        },
+      });
+      term.loadAddon(addon);
+      term.open(host);
+      if (cancelled) {
+        term.dispose();
+        term = null;
+        return;
+      }
+      const textarea = host.querySelector("textarea");
+      if (textarea instanceof HTMLTextAreaElement) {
+        textarea.setAttribute("aria-label", "Terminal");
+      }
+      term.onData((data) => {
+        void sendPtyRef.current(data);
+      });
+      onFit = () => {
+        addon.fit();
+        if (term !== null) {
+          void client.resizeWorkspaceShell(repositoryId, term.cols, term.rows);
+        }
+      };
+      window.addEventListener("resize", onFit);
+      addon.fit();
+      void client.resizeWorkspaceShell(repositoryId, term.cols, term.rows);
+      termRef.current = term;
+      writtenRef.current = "";
+      setXtermMode(true);
+      term.focus();
+    })();
+    return () => {
+      cancelled = true;
+      if (onFit !== null) {
+        window.removeEventListener("resize", onFit);
+      }
+      termRef.current = null;
+      term?.dispose();
+      setXtermMode(false);
+    };
+  }, [client, ready, repositoryId]);
+
+  useEffect(() => {
+    const term = termRef.current;
+    if (term === null || !xtermMode) {
+      return;
+    }
+    const output = run?.output ?? "";
+    if (output.startsWith(writtenRef.current)) {
+      term.write(output.slice(writtenRef.current.length));
+    } else {
+      term.reset();
+      term.write(output);
+    }
+    writtenRef.current = output;
+  }, [run?.output, xtermMode]);
+
+  async function onStop(): Promise<void> {
+    if (!repositoryId || stoppingRef.current || runRef.current?.running !== true) {
+      return;
+    }
+    stoppingRef.current = true;
+    try {
+      await client.cancelWorkspaceCommand(repositoryId);
+      setRun((current) =>
+        current === null ? current : { ...current, running: false, cancelled: true },
+      );
+    } catch {
+      setError("Could not stop that command. Wait for it to finish, then try again.");
+    } finally {
+      stoppingRef.current = false;
+    }
+  }
+
+  function onTerminalKey(event: ReactKeyboardEvent<HTMLTextAreaElement>): void {
+    const data = ptyInputFromKeyboard(event);
+    if (data === null) {
+      return;
+    }
+    event.preventDefault();
+    void sendPty(data);
+  }
 
   if (!ready) {
     return (
@@ -203,6 +256,7 @@ export function TerminalPage({
 
   const status = runStatus(run);
   const shellOpen = run?.running === true;
+  const output = run?.output ?? "";
 
   return (
     <section className="terminal-page">
@@ -213,76 +267,31 @@ export function TerminalPage({
             {status}
           </p>
         ) : null}
-      </header>
-      {error ? <p className="wizard__error">{error}</p> : null}
-      <div className="terminal-page__form">
-        <label className="terminal-page__field">
-          <span className="visually-hidden">Command</span>
-          <input
-            ref={inputRef}
-            className="terminal-page__input"
-            value={draft}
-            aria-label="Command"
-            placeholder="npm test"
-            disabled={sending}
-            spellCheck={false}
-            onChange={(event) => {
-              setDraft(event.target.value);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowUp") {
-                event.preventDefault();
-                const older = recallOlderCommand(history, historyIndex, draft, historyStash);
-                setDraft(older.draft);
-                setHistoryIndex(older.index);
-                setHistoryStash(older.stash);
-                return;
-              }
-              if (event.key === "ArrowDown") {
-                event.preventDefault();
-                const newer = recallNewerCommand(history, historyIndex, draft, historyStash);
-                setDraft(newer.draft);
-                setHistoryIndex(newer.index);
-                setHistoryStash(newer.stash);
-                return;
-              }
-              if (event.key === "Escape") {
-                event.preventDefault();
-                void onStop();
-                return;
-              }
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                void onSend();
-              }
-            }}
-          />
-        </label>
-        <button
-          type="button"
-          className="btn-primary"
-          disabled={sending || draft.trim() === ""}
-          onClick={() => {
-            void onSend();
-          }}
-        >
-          Send
-        </button>
         {shellOpen ? (
           <button type="button" className="btn-quiet" onClick={() => void onStop()}>
             Stop
           </button>
         ) : null}
+      </header>
+      {error ? <p className="wizard__error">{error}</p> : null}
+      <div className="terminal-page__screen">
+        <div
+          ref={hostRef}
+          className={xtermMode ? "terminal-page__xterm is-on" : "terminal-page__xterm"}
+          aria-hidden={!xtermMode}
+        />
+        <textarea
+          className={xtermMode ? "terminal-page__tty is-off" : "terminal-page__tty"}
+          aria-label="Terminal"
+          spellCheck={false}
+          value={output}
+          placeholder="Type in this workspace shell."
+          aria-hidden={xtermMode}
+          tabIndex={xtermMode ? -1 : undefined}
+          onChange={() => undefined}
+          onKeyDown={onTerminalKey}
+        />
       </div>
-      <pre
-        ref={outputRef}
-        className="terminal-page__output"
-        data-empty={run && run.output !== "" ? undefined : "true"}
-      >
-        {run?.output !== undefined && run.output !== ""
-          ? run.output
-          : "Type a command in this workspace."}
-      </pre>
     </section>
   );
 }
@@ -308,58 +317,4 @@ function runStatus(run: WorkspaceTerminalRun | null): string | null {
     return "Stopped.";
   }
   return null;
-}
-
-const MAX_TERMINAL_HISTORY = 50;
-
-function rememberCommand(history: string[], command: string): string[] {
-  if (history[history.length - 1] === command) {
-    return history;
-  }
-  const next = [...history, command];
-  if (next.length <= MAX_TERMINAL_HISTORY) {
-    return next;
-  }
-  return next.slice(next.length - MAX_TERMINAL_HISTORY);
-}
-
-interface HistoryRecall {
-  draft: string;
-  index: number | null;
-  stash: string;
-}
-
-function recallOlderCommand(
-  history: string[],
-  index: number | null,
-  draft: string,
-  stash: string,
-): HistoryRecall {
-  if (history.length === 0) {
-    return { draft, index, stash };
-  }
-  if (index === null) {
-    return { draft: history[history.length - 1] ?? draft, index: history.length - 1, stash: draft };
-  }
-  if (index <= 0) {
-    return { draft: history[0] ?? draft, index: 0, stash };
-  }
-  const next = index - 1;
-  return { draft: history[next] ?? draft, index: next, stash };
-}
-
-function recallNewerCommand(
-  history: string[],
-  index: number | null,
-  draft: string,
-  stash: string,
-): HistoryRecall {
-  if (index === null) {
-    return { draft, index, stash };
-  }
-  if (index >= history.length - 1) {
-    return { draft: stash, index: null, stash: "" };
-  }
-  const next = index + 1;
-  return { draft: history[next] ?? draft, index: next, stash };
 }
