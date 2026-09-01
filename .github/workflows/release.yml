@@ -131,29 +131,38 @@ jobs:
           set -euo pipefail
           mkdir -p upload
           while IFS= read -r -d '' app; do
-            zip -r "upload/$(basename "$app").zip" "$app"
+            zip -r "upload/Kronos_${TAG#v}_macos.app.zip" "$app"
           done < <(find dist -name '*.app' -type d -print0)
           while IFS= read -r -d '' file; do
-            rel="${file#dist/}"
-            dest="upload/$(echo "$rel" | tr '/\\' '__')"
-            cp "$file" "$dest"
-          done < <(find dist -type f \( -name '*.exe' -o -name '*.deb' -o -name 'SHA256SUMS' -o -name 'sbom.cdx.json' -o -name 'provenance.json' -o -name 'release.sig' \) -print0)
+            case "$file" in
+              *.exe) cp "$file" "upload/Kronos_${TAG#v}_x64-setup.exe" ;;
+              *.deb) cp "$file" "upload/Kronos_${TAG#v}_amd64.deb" ;;
+            esac
+          done < <(find dist -type f \( -name '*.exe' -o -name '*.deb' \) -print0)
+          if [ -d upload ]; then
+            (cd upload && sha256sum -- * > SHA256SUMS)
+          fi
           mapfile -t assets < <(find upload -type f)
           if [ "${#assets[@]}" -eq 0 ]; then
             echo "no installer assets to publish"
             exit 1
           fi
-          extra=(--verify-tag)
-          case "$TAG" in
-            v0.*) extra+=(--prerelease) ;;
-          esac
           {
-            echo 'Preview build. The product is not 1.0.'
+            echo "First public desktop build of Kronos ${TAG}."
             echo
-            echo 'Installers are unsigned. Windows SmartScreen and macOS Gatekeeper will warn. Use Run anyway or right-click Open.'
+            echo "Download one installer for your OS:"
             echo
-            echo 'The app still starts the engine with Python 3.11+ on PATH (python -m kronos_engine on Windows, python3 -m kronos_engine elsewhere). Node and Rust are not required to run a downloaded installer.'
+            echo "- Windows: Kronos_${TAG#v}_x64-setup.exe"
+            echo "- Linux: Kronos_${TAG#v}_amd64.deb"
+            echo "- macOS: Kronos_${TAG#v}_macos.app.zip"
+            echo
+            echo "Unsigned. Windows SmartScreen and macOS Gatekeeper will warn. Use Run anyway or right-click Open."
+            echo
+            echo "Python 3.11+ must be on PATH. Node and Rust are not required to run the installer."
+            echo
+            echo "SHA256SUMS is optional verification. Source zip/tar.gz is the tree, not the app."
           } > "$RUNNER_TEMP/notes.md"
+          extra=(--verify-tag)
           gh release create "$TAG" "${assets[@]}" "${extra[@]}" \
             --repo "${{ github.repository }}" \
             --title "Kronos ${TAG}" \

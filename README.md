@@ -1,6 +1,6 @@
 # Kronos
 
-Kronos is a local software-engineering operating system. One desktop application plans bounded work, runs tests, and keeps repository automation under deterministic policy.
+Local software-engineering OS. One desktop app enrols **your** git folder, plans bounded work, runs tests, and keeps repository automation under policy.
 
 Windows, macOS, and Linux. Licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
 
