@@ -30,7 +30,7 @@ describe("SettingsPage", () => {
     );
     expect(await screen.findByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
     expect(
-      screen.getByText(/connect a compatible engine to change settings/i),
+      screen.getByText(/waiting for the engine/i),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText(/bot token/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/private key/i)).not.toBeInTheDocument();

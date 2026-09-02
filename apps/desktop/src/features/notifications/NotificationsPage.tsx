@@ -62,10 +62,7 @@ export function NotificationsPage({
       <section className="notifications-page">
         <p className="page-kicker">Notifications</p>
         <h1 className="page-title">Notifications</h1>
-        <p className="page-body">
-          Connect a compatible engine to inspect alerts. Dependency failures pause here with
-          evidence.
-        </p>
+        <p className="page-body">Waiting for the engine.</p>
       </section>
     );
   }
@@ -74,7 +71,7 @@ export function NotificationsPage({
     <section className="notifications-page">
       <p className="page-kicker">Notifications</p>
       <h1 className="page-title">Notifications</h1>
-      <p className="page-body">Paused work and degraded indexes appear as alerts without secrets.</p>
+      <p className="page-body">Paused work and degraded indexes appear here without secrets.</p>
       {items.length === 0 ? (
         <p className="workspaces__empty">No alerts.</p>
       ) : (

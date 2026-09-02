@@ -54,7 +54,7 @@ export function InspectorDrawer({
   const scope: ChangeListScope = pickedScope ?? (hasTurn ? "turn" : "all");
   const visible = visibleInspectorChanges(changes, scope);
   return (
-    <aside className="inspector" aria-label="Session details">
+    <aside className="inspector" id="inspector" aria-label="Session details">
       <div className="inspector__tabs" role="tablist" aria-label="Inspector">
         <TabButton selected={tab === "changes"} onClick={() => onTab("changes")}>
           Changes

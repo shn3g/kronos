@@ -5,6 +5,7 @@ export type ActivityId = "chat" | "files" | "goals" | "workspaces" | "settings";
 interface ActivityBarProps {
   active: ActivityId;
   collapsed?: boolean;
+  notificationCount?: number;
   onSelect: (id: ActivityId) => void;
 }
 
@@ -15,9 +16,17 @@ const ITEMS: { id: Exclude<ActivityId, "settings">; label: string; icon: string 
   { id: "workspaces", label: "Workspaces", icon: "M4 6h7v12H4zM13 6h7v5h-7zM13 13h7v5h-7z" },
 ];
 
-export function ActivityBar({ active, collapsed = false, onSelect }: ActivityBarProps) {
+export function ActivityBar({
+  active,
+  collapsed = false,
+  notificationCount = 0,
+  onSelect,
+}: ActivityBarProps) {
+  const settingsLabel =
+    notificationCount > 0 ? `Settings, ${notificationCount} notifications` : "Settings";
+
   return (
-    <nav className="activity-bar" aria-label="Activity" hidden={collapsed}>
+    <nav className="activity-bar" id="activity-bar" aria-label="Activity" hidden={collapsed}>
       {ITEMS.map((item) => (
         <button
           key={item.id}
@@ -37,12 +46,17 @@ export function ActivityBar({ active, collapsed = false, onSelect }: ActivityBar
       <button
         type="button"
         className="activity-bar__btn activity-bar__btn--foot"
-        aria-label="Settings"
+        aria-label={settingsLabel}
         aria-current={active === "settings" ? "page" : undefined}
         onClick={() => {
           onSelect("settings");
         }}
       >
+        {notificationCount > 0 ? (
+          <span className="activity-bar__badge" aria-hidden="true">
+            {notificationCount}
+          </span>
+        ) : null}
         <svg viewBox="0 0 24 24" aria-hidden="true" className="activity-bar__icon">
           <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" strokeWidth="1.6" />
           <path

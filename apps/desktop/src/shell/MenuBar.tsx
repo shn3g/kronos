@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { SAVE_FILE_EVENT } from "../features/files/fileEditor";
+import { KEYBOARD_SHORTCUTS } from "./keyboardHelp";
 
 export type MenuId = "file" | "edit" | "view" | "help" | null;
 
@@ -63,7 +64,7 @@ export function MenuBar({
   }, []);
 
   return (
-    <div className="menu-bar" role="menubar" aria-label="Application">
+    <div className="menu-bar" id="menu-bar" role="menubar" aria-label="Application">
       <Menu
         id={fileId}
         label="File"
@@ -232,15 +233,14 @@ export function MenuBar({
           setOpen(open === "help" ? null : "help");
         }}
       >
-        <p className="menu-help">
-          Kronos is a locally installed desktop app for coding agents on your git folders. Ctrl+N
-          or Cmd+N starts a new chat. Ctrl+B or Cmd+B hides the activity bar. Ctrl+Shift+J or
-          Cmd+Shift+J hides Changes. Ctrl+` or Cmd+` shows Terminal. Ctrl+, or Cmd+, opens
-          Settings. Escape closes menus. File → Models assigns the orchestrator. Open a git folder
-          from Workspaces. Use Go to file, Ask in chat, or Open in Changes to edit files. Save
-          writes the open file into the workspace. In Terminal, the shell stays open as a real TTY.
-          Type in the panel. Stop ends the shell.
-        </p>
+        <ul className="menu-help" aria-label="Keyboard shortcuts">
+          {KEYBOARD_SHORTCUTS.map((row) => (
+            <li key={row.action} className="menu-help__row">
+              <kbd className="menu-help__shortcut">{row.shortcut}</kbd>
+              <span className="menu-help__action">{row.action}</span>
+            </li>
+          ))}
+        </ul>
       </Menu>
     </div>
   );

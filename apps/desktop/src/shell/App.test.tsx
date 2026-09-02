@@ -1001,4 +1001,67 @@ describe("App shell", () => {
     await user.click(screen.getByRole("button", { name: /^files$/i }));
     expect(await screen.findByRole("textbox", { name: "src/app.py" })).toHaveValue("print(1)\nx");
   });
+
+  it("lists keyboard shortcuts in Help as a scannable map", async () => {
+    const user = userEvent.setup();
+    render(<App {...readyFrame()} />);
+
+    await screen.findByRole("heading", { level: 1, name: "Ask Kronos" });
+    await user.click(screen.getByRole("menuitem", { name: /^Help$/ }));
+    expect(screen.getByRole("list", { name: /keyboard shortcuts/i })).toBeInTheDocument();
+    expect(screen.getByText("New chat")).toBeInTheDocument();
+    expect(screen.getByText("Settings")).toBeInTheDocument();
+  });
+
+  it("shows a notifications badge on the Settings activity icon", async () => {
+    render(
+      <App
+        {...readyFrame({
+          notificationsClient: {
+            list: async () => [
+              { id: "a1", title: "Index degraded", detail: "Rebuild needed.", severity: "pause" },
+              { id: "a2", title: "Dead letter", detail: "Queue paused.", severity: "pause" },
+            ],
+          },
+        })}
+      />,
+    );
+
+    await screen.findByRole("heading", { level: 1, name: "Ask Kronos" });
+    expect(screen.getByRole("button", { name: /settings, 2 notifications/i })).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+  });
+
+  it("keeps skip-link, menu bar, activity bar, main, inspector, and terminal in focus order", async () => {
+    const user = userEvent.setup();
+    render(<App {...readyFrame()} />);
+
+    await screen.findByRole("heading", { level: 1, name: "Ask Kronos" });
+    await user.click(screen.getByRole("menuitem", { name: /^View$/ }));
+    await user.click(screen.getByRole("menuitem", { name: /^terminal$/i }));
+    await screen.findByRole("region", { name: /terminal/i });
+
+    const skip = document.querySelector(".skip-link");
+    const menu = document.getElementById("menu-bar");
+    const activity = document.getElementById("activity-bar");
+    const main = document.getElementById("main");
+    const inspector = document.getElementById("inspector");
+    const terminal = document.getElementById("terminal");
+
+    expect(skip).toBeTruthy();
+    expect(menu).toBeTruthy();
+    expect(activity).toBeTruthy();
+    expect(main).toBeTruthy();
+    expect(inspector).toBeTruthy();
+    expect(terminal).toBeTruthy();
+
+    const follows = (a: Element, b: Element) =>
+      (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
+    expect(follows(skip!, menu!)).toBe(true);
+    expect(follows(menu!, activity!)).toBe(true);
+    expect(follows(activity!, main!)).toBe(true);
+    expect(follows(main!, inspector!)).toBe(true);
+    expect(follows(inspector!, terminal!)).toBe(true);
+  });
 });

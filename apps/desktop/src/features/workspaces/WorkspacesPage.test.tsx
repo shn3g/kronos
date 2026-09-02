@@ -73,7 +73,7 @@ describe("WorkspacesPage", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Workspaces" })).toBeInTheDocument();
     expect(
-      screen.getByText(/connect a compatible engine to enrol repositories/i),
+      screen.getByText(/waiting for the engine/i),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /enable kronos/i })).not.toBeInTheDocument();
     expect(list).not.toHaveBeenCalled();
@@ -180,7 +180,7 @@ describe("WorkspacesPage", () => {
       await act(async () => {
         await Promise.resolve();
       });
-      expect(screen.getByText(/connect a compatible engine/i)).toBeInTheDocument();
+      expect(screen.getByText(/waiting for the engine/i)).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /enable kronos/i })).not.toBeInTheDocument();
 
       status = { status: "ready", version: "0.1.0" };

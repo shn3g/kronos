@@ -66,10 +66,7 @@ export function TelegramPage({ engineClient, telegramClient }: TelegramPageProps
     return (
       <section className="telegram-setup">
         <h2 className="wizard__title">Telegram</h2>
-        <p className="page-body">
-          Connect a compatible engine to set up Telegram. Setup stays closed until the local engine
-          is ready.
-        </p>
+        <p className="page-body">Waiting for the engine.</p>
       </section>
     );
   }

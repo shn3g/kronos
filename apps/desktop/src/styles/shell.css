@@ -704,10 +704,34 @@
 .menu-help {
   margin: 0;
   padding: 8px;
+  list-style: none;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.4;
-  max-width: 16rem;
+  max-width: 18rem;
+}
+
+.menu-help__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.menu-help__row:last-child {
+  border-bottom: 0;
+}
+
+.menu-help__shortcut {
+  margin: 0;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  color: var(--ink);
+}
+
+.menu-help__action {
+  color: var(--muted);
 }
 .activity-bar {
   display: flex;
@@ -739,6 +763,22 @@
 
 .activity-bar__btn--foot {
   margin-top: auto;
+  position: relative;
+}
+
+.activity-bar__badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 14px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--void);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
 }
 
 .activity-bar__icon {
@@ -1359,6 +1399,23 @@
   margin: 0 0 6px;
   color: var(--muted);
   font-size: 11px;
+  transition: color 0.2s ease;
+}
+
+.chat-bubble--tool-running {
+  border-color: var(--hairline);
+}
+
+.chat-bubble--tool-running .chat-bubble__tool {
+  color: var(--ink);
+}
+
+.chat-bubble--tool-ok .chat-bubble__tool {
+  color: var(--ink);
+}
+
+.chat-bubble--tool-error .chat-bubble__tool {
+  color: var(--ink);
 }
 
 .chat-bubble__output-wrap {
@@ -1395,6 +1452,22 @@
   content: "▍";
   margin-left: 2px;
   color: var(--muted);
+  animation: chat-caret-blink 1s step-end infinite;
+}
+
+@keyframes chat-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-bubble--streaming p::after,
+  .chat-bubble--streaming .chat-md > :last-child:not(ul):not(ol)::after,
+  .chat-bubble--streaming .chat-md > ul:last-child li:last-child::after,
+  .chat-bubble--streaming .chat-md > ol:last-child li:last-child::after {
+    animation: none;
+  }
 }
 
 .chat-turn-status {

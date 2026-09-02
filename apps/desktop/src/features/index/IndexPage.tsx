@@ -126,10 +126,7 @@ export function IndexPage({ engineClient, indexClient, modelsClient }: IndexPage
       <section className="index-page">
         <p className="page-kicker">Index</p>
         <h1 className="page-title">Index</h1>
-        <p className="page-body">
-          Connect a compatible engine to inspect repository indexes. Retrieval stays closed until
-          the local engine is ready.
-        </p>
+        <p className="page-body">Waiting for the engine.</p>
       </section>
     );
   }
@@ -206,10 +203,7 @@ export function IndexPage({ engineClient, indexClient, modelsClient }: IndexPage
     <section className="index-page">
       <p className="page-kicker">Index</p>
       <h1 className="page-title">Index</h1>
-      <p className="page-body">
-        Isolated sparse, dense, and graph retrieval per enrolled repository. Vectors stay
-        disposable; missing embedding files degrade without blocking search.
-      </p>
+      <p className="page-body">Sparse, dense, and graph retrieval per enrolled repository.</p>
       {repositories.length ? (
         <label className="index-page__field" htmlFor="index-repo">
           Repository

@@ -61,10 +61,7 @@ export function MemoryPage({ engineClient, memoryClient }: MemoryPageProps) {
       <section className="memory-page">
         <p className="page-kicker">Memory</p>
         <h1 className="page-title">Memory</h1>
-        <p className="page-body">
-          Connect a compatible engine to inspect episodic and procedural records. Learning stays
-          closed until the local engine is ready.
-        </p>
+        <p className="page-body">Waiting for the engine.</p>
       </section>
     );
   }

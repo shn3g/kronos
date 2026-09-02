@@ -141,10 +141,7 @@ export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
       <section className="models">
         <p className="page-kicker">Models</p>
         <h1 className="page-title">Models</h1>
-        <p className="page-body">
-          Connect a compatible engine to assign model profiles. Routing stays closed until the
-          local engine is ready.
-        </p>
+        <p className="page-body">Waiting for the engine.</p>
       </section>
     );
   }

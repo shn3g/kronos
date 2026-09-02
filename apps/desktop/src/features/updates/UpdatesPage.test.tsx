@@ -50,7 +50,7 @@ describe("UpdatesPage", () => {
     );
     expect(await screen.findByRole("heading", { level: 1, name: "Updates" })).toBeInTheDocument();
     expect(
-      screen.getByText(/connect a compatible engine to inspect updates/i),
+      screen.getByText(/waiting for the engine/i),
     ).toBeInTheDocument();
     expect(status).not.toHaveBeenCalled();
   });

@@ -24,6 +24,7 @@ import { GoalsWorkbench, type GoalsWorkbenchClients } from "../features/goals/Go
 import { createProductionGoalsClient, type GoalsClient } from "../features/goals/client";
 import { createProductionHomeClient, type HomeClient } from "../features/home/client";
 import { createProductionModelsClient, type ModelsClient } from "../features/models/client";
+import { createProductionNotificationsClient, type NotificationsPageClients } from "../features/notifications/client";
 import { createProductionRunsClient } from "../features/runs/client";
 import { TerminalPage } from "../features/terminal/TerminalPage";
 import { SettingsHub } from "../features/settings/SettingsHub";
@@ -57,6 +58,7 @@ const productionGoals = createProductionGoalsClient();
 const productionRuns = createProductionRunsClient();
 const productionSettings = createProductionSettingsClient();
 const productionIndex = createProductionIndexClient();
+const productionNotifications = createProductionNotificationsClient();
 const ACTIVITY_BAR_STORAGE_KEY = "kronos.activityBarCollapsed";
 const INSPECTOR_STORAGE_KEY = "kronos.inspectorCollapsed";
 
@@ -80,6 +82,7 @@ interface AppProps {
   goalsClient?: GoalsClient;
   settingsClient?: SettingsPageClients;
   indexClient?: IndexClient;
+  notificationsClient?: NotificationsPageClients;
 }
 
 export function App({
@@ -91,6 +94,7 @@ export function App({
   goalsClient,
   settingsClient,
   indexClient,
+  notificationsClient,
 }: AppProps) {
   const engine = engineClient ?? productionEngine;
   const models = modelsClient ?? productionModels;
@@ -100,6 +104,7 @@ export function App({
   const goals = goalsClient ?? productionGoals;
   const settings = settingsClient ?? productionSettings;
   const index = indexClient ?? productionIndex;
+  const notifications = notificationsClient ?? productionNotifications;
   const [engineState, setEngineState] = useState<EngineConnectionState>({
     status: "starting",
   });
@@ -133,6 +138,7 @@ export function App({
   const [commitError, setCommitError] = useState<string | null>(null);
   const [committing, setCommitting] = useState(false);
   const committingRef = useRef(false);
+  const [notificationCount, setNotificationCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -299,6 +305,34 @@ export function App({
 
   useEffect(() => {
     if (!engineReady || !modelKnown || !modelReady) {
+      setNotificationCount(0);
+      return;
+    }
+    let cancelled = false;
+    const apply = () => {
+      void notifications.list().then(
+        (items) => {
+          if (!cancelled) {
+            setNotificationCount(items.length);
+          }
+        },
+        () => {
+          if (!cancelled) {
+            setNotificationCount(0);
+          }
+        },
+      );
+    };
+    apply();
+    const interval = window.setInterval(apply, 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [engineReady, modelKnown, modelReady, notifications]);
+
+  useEffect(() => {
+    if (!engineReady || !modelKnown || !modelReady) {
       return;
     }
     const onKey = (event: KeyboardEvent) => {
@@ -394,8 +428,11 @@ export function App({
   if (!modelKnown) {
     return (
       <div className="app-shell app-shell--gate">
+        <a className="skip-link" href="#main">
+          Skip to main content
+        </a>
         <EngineStatus state={engineState} />
-        <main id="main">
+        <main id="main" tabIndex={-1}>
           <CheckingModelGate />
         </main>
       </div>
@@ -463,6 +500,7 @@ export function App({
         <ActivityBar
           active={activity}
           collapsed={activityCollapsed}
+          notificationCount={notificationCount}
           onSelect={(id) => {
             go({ activity: id });
           }}
@@ -597,7 +635,12 @@ export function App({
               />
             )}
           </div>
-          <section className="app-terminal" hidden={!terminalOpen} aria-label="Terminal">
+          <section
+            className="app-terminal"
+            id="terminal"
+            hidden={!terminalOpen}
+            aria-label="Terminal"
+          >
             <TerminalPage
               engineClient={engine}
               repositoryId={workspaceId}

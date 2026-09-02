@@ -179,10 +179,7 @@ export function GoalsWorkbench({
       <section className="goals-workbench">
         <p className="page-kicker">Goals</p>
         <h1 className="page-title">Goals</h1>
-        <p className="page-body">
-          Connect a compatible engine to create and track bounded goals. Planning stays closed
-          until the local engine is ready.
-        </p>
+        <p className="page-body">Waiting for the engine.</p>
       </section>
     );
   }
@@ -235,10 +232,7 @@ export function GoalsWorkbench({
     <section className="goals-workbench">
       <p className="page-kicker">Goals</p>
       <h1 className="page-title">Goals</h1>
-      <p className="page-body">
-        Bounded goals require a repository, success criteria, non-goals, budget, and a risk
-        ceiling. Tasks, failures, and PR links appear after planning.
-      </p>
+      <p className="page-body">Create bounded goals and review readiness before unattended work.</p>
       <GoalCreateWizard
         draft={draft}
         repositories={repositories}

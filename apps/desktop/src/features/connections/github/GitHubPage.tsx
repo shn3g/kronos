@@ -143,10 +143,7 @@ export function GitHubPage({ engineClient, githubClient }: GitHubPageProps) {
       <section className="github-setup">
         <p className="page-kicker">Connections</p>
         <h1 className="page-title">Connections</h1>
-        <p className="page-body">
-          Connect a compatible engine to create and install GitHub Apps. Setup stays closed until
-          the local engine is ready.
-        </p>
+        <p className="page-body">Waiting for the engine.</p>
       </section>
     );
   }

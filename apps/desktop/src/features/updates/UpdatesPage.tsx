@@ -82,9 +82,7 @@ export function UpdatesPage({ engineClient, updatesClient }: UpdatesPageProps) {
       <section className="updates-page">
         <p className="page-kicker">Updates</p>
         <h1 className="page-title">Updates</h1>
-        <p className="page-body">
-          Connect a compatible engine to inspect updates, checksums, SBOM, and provenance.
-        </p>
+        <p className="page-body">Waiting for the engine.</p>
       </section>
     );
   }

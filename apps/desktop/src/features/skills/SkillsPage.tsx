@@ -62,10 +62,7 @@ export function SkillsPage({ engineClient, skillsClient }: SkillsPageProps) {
       <section className="skills-page">
         <p className="page-kicker">Skills</p>
         <h1 className="page-title">Skills</h1>
-        <p className="page-body">
-          Connect a compatible engine to browse, quarantine, and activate skills. Approval stays
-          closed until the local engine is ready.
-        </p>
+        <p className="page-body">Waiting for the engine.</p>
       </section>
     );
   }

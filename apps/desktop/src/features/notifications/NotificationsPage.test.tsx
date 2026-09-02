@@ -34,7 +34,7 @@ describe("NotificationsPage", () => {
       await screen.findByRole("heading", { level: 1, name: "Notifications" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/connect a compatible engine to inspect alerts/i),
+      screen.getByText(/waiting for the engine/i),
     ).toBeInTheDocument();
     expect(list).not.toHaveBeenCalled();
   });

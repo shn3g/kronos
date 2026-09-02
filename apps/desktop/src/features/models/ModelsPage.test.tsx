@@ -115,7 +115,7 @@ describe("ModelsPage", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Models" })).toBeInTheDocument();
     expect(
-      screen.getByText(/connect a compatible engine to assign model profiles/i),
+      screen.getByText(/waiting for the engine/i),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /save assignments/i })).not.toBeInTheDocument();
     expect(snapshot).not.toHaveBeenCalled();

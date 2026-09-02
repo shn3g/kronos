@@ -70,10 +70,7 @@ export function RunsPage({ engineClient, runsClient, goalId }: RunsPageProps) {
       <section className="runs-page">
         <p className="page-kicker">Runs</p>
         <h1 className="page-title">Runs</h1>
-        <p className="page-body">
-          Connect a compatible engine to inspect task runs, tests, and review evidence. This
-          screen stays closed until the local engine is ready.
-        </p>
+        <p className="page-body">Waiting for the engine.</p>
       </section>
     );
   }

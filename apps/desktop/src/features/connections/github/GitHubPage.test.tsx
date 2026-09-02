@@ -80,7 +80,7 @@ describe("GitHubPage", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Connections" })).toBeInTheDocument();
     expect(
-      screen.getByText(/connect a compatible engine to create and install GitHub Apps/i),
+      screen.getByText(/waiting for the engine/i),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /convert controller/i })).not.toBeInTheDocument();
     expect(status).not.toHaveBeenCalled();

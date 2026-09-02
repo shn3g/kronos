@@ -70,7 +70,7 @@ describe("SkillsPage", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Skills" })).toBeInTheDocument();
     expect(
-      screen.getByText(/connect a compatible engine to browse, quarantine, and activate skills/i),
+      screen.getByText(/waiting for the engine/i),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /activate/i })).not.toBeInTheDocument();
     expect(list).not.toHaveBeenCalled();

@@ -70,7 +70,7 @@ describe("IndexPage", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Index" })).toBeInTheDocument();
     expect(
-      screen.getByText(/connect a compatible engine to inspect repository indexes/i),
+      screen.getByText(/waiting for the engine/i),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /rebuild index/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();

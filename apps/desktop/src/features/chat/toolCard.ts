@@ -11,8 +11,12 @@ const TOOL_LABELS: Record<string, string> = {
   run_command: "Run command",
 };
 
+export function toolDisplayName(name: string | null): string {
+  return (name && TOOL_LABELS[name]) || name || "Tool";
+}
+
 export function toolCardLabel(name: string | null, status: string | null): string {
-  const label = (name && TOOL_LABELS[name]) || name || "Tool";
+  const label = toolDisplayName(name);
   if (status === "ok") {
     return `${label} · done`;
   }

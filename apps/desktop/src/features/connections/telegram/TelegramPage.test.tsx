@@ -42,7 +42,7 @@ describe("TelegramPage", () => {
 
     expect(await screen.findByRole("heading", { name: "Telegram" })).toBeInTheDocument();
     expect(
-      screen.getByText(/connect a compatible engine to set up Telegram/i),
+      screen.getByText(/waiting for the engine/i),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /import bot token/i })).not.toBeInTheDocument();
     expect(status).not.toHaveBeenCalled();

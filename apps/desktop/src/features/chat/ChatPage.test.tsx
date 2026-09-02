@@ -165,7 +165,7 @@ describe("ChatPage", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Ask Kronos" })).toBeInTheDocument();
   });
 
-  it("says workspace instruction files are followed when a folder is open", async () => {
+  it("shows a one-line empty state when a workspace folder is open", async () => {
     render(
       <ChatPage
         chatClient={chatClient()}
@@ -176,7 +176,7 @@ describe("ChatPage", () => {
     );
 
     expect(
-      await screen.findByText(/AGENTS.md and Cursor rules files in this folder are followed/i),
+      await screen.findByText(/ask about this workspace, paste a screenshot, or type \/goal/i),
     ).toBeInTheDocument();
   });
 
@@ -246,7 +246,7 @@ describe("ChatPage", () => {
     await user.type(box, "What is broken in onboarding?");
     await user.click(screen.getByRole("button", { name: /^send$/i }));
     expect(await screen.findByText(/what is broken in onboarding/i)).toBeInTheDocument();
-    expect(screen.getByText(/working on this turn/i)).toBeInTheDocument();
+    expect(screen.getByText(/streaming reply/i)).toBeInTheDocument();
 
     await act(async () => {
       handlers.onDelta("Staff is ");
@@ -286,7 +286,7 @@ describe("ChatPage", () => {
     const box = await screen.findByRole("textbox", { name: /ask kronos/i });
     await user.type(box, "Read the file");
     await user.click(screen.getByRole("button", { name: /^send$/i }));
-    await screen.findByText(/working on this turn/i);
+    await screen.findByText(/streaming reply/i);
 
     await act(async () => {
       const running: ChatToolEvent = {
@@ -297,7 +297,7 @@ describe("ChatPage", () => {
       };
       handlers.onTool?.(running);
     });
-    expect(await screen.findByText("Read file · running")).toBeInTheDocument();
+    expect(await screen.findByText("Read file · running.")).toBeInTheDocument();
 
     await act(async () => {
       handlers.onTool?.({

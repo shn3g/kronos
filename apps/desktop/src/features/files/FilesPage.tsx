@@ -528,7 +528,7 @@ export function FilesPage({
     return (
       <section className="files-page">
         <h1 className="page-title">Files</h1>
-        <p className="page-body">Files load after the engine connects.</p>
+        <p className="page-body">Waiting for the engine.</p>
       </section>
     );
   }

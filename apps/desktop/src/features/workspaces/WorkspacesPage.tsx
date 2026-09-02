@@ -70,10 +70,7 @@ export function WorkspacesPage({
       <section className="workspaces">
         <p className="page-kicker">Workspaces</p>
         <h1 className="page-title">Workspaces</h1>
-        <p className="page-body">
-          Connect a compatible engine to enrol repositories. Enrolment stays closed until the
-          local engine is ready.
-        </p>
+        <p className="page-body">Waiting for the engine.</p>
       </section>
     );
   }
@@ -139,9 +136,7 @@ export function WorkspacesPage({
     <section className="workspaces">
       <p className="page-kicker">Workspaces</p>
       <h1 className="page-title">Workspaces</h1>
-      <p className="page-body">
-        Enrolled repositories stay isolated. Indexes, worktrees, and engine state live outside git.
-      </p>
+      <p className="page-body">Enrol git folders and enable Kronos on each workspace.</p>
       <div className="workspaces__toolbar">
         <button type="button" className="btn-primary" onClick={() => setWizardOpen(true)}>
           Enable Kronos

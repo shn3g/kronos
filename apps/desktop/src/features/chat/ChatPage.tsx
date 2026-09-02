@@ -39,7 +39,8 @@ import {
   userMessageSegments,
   type ChatComposerImage,
 } from "./pastedImage";
-import { toolCardLabel } from "./toolCard";
+import { toolCardLabel, toolDisplayName } from "./toolCard";
+import { streamStatusMessage, type StreamPhase } from "./streamStatus";
 
 const EMPTY_MENTION_REQUEST = { path: "", nonce: 0, selectedText: "", startLine: 0, endLine: 0 };
 
@@ -92,6 +93,8 @@ export function ChatPage({
   const [messages, setMessages] = useState<ThreadItem[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [streamPhase, setStreamPhase] = useState<StreamPhase>("idle");
+  const [activeToolLabel, setActiveToolLabel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mentionPaths, setMentionPaths] = useState<string[]>([]);
   const [mentionHighlight, setMentionHighlight] = useState(0);
@@ -308,6 +311,8 @@ export function ChatPage({
       streaming: true,
     };
     setError(null);
+    setStreamPhase("streaming");
+    setActiveToolLabel(null);
     if (options.clearDraft) {
       setDraft("");
       setComposerImages([]);
@@ -330,12 +335,21 @@ export function ChatPage({
           );
         },
         onTool: (tool) => {
+          if (tool.status === "running") {
+            setStreamPhase("tool");
+            setActiveToolLabel(toolDisplayName(tool.name));
+          } else {
+            setStreamPhase("streaming");
+            setActiveToolLabel(null);
+          }
           setMessages((current) => upsertToolMessage(current, tool, assistantId));
         },
         onGoal: (goal) => {
           setMessages((current) => upsertGoalMessage(current, goal, assistantId));
         },
         onDone: (result) => {
+          setStreamPhase("done");
+          setActiveToolLabel(null);
           setMessages((current) =>
             current.map((item) =>
               item.id === assistantId
@@ -352,6 +366,8 @@ export function ChatPage({
         },
         onError: () => {
           failed = true;
+          setStreamPhase("error");
+          setActiveToolLabel(null);
         },
       });
       if (failed) {
@@ -361,6 +377,7 @@ export function ChatPage({
           setComposerImages(options.images);
         }
         setError("Could not send that message. Check the model connection and try again.");
+        setStreamPhase("error");
       }
     } catch {
       setMessages((current) => current.filter((item) => item.id !== pending.id && item.id !== assistantId));
@@ -369,6 +386,7 @@ export function ChatPage({
         setComposerImages(options.images);
       }
       setError("Could not send that message. Check the model connection and try again.");
+      setStreamPhase("error");
     } finally {
       inflightRef.current = null;
       setBusy(false);
@@ -559,8 +577,8 @@ export function ChatPage({
             <h1 className="chat-empty__title">Ask Kronos</h1>
             <p>
               {repositoryId
-                ? "Chat can search this workspace, read and write files, run commands, and start a longer goal when you want unattended work. AGENTS.md and Cursor rules files in this folder are followed on every turn. Apply on a code block writes that file here. Click a file mention to open it in Files. Paste a screenshot to ask about the UI."
-                : "You can ask how Kronos works now. Paste a screenshot, or open a git folder to index code."}
+                ? "Ask about this workspace, paste a screenshot, or type /goal for unattended work."
+                : "Ask how Kronos works, or open a git folder to index code."}
             </p>
             {repositoryId ? null : (
               <button type="button" className="btn-quiet" onClick={onOpenWorkspace}>
@@ -573,7 +591,7 @@ export function ChatPage({
             {messages.map((item) => (
               <li
                 key={item.id}
-                className={`chat-bubble chat-bubble--${item.role}${item.streaming ? " chat-bubble--streaming" : ""}`}
+                className={`chat-bubble chat-bubble--${item.role}${item.streaming ? " chat-bubble--streaming" : ""}${item.role === "tool" && item.toolStatus ? ` chat-bubble--tool-${item.toolStatus}` : ""}`}
                 data-tool={item.toolName ?? undefined}
               >
                 {item.goalEvent ? (
@@ -612,9 +630,9 @@ export function ChatPage({
             ))}
           </ol>
         )}
-        {busy ? (
-          <p className="chat-turn-status" aria-live="polite">
-            Working on this turn.
+        {streamStatusMessage(streamPhase, activeToolLabel ?? undefined) ? (
+          <p className="chat-turn-status" role="status" aria-live="polite">
+            {streamStatusMessage(streamPhase, activeToolLabel ?? undefined)}
           </p>
         ) : null}
         {error ? (

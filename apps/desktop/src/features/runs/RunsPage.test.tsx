@@ -19,7 +19,7 @@ describe("RunsPage", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Runs" })).toBeInTheDocument();
     expect(
-      screen.getByText(/connect a compatible engine to inspect task runs/i),
+      screen.getByText(/waiting for the engine/i),
     ).toBeInTheDocument();
     expect(list).not.toHaveBeenCalled();
   });

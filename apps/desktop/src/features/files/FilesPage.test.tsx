@@ -90,7 +90,7 @@ describe("FilesPage", () => {
     );
 
     expect(await screen.findByRole("heading", { level: 1, name: "Files" })).toBeInTheDocument();
-    expect(screen.getByText(/files load after the engine connects/i)).toBeInTheDocument();
+    expect(screen.getByText(/waiting for the engine/i)).toBeInTheDocument();
     expect(screen.queryByRole("tree", { name: /workspace files/i })).not.toBeInTheDocument();
     expect(listWorkspaceFiles).not.toHaveBeenCalled();
   });

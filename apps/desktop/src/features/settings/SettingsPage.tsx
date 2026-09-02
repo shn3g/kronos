@@ -64,10 +64,7 @@ export function SettingsPage({ engineClient, settingsClient }: SettingsPageProps
       <section className="settings-page">
         <p className="page-kicker">Settings</p>
         <h1 className="page-title">Settings</h1>
-        <p className="page-body">
-          Connect a compatible engine to change settings. Tokens and private keys are never pasted
-          here.
-        </p>
+        <p className="page-body">Waiting for the engine.</p>
       </section>
     );
   }
@@ -98,10 +95,7 @@ export function SettingsPage({ engineClient, settingsClient }: SettingsPageProps
     <section className="settings-page">
       <p className="page-kicker">Settings</p>
       <h1 className="page-title">Settings</h1>
-      <p className="page-body">
-        Export is off by default. GitHub PEMs and Telegram bot tokens stay in the OS secret store
-        and the Connections native import flow.
-      </p>
+      <p className="page-body">Telemetry, backups, and doctor checks for this install.</p>
       <label className="models__confirm">
         <input
           type="checkbox"
