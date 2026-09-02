@@ -36,9 +36,21 @@ test("connects a mock model, enrols a folder, chats, and uses Files and Terminal
   await page.getByLabel(/model id/i).fill("mock");
   await page.getByRole("button", { name: "Continue" }).click();
 
-  // First-run may show optional workspace step after embeddings (seeded in startWithEngine).
+  const embeddingsHeading = page.getByRole("heading", { name: /install local embeddings/i });
   const workspaceStep = page.getByRole("heading", { name: "Open a workspace" });
   const askHeading = page.getByRole("heading", { name: "Ask Kronos" });
+  await expect(embeddingsHeading.or(workspaceStep).or(askHeading)).toBeVisible({
+    timeout: 60_000,
+  });
+  if (await embeddingsHeading.isVisible()) {
+    const installButton = page.getByRole("button", { name: /^install$/i });
+    if (await installButton.isEnabled()) {
+      await installButton.click();
+      await expect(page.getByText(/local embeddings are ready/i)).toBeVisible({
+        timeout: 180_000,
+      });
+    }
+  }
   await expect(workspaceStep.or(askHeading)).toBeVisible({ timeout: 30_000 });
   if (await workspaceStep.isVisible()) {
     await page.getByRole("button", { name: "Skip for now" }).click();

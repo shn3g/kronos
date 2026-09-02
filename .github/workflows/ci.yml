@@ -1,12 +1,11 @@
 name: CI
 
-# Jobs run only when a pull request is marked ready for review.
-# Draft opened/synchronize events are not in `on`, so they never start a run.
-# converted_to_draft starts a skipped run so concurrency can cancel an in-flight matrix.
+# Jobs run when a pull request is marked ready for review or receives new commits.
+# Draft opened events are not in `on`. converted_to_draft starts a skipped run for concurrency cancel.
 # There is no `on.push`: merging to main does not re-run tests. Tags use release.yml.
 on:
   pull_request:
-    types: [ready_for_review, converted_to_draft]
+    types: [ready_for_review, converted_to_draft, synchronize]
 
 permissions:
   contents: read
