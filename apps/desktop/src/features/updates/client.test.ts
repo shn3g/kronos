@@ -24,6 +24,6 @@ describe("createProductionUpdatesClient", () => {
     const status = await client.status();
     expect(status.signed).toBe(false);
     expect(status.checksumsPresent).toBe(true);
-    expect(client.updaterSigningConfigured()).toBe(false);
+    expect(client.updaterSigningConfigured()).toBe(true);
   });
 });

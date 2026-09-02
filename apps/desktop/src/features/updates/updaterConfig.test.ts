@@ -24,4 +24,9 @@ describe("updaterConfig", () => {
     expect(isUpdaterSigningConfigured("")).toBe(false);
     expect(isUpdaterSigningConfigured("   ")).toBe(false);
   });
+
+  it("treats the bundled publisher pubkey as configured", () => {
+    expect(UPDATER_PUBKEY.trim().length).toBeGreaterThan(0);
+    expect(isUpdaterSigningConfigured()).toBe(true);
+  });
 });
