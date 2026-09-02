@@ -34,9 +34,10 @@ def _engine_env(tmp_path: Path, token: str) -> dict[str, str]:
     return env
 
 
-def _start(env: dict[str, str]) -> subprocess.Popen[str]:
+def _start(env: dict[str, str], *, command: list[str] | None = None) -> subprocess.Popen[str]:
+    launch = command or [sys.executable, "-m", "kronos_engine"]
     return subprocess.Popen(
-        [sys.executable, "-m", "kronos_engine"],
+        launch,
         cwd=str(ENGINE_ROOT),
         env=env,
         stdout=subprocess.PIPE,
@@ -122,5 +123,25 @@ def test_desktop_probe_path_is_ready_and_can_read_events(tmp_path: Path) -> None
         payload = events.json()
         assert payload["events"] == []
         assert payload["head_seq"] == 0
+    finally:
+        _stop(proc)
+
+
+@pytest.mark.integration
+def test_desktop_probe_bundled_binary_when_env_set(tmp_path: Path) -> None:
+    raw_bin = os.environ.get("KRONOS_ENGINE_BIN", "").strip()
+    if not raw_bin:
+        pytest.skip("KRONOS_ENGINE_BIN is not set")
+    bundled = Path(raw_bin)
+    if not bundled.is_file():
+        pytest.skip(f"KRONOS_ENGINE_BIN does not point at a file: {bundled}")
+
+    token = "desktop-probe-bundled-token"
+    proc = _start(_engine_env(tmp_path, token), command=[str(bundled)])
+    try:
+        base_url = _wait_ready_line(proc, timeout=20.0).rstrip("/")
+        assert base_url.startswith("http://127.0.0.1:")
+        state = probe_engine_state(base_url, token)
+        assert state == {"status": "ready", "version": ENGINE_VERSION}
     finally:
         _stop(proc)

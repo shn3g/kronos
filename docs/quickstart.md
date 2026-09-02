@@ -10,19 +10,20 @@ Download a Windows NSIS installer, Linux `.deb`, or macOS `.app` from a [GitHub 
 
 Signing is not present. Windows SmartScreen and macOS Gatekeeper will warn. That is the OS. Use "Run anyway" or right-click Open for the unsigned path.
 
-The desktop sidecar still runs `python -m kronos_engine` (`python` on Windows, `python3` elsewhere) from PATH. Python 3.11+ must be installed until a later bundle. An unsigned installer that does not bundle Python is not fully one-click.
+Installers bundle the local engine. You do not need Python on PATH to run them.
 
-Hosted GitHub Actions may not always produce Release artifacts. If the Release has no installer, install Node 22, pnpm 9.15, Python 3.11+, Rust, and the platform WebView, then:
+Hosted GitHub Actions may not always produce Release artifacts. If the Release has no installer, install Node 22, pnpm 9.15, Python 3.11+, Rust, and the platform WebView. Python is required to build the engine and for `python -m kronos_engine` during development. Then:
 
 ```text
 pnpm install
 cd engine && pip install -e ".[dev]" && cd ..
+python3 scripts/build-engine.py
 pnpm tauri build
 ```
 
 ## First run
 
-1. Open Kronos. If the local engine is down, the window says "The local engine is not running". The sidecar is `python -m kronos_engine` on PATH. Until 0.5.0 the engine **must match the desktop version**.
+1. Open Kronos. If the local engine is down, the window says "The local engine is not running". Installers start a bundled `kronos-engine` sidecar; development builds may use `python -m kronos_engine` on PATH instead. Until 0.5.0 the engine **must match the desktop version**.
 2. Connect a model if no orchestrator is assigned. Keys go into the operating system secret store.
 3. Chat is the main stage without a folder. Open a git folder from File or Workspaces when you want indexing, the Files editor, Terminal (View menu), and inspector Changes (revert or local commit). Chat can search, read, write, and run capped commands inside that folder. `/goal` creates a draft and reports readiness. Goals workbench lists plans, Plan/Tick, and readiness with Settings fix links. Paste a screenshot into chat to ask about the UI.
 4. Browser preview: start the engine, then `pnpm --filter @kronos/desktop dev` and open `http://localhost:1420`. The page never sees the engine token. `vite preview` stays engine-unavailable.

@@ -1114,7 +1114,7 @@ fn spawn_engine(app: &AppHandle) -> Result<(Child, EngineConnection), String> {
     let paths = EngineDirs::resolve(app)?;
     paths.create()?;
     let token = load_or_create_token(&paths.config.join("install.json"))?;
-    let (program, args) = engine_command()?;
+    let (program, args) = engine_command(app)?;
     let log_path = paths.logs.join("engine.log");
     let log_file = OpenOptions::new()
         .create(true)
@@ -1123,6 +1123,13 @@ fn spawn_engine(app: &AppHandle) -> Result<(Child, EngineConnection), String> {
         .map_err(|error| error.to_string())?;
 
     let mut command = Command::new(&program);
+    if args.is_empty() {
+        if let Some(parent) = program.parent() {
+            if !parent.as_os_str().is_empty() {
+                command.current_dir(parent);
+            }
+        }
+    }
     command
         .args(&args)
         .env("KRONOS_DATA_HOME", &paths.data)
@@ -1229,32 +1236,82 @@ impl EngineDirs {
     }
 }
 
-fn engine_command() -> Result<(PathBuf, Vec<String>), String> {
-    if let Ok(bin) = std::env::var("KRONOS_ENGINE_BIN") {
+fn engine_sidecar_name() -> &'static str {
+    if cfg!(windows) {
+        "kronos-engine.exe"
+    } else {
+        "kronos-engine"
+    }
+}
+
+fn resolve_bundled_engine_executable(candidate: &Path) -> Option<PathBuf> {
+    if candidate.is_file() {
+        return Some(candidate.to_path_buf());
+    }
+    if candidate.is_dir() {
+        let nested = candidate.join(engine_sidecar_name());
+        if nested.is_file() {
+            return Some(nested);
+        }
+    }
+    None
+}
+
+fn resolve_engine_command(
+    env_bin: Option<&str>,
+    resource_dir: Option<&Path>,
+    current_exe_dir: Option<&Path>,
+) -> Result<(PathBuf, Vec<String>), String> {
+    if let Some(bin) = env_bin {
         let path = PathBuf::from(bin);
-        if path.exists() {
-            return Ok((path, Vec::new()));
+        if let Some(resolved) = resolve_bundled_engine_executable(&path) {
+            return Ok((resolved, Vec::new()));
         }
         return Err(format!(
             "KRONOS_ENGINE_BIN does not exist: {}",
             path.display()
         ));
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            for name in ["kronos-engine.exe", "kronos-engine"] {
-                let candidate = dir.join(name);
-                if candidate.exists() {
-                    return Ok((candidate, Vec::new()));
-                }
+
+    if let Some(resource_dir) = resource_dir {
+        let mut resource_candidates = vec![resource_dir.join("engine").join(engine_sidecar_name())];
+        if cfg!(windows) {
+            resource_candidates.push(resource_dir.join("engine").join("kronos-engine"));
+        }
+        for candidate in resource_candidates {
+            if let Some(resolved) = resolve_bundled_engine_executable(&candidate) {
+                return Ok((resolved, Vec::new()));
             }
         }
     }
+
+    if let Some(dir) = current_exe_dir {
+        for name in ["kronos-engine.exe", "kronos-engine"] {
+            let candidate = dir.join(name);
+            if let Some(resolved) = resolve_bundled_engine_executable(&candidate) {
+                return Ok((resolved, Vec::new()));
+            }
+        }
+    }
+
     let python = python_executable();
     Ok((
         PathBuf::from(python),
         vec!["-m".to_string(), "kronos_engine".to_string()],
     ))
+}
+
+fn engine_command(app: &AppHandle) -> Result<(PathBuf, Vec<String>), String> {
+    let env_bin = std::env::var("KRONOS_ENGINE_BIN").ok();
+    let resource_dir = app.path().resource_dir().ok();
+    let current_exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf));
+    resolve_engine_command(
+        env_bin.as_deref(),
+        resource_dir.as_deref(),
+        current_exe_dir.as_deref(),
+    )
 }
 
 fn python_executable() -> &'static str {
@@ -1563,6 +1620,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::engine_path_allowed;
+    use std::path::PathBuf;
 
     #[test]
     fn allowlist_includes_models_and_repositories() {
@@ -1885,5 +1943,83 @@ mod tests {
             src.contains("loopback_request(\"GET\", url, extra_headers, None, PROBE_TIMEOUT)"),
             "loopback_get / ready-check must keep the 2s probe timeout"
         );
+    }
+
+    #[test]
+    fn engine_command_prefers_env_bin_over_resource_and_sibling() {
+        let temp = tempfile::tempdir().unwrap();
+        let env_bin = temp.path().join("custom-engine");
+        std::fs::write(&env_bin, "bin").unwrap();
+        let resource_dir = temp.path().join("resources");
+        let resource_engine = resource_dir.join("engine").join("kronos-engine");
+        std::fs::create_dir_all(resource_engine.parent().unwrap()).unwrap();
+        std::fs::write(&resource_engine, "resource").unwrap();
+        let sibling_dir = temp.path().join("app");
+        std::fs::create_dir_all(&sibling_dir).unwrap();
+        std::fs::write(sibling_dir.join("kronos-engine"), "sibling").unwrap();
+
+        let resolved = super::resolve_engine_command(
+            Some(env_bin.to_str().unwrap()),
+            Some(&resource_dir),
+            Some(&sibling_dir),
+        )
+        .unwrap();
+        assert_eq!(resolved.0, env_bin);
+        assert!(resolved.1.is_empty());
+    }
+
+    #[test]
+    fn engine_command_uses_resource_dir_before_sibling_and_python() {
+        let temp = tempfile::tempdir().unwrap();
+        let resource_dir = temp.path().join("resources");
+        let resource_engine = resource_dir.join("engine").join("kronos-engine");
+        std::fs::create_dir_all(resource_engine.parent().unwrap()).unwrap();
+        std::fs::write(&resource_engine, "resource").unwrap();
+        let sibling_dir = temp.path().join("app");
+        std::fs::create_dir_all(&sibling_dir).unwrap();
+        std::fs::write(sibling_dir.join("kronos-engine"), "sibling").unwrap();
+
+        let resolved = super::resolve_engine_command(None, Some(&resource_dir), Some(&sibling_dir))
+            .unwrap();
+        assert_eq!(resolved.0, resource_engine);
+        assert!(resolved.1.is_empty());
+    }
+
+    #[test]
+    fn engine_command_uses_sibling_before_python_fallback() {
+        let temp = tempfile::tempdir().unwrap();
+        let sibling_dir = temp.path().join("app");
+        std::fs::create_dir_all(&sibling_dir).unwrap();
+        let sibling_engine = sibling_dir.join("kronos-engine");
+        std::fs::write(&sibling_engine, "sibling").unwrap();
+
+        let resolved = super::resolve_engine_command(None, None, Some(&sibling_dir)).unwrap();
+        assert_eq!(resolved.0, sibling_engine);
+        assert!(resolved.1.is_empty());
+    }
+
+    #[test]
+    fn engine_command_falls_back_to_python_module() {
+        let resolved = super::resolve_engine_command(None, None, None).unwrap();
+        let expected_python = if cfg!(windows) { "python" } else { "python3" };
+        assert_eq!(resolved.0, PathBuf::from(expected_python));
+        assert_eq!(
+            resolved.1,
+            vec!["-m".to_string(), "kronos_engine".to_string()]
+        );
+    }
+
+    #[test]
+    fn engine_command_resolves_onedir_folder_under_resources() {
+        let temp = tempfile::tempdir().unwrap();
+        let resource_dir = temp.path().join("resources");
+        let onedir = resource_dir.join("engine").join("kronos-engine");
+        let nested = onedir.join("kronos-engine");
+        std::fs::create_dir_all(&onedir).unwrap();
+        std::fs::write(&nested, "onedir").unwrap();
+
+        let resolved = super::resolve_engine_command(None, Some(&resource_dir), None).unwrap();
+        assert_eq!(resolved.0, nested);
+        assert!(resolved.1.is_empty());
     }
 }
