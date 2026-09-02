@@ -77,6 +77,7 @@ export function ConnectModelGate({ modelsClient, onConnected }: ConnectModelGate
 
   return (
     <section className="gate">
+      <p className="gate__step">Step 1 of 3 · Connect a model</p>
       <h1 className="gate__title">Connect a model</h1>
       <p className="gate__body">
         Kronos needs one model before it can chat. The key is stored by the operating system, not
@@ -121,7 +122,7 @@ export function ConnectModelGate({ modelsClient, onConnected }: ConnectModelGate
             kind: "openai_compatible",
             displayName: displayName.trim() || "Local model",
             baseUrl: baseUrl.trim() || null,
-            billed: false,
+            billed: billedFromBaseUrl(baseUrl.trim()),
             apiKey: apiKey.trim() ? apiKey.trim() : null,
             modelId: modelId.trim() ? modelId.trim() : null,
           });
@@ -170,11 +171,12 @@ export function ConnectModelGate({ modelsClient, onConnected }: ConnectModelGate
           />
         </label>
         <label className="wizard__label" htmlFor="model-id">
-          Model id (optional)
+          Model id
           <input
             id="model-id"
             className="wizard__input"
             value={modelId}
+            placeholder="e.g. big-pickle"
             onChange={(event) => {
               setModelId(event.target.value);
             }}
@@ -194,7 +196,7 @@ export function ConnectModelGate({ modelsClient, onConnected }: ConnectModelGate
           />
         </label>
         {error ? <p className="wizard__error">{error}</p> : null}
-        <button type="submit" className="btn-primary" disabled={busy}>
+        <button type="submit" className={localEndpoint ? "btn-quiet" : "btn-primary"} disabled={busy}>
           Continue
         </button>
         {showCursorCliNote ? null : (

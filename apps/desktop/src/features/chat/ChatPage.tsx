@@ -106,7 +106,11 @@ export function ChatPage({
   const [assignments, setAssignments] = useState<RoleAssignments | null>(null);
   const [contextWindow, setContextWindow] = useState(DEFAULT_CONTEXT_WINDOW);
   const [modelLabel, setModelLabel] = useState<string | null>(orchestratorName);
-  const inflightRef = useRef<{ conversationId: string; requestId: string } | null>(null);
+  const inflightRef = useRef<{
+    conversationId: string;
+    requestId: string;
+    stopped: boolean;
+  } | null>(null);
   const threadRef = useRef<HTMLOListElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
@@ -373,9 +377,12 @@ export function ChatPage({
       if (id === null || turnEpochRef.current !== epoch) {
         return;
       }
-      inflightRef.current = { conversationId: id, requestId };
+      inflightRef.current = { conversationId: id, requestId, stopped: false };
       setBusy(true);
       let failed = false;
+      let failMessage = "";
+      let terminalSeen = false;
+      let accumulated = "";
       const stillThisTurn = () => turnEpochRef.current === epoch;
       await chatClient.streamMessage(id, text, {
         requestId,
@@ -384,6 +391,7 @@ export function ChatPage({
           if (!stillThisTurn()) {
             return;
           }
+          accumulated += delta;
           setMessages((current) =>
             current.map((item) =>
               item.id === assistantId ? { ...item, content: item.content + delta } : item,
@@ -413,9 +421,18 @@ export function ChatPage({
           if (!stillThisTurn()) {
             return;
           }
+          terminalSeen = true;
+          const stopped = inflightRef.current?.stopped === true;
+          const finalContent = (result.content || accumulated).trim();
+          if (finalContent === "" && !stopped) {
+            failed = true;
+            failMessage = "The model returned an empty reply. Check the model id, API key, and provider URL.";
+            settleStreamStatus("error");
+            return;
+          }
           settleStreamStatus("done");
-          setMessages((current) =>
-            current.map((item) =>
+          setMessages((current) => {
+            const next = current.map((item) =>
               item.id === assistantId
                 ? {
                     ...item,
@@ -425,19 +442,31 @@ export function ChatPage({
                     streaming: false,
                   }
                 : item,
-            ),
-          );
+            );
+            if (stopped && finalContent === "") {
+              return next.filter((item) => item.id !== assistantId);
+            }
+            return next;
+          });
         },
-        onError: () => {
+        onError: (message) => {
           if (!stillThisTurn()) {
             return;
           }
+          terminalSeen = true;
           failed = true;
+          failMessage =
+            message.trim() ||
+            "Could not send that message. Check the model connection and try again.";
           settleStreamStatus("error");
         },
       });
       if (!stillThisTurn()) {
         return;
+      }
+      if (!terminalSeen && !failed && inflightRef.current?.stopped !== true) {
+        failed = true;
+        failMessage = "The reply ended before the model finished.";
       }
       if (failed) {
         setMessages((current) => current.filter((item) => item.id !== pending.id && item.id !== assistantId));
@@ -445,10 +474,12 @@ export function ChatPage({
           setDraft(text);
           setComposerImages(options.images);
         }
-        setError("Could not send that message. Check the model connection and try again.");
+        setError(
+          failMessage || "Could not send that message. Check the model connection and try again.",
+        );
         settleStreamStatus("error");
       }
-    } catch {
+    } catch (caught) {
       if (turnEpochRef.current !== epoch) {
         return;
       }
@@ -457,7 +488,10 @@ export function ChatPage({
         setDraft(text);
         setComposerImages(options.images);
       }
-      setError("Could not send that message. Check the model connection and try again.");
+      const detail = caught instanceof Error ? caught.message.trim() : "";
+      setError(
+        detail || "Could not send that message. Check the model connection and try again.",
+      );
       settleStreamStatus("error");
     } finally {
       if (turnEpochRef.current === epoch) {
@@ -552,6 +586,7 @@ export function ChatPage({
       setBusy(false);
       return;
     }
+    inflight.stopped = true;
     try {
       await chatClient.cancelStream(inflight.conversationId, inflight.requestId);
     } catch {
@@ -616,6 +651,7 @@ export function ChatPage({
   const contextLabel = chatContextMeterLabel(contextUsage);
   const contextWarn = chatContextWarning(contextUsage.ratio);
   const contextPercent = Math.round(contextUsage.ratio * 100);
+  const lastAssistantId = [...messages].reverse().find((item) => item.role === "assistant")?.id ?? null;
 
   return (
     <div className="chat-layout">
@@ -687,6 +723,17 @@ export function ChatPage({
                         ))}
                       </ul>
                     ) : null}
+                    {!busy &&
+                    !error &&
+                    !item.streaming &&
+                    item.id === lastAssistantId &&
+                    item.content.trim() !== "" ? (
+                      <div className="chat-bubble__actions">
+                        <button type="button" className="btn-quiet" onClick={() => void onRetry()}>
+                          Retry
+                        </button>
+                      </div>
+                    ) : null}
                   </>
                 ) : item.role === "user" ? (
                   <UserMessage
@@ -715,13 +762,6 @@ export function ChatPage({
             <p className="wizard__error">{error}</p>
             <button type="button" className="btn-quiet" onClick={() => void onSend()}>
               Try again
-            </button>
-          </div>
-        ) : null}
-        {!busy && !error && lastUserMessageText(messages) !== "" ? (
-          <div className="chat-retry">
-            <button type="button" className="btn-quiet" onClick={() => void onRetry()}>
-              Retry
             </button>
           </div>
         ) : null}

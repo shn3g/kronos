@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -79,6 +79,11 @@ async function main(): Promise<void> {
   for (const name of ["data", "config", "cache", "logs"]) {
     mkdirSync(join(home, name), { recursive: true });
   }
+  const modelsRoot = join(home, "cache", "models", "minilm-l6-v2");
+  mkdirSync(modelsRoot, { recursive: true });
+  writeFileSync(join(modelsRoot, "all-MiniLM-L6-v2.onnx"), "");
+  writeFileSync(join(modelsRoot, "tokenizer.json"), "{}");
+  writeFileSync(join(home, "cache", "models", ".active-key"), "minilm-l6-v2");
   if (!existsSync(engineRoot)) {
     throw new Error(`engine root missing: ${engineRoot}`);
   }

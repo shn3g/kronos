@@ -1027,7 +1027,7 @@ def _trim_history(
     max_tokens: int,
     system: str,
 ) -> tuple[ConversationMessage, ...]:
-    room = window - budget - max_tokens - _char_tokens(system)
+    room = window - budget - (max_tokens or 4096) - _char_tokens(system)
     selected: list[ConversationMessage] = []
     used = 0
     for item in reversed(messages):

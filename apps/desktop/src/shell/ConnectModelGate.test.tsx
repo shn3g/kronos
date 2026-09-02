@@ -154,7 +154,7 @@ describe("ConnectModelGate", () => {
     await user.click(screen.getByRole("button", { name: /^continue$/i }));
     expect(createProvider).toHaveBeenCalledWith(
       expect.objectContaining({
-        billed: false,
+        billed: true,
         baseUrl: "https://api.openai.com/v1",
         apiKey: "sk-test",
         modelId: "gpt-4o-mini",

@@ -36,7 +36,14 @@ test("connects a mock model, enrols a folder, chats, and uses Files and Terminal
   await page.getByLabel(/model id/i).fill("mock");
   await page.getByRole("button", { name: "Continue" }).click();
 
-  await expect(page.getByRole("heading", { name: "Ask Kronos" })).toBeVisible({ timeout: 30_000 });
+  // First-run may show optional workspace step after embeddings (seeded in startWithEngine).
+  const workspaceStep = page.getByRole("heading", { name: "Open a workspace" });
+  const askHeading = page.getByRole("heading", { name: "Ask Kronos" });
+  await expect(workspaceStep.or(askHeading)).toBeVisible({ timeout: 30_000 });
+  if (await workspaceStep.isVisible()) {
+    await page.getByRole("button", { name: "Skip for now" }).click();
+  }
+  await expect(askHeading).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: "Workspaces" }).click();
   await page.getByRole("button", { name: "Enable Kronos" }).click();
   await page.locator("#repo-folder").fill(repo);

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   embeddingInstallProgressLabel,
@@ -13,28 +13,46 @@ import type { ModelsClient } from "./client";
 
 interface LocalEmbeddingsCardProps {
   modelsClient: ModelsClient;
+  variant?: "settings" | "gate";
+  onReady?: () => void;
 }
 
 const POLL_MS = 500;
 
-export function LocalEmbeddingsCard({ modelsClient }: LocalEmbeddingsCardProps) {
+function embeddingsInstalled(snapshot: EmbeddingInstallSnapshot): boolean {
+  return snapshot.activeKey !== null || snapshot.catalog.some((item) => item.installed);
+}
+
+export function LocalEmbeddingsCard({
+  modelsClient,
+  variant = "settings",
+  onReady,
+}: LocalEmbeddingsCardProps) {
   const [snapshot, setSnapshot] = useState<EmbeddingInstallSnapshot | null>(null);
   const [selectedKey, setSelectedKey] = useState("minilm-l6-v2");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const readyFired = useRef(false);
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
 
   useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
       try {
         const next = await modelsClient.embeddingInstall();
-        if (!cancelled) {
-          setSnapshot(next);
-          if (next.activeKey) {
-            setSelectedKey(next.activeKey);
-          } else if (next.catalog.length > 0) {
-            setSelectedKey((current) => current || next.catalog[0]?.key || "minilm-l6-v2");
-          }
+        if (cancelled) {
+          return;
+        }
+        setSnapshot(next);
+        if (next.activeKey) {
+          setSelectedKey(next.activeKey);
+        } else if (next.catalog.length > 0) {
+          setSelectedKey((current) => current || next.catalog[0]?.key || "minilm-l6-v2");
+        }
+        if (embeddingsInstalled(next) && onReadyRef.current && !readyFired.current) {
+          readyFired.current = true;
+          onReadyRef.current();
         }
       } catch {
         if (!cancelled) {
@@ -59,6 +77,7 @@ export function LocalEmbeddingsCard({ modelsClient }: LocalEmbeddingsCardProps) 
   const installed = selected?.installed === true;
   const progressPercent =
     status && installing ? embeddingInstallProgressPercent(status) : null;
+  const gate = variant === "gate";
 
   async function onInstall() {
     if (!selectedKey) {
@@ -93,10 +112,15 @@ export function LocalEmbeddingsCard({ modelsClient }: LocalEmbeddingsCardProps) 
   }
 
   return (
-    <section className="models__embeddings" aria-labelledby="local-embeddings-title">
-      <h2 id="local-embeddings-title" className="models__embeddings-title">
-        Local embeddings
-      </h2>
+    <section
+      className={gate ? "gate__embeddings" : "models__embeddings"}
+      aria-labelledby={gate ? undefined : "local-embeddings-title"}
+    >
+      {gate ? null : (
+        <h2 id="local-embeddings-title" className="models__embeddings-title">
+          Local embeddings
+        </h2>
+      )}
       <p className="page-body">
         {snapshot?.policy ??
           "Kronos downloads model weights only when you click Install, from pinned URLs verified by SHA-256."}
@@ -122,7 +146,7 @@ export function LocalEmbeddingsCard({ modelsClient }: LocalEmbeddingsCardProps) 
       <div className="models__embeddings-actions">
         <button
           type="button"
-          className="btn-quiet"
+          className={gate ? "btn-primary" : "btn-quiet"}
           disabled={installing || busy || installed}
           onClick={() => {
             void onInstall();
@@ -130,16 +154,18 @@ export function LocalEmbeddingsCard({ modelsClient }: LocalEmbeddingsCardProps) 
         >
           Install
         </button>
-        <button
-          type="button"
-          className="btn-quiet"
-          disabled={installing || busy || !installed}
-          onClick={() => {
-            void onRemove();
-          }}
-        >
-          Remove
-        </button>
+        {gate ? null : (
+          <button
+            type="button"
+            className="btn-quiet"
+            disabled={installing || busy || !installed}
+            onClick={() => {
+              void onRemove();
+            }}
+          >
+            Remove
+          </button>
+        )}
       </div>
       {installing && status ? <InstallProgress status={status} percent={progressPercent} /> : null}
       {status?.state === "failed" && status.error ? (

@@ -10,6 +10,8 @@ import pytest
 from tests.support.secrets import InMemorySecretStore
 
 from kronos_engine.application.model_profiles import (
+    DEFAULT_BILLED_LIMITS,
+    DEFAULT_LIMITS,
     ModelProfileService,
     ProviderDraft,
     RoleAssignmentError,
@@ -81,6 +83,73 @@ def test_register_provider_persists_preset_model_id_on_profiles(tmp_path: Path) 
     profiles = service.list_profiles()
     assert profiles
     assert {item.model_id for item in profiles} == {"gpt-4o-mini"}
+
+
+def test_register_provider_uses_default_limits_for_unbilled_provider(tmp_path: Path) -> None:
+    service, _store = _service(tmp_path)
+    service.register_provider(
+        ProviderDraft(
+            kind="openai_compatible",
+            display_name="Ollama",
+            base_url="http://127.0.0.1:11434/v1",
+            billed=False,
+            api_key=None,
+        )
+    )
+    profiles = service.list_profiles()
+    assert profiles
+    for item in profiles:
+        assert item.limits == DEFAULT_LIMITS
+        assert item.limits.cost_ceiling == 0.0
+        assert item.limits.max_tokens == 8192
+
+
+def test_register_provider_uses_billed_limits_for_billed_provider(tmp_path: Path) -> None:
+    service, _store = _service(tmp_path)
+    service.register_provider(
+        ProviderDraft(
+            kind="openai_compatible",
+            display_name="OpenAI",
+            base_url="https://api.openai.com/v1",
+            billed=True,
+            api_key="sk-test",
+        )
+    )
+    profiles = service.list_profiles()
+    assert profiles
+    for item in profiles:
+        assert item.limits == DEFAULT_BILLED_LIMITS
+        assert item.limits.cost_ceiling == 5.0
+        assert item.limits.max_tokens == 8192
+
+
+def test_backfill_orchestrator_uses_billed_limits_for_billed_provider(tmp_path: Path) -> None:
+    service, _store = _service(tmp_path)
+    provider = ProviderConfig(
+        id="prov_billed",
+        kind="openai_compatible",
+        display_name="OpenAI",
+        base_url="https://api.openai.com/v1",
+        billed=True,
+        secret_ref="provider:prov_billed:api_key",
+    )
+    service._registry.save_provider(provider)
+    for role in ("planner", "coder", "reviewer", "embedding"):
+        service._registry.save_profile(
+            ModelProfile(
+                id=f"prof_{provider.id}_{role}",
+                display_name=f"OpenAI ({role})",
+                role=role,
+                provider_id=provider.id,
+                model_id="gpt-4o-mini",
+                billed=True,
+                approved_fallbacks=(),
+                limits=_limits(),
+            )
+        )
+    orchestrator = next(item for item in service.list_profiles() if item.role == "orchestrator")
+    assert orchestrator.limits == DEFAULT_BILLED_LIMITS
+    assert orchestrator.limits.cost_ceiling == 5.0
 
 
 def test_register_provider_seeds_five_role_profiles(tmp_path: Path) -> None:

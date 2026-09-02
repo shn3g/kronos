@@ -169,8 +169,9 @@ class OpenAICompatibleProvider:
             "messages": list(request.messages)
             if request.messages is not None
             else [{"role": "user", "content": request.prompt}],
-            "max_tokens": request.profile.limits.max_tokens,
         }
+        if request.profile.limits.max_tokens > 0:
+            body["max_tokens"] = request.profile.limits.max_tokens
         if stream:
             body["stream"] = True
         return f"{self._base_url}/chat/completions", headers, body
@@ -195,8 +196,12 @@ def delta_text_from_sse_payload(payload: str) -> str:
     delta = first.get("delta")
     if isinstance(delta, dict):
         content = delta.get("content")
-        if isinstance(content, str):
+        if isinstance(content, str) and content:
             return content
+        for key in ("reasoning_content", "reasoning"):
+            fallback = delta.get(key)
+            if isinstance(fallback, str) and fallback:
+                return fallback
     message = first.get("message")
     if isinstance(message, dict):
         content = message.get("content")
