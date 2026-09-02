@@ -8,6 +8,28 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[4]
 
 
+def test_ci_runs_on_ready_pull_requests_not_on_main_push() -> None:
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    security = (ROOT / ".github" / "workflows" / "security.yml").read_text(encoding="utf-8")
+    release = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+
+    assert "pull_request:" in ci
+    assert "ready_for_review" in ci
+    assert "github.event.pull_request.draft == false" in ci
+    assert "branches: [main]" not in ci
+    assert "on:\n  push:\n    branches: [main]" not in ci.replace("\r\n", "\n")
+    assert "cargo test" in ci
+    assert "clippy" in ci
+
+    assert "branches: [main]" not in security
+    assert "pull_request:" in security
+    assert "cron:" in security
+
+    assert 'tags:' in release
+    assert '"v*"' in release
+    assert "github.ref_type == 'tag'" in release
+
+
 def test_platform_unit_files_and_release_workflow_exist() -> None:
     windows = ROOT / "deploy" / "windows"
     systemd = ROOT / "deploy" / "systemd" / "kronos-engine.service"

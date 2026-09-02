@@ -75,7 +75,7 @@ Sign each commit with `Signed-off-by` (`git commit -s`) to certify the [Develope
 - Keep the change reviewable: one capability per PR when practical.
 - Do not commit secrets, `.env` files, or machine-local paths.
 - If you add a test or lint entry point, document it in the Tests section above.
-- Pull requests run `.github/workflows/ci.yml` (frontend tests on Ubuntu, Windows, and macOS; Playwright smoke on Linux; desktop native builds; engine pytest, ruff, and mypy) and `.github/workflows/security.yml` (dependency audit, secret scanning, SBOM). Keep those jobs green.
+- Draft pull requests run version lockstep only. Mark a PR ready for review to run `.github/workflows/ci.yml` (frontend tests on Ubuntu, Windows, and macOS; Playwright smoke on Linux; Ubuntu `cargo test` and clippy; desktop native builds; engine pytest, ruff, and mypy) and `.github/workflows/security.yml` (dependency audit, secret scanning, SBOM). Merging to `main` does not re-run those jobs. Pushing a `v*` tag runs `.github/workflows/release.yml` and publishes installers. Keep ready-for-review checks green.
 - This repository does not currently include a `.github/CODEOWNERS` file. Changes to license, security policy, and required-check configuration need maintainer approval. See [GOVERNANCE.md](GOVERNANCE.md).
 
 ## Security

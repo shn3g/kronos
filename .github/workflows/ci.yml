@@ -1,9 +1,8 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -25,6 +24,7 @@ jobs:
 
   frontend:
     name: Frontend (${{ matrix.os }})
+    if: github.event.pull_request.draft == false
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -60,6 +60,7 @@ jobs:
 
   desktop:
     name: Desktop build (${{ matrix.os }})
+    if: github.event.pull_request.draft == false
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -96,6 +97,7 @@ jobs:
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: stable
+          components: clippy
 
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -104,6 +106,16 @@ jobs:
 
       - name: Install JavaScript dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Cargo test
+        if: runner.os == 'Linux'
+        working-directory: apps/desktop/src-tauri
+        run: cargo test
+
+      - name: Clippy
+        if: runner.os == 'Linux'
+        working-directory: apps/desktop/src-tauri
+        run: cargo clippy -- -D warnings
 
       - name: Build desktop artifact
         working-directory: apps/desktop
@@ -120,6 +132,7 @@ jobs:
 
   engine:
     name: Engine (${{ matrix.os }})
+    if: github.event.pull_request.draft == false
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

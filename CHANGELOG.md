@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- CI and security workflows run on ready-for-review pull requests, not on push to `main`. Draft PRs keep version lockstep only. Installers still publish from `v*` tags. Ubuntu desktop CI also runs `cargo test` and clippy.
+
 ### Fixed
 
 - A desktop newer than the engine on PATH is now reported as incompatible instead of ready. The status banner shows both versions (`Engine ready. Desktop 0.2.0. Engine 0.2.0.`) and the incompatible message names the PATH engine to install.
