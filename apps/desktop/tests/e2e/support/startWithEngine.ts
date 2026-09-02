@@ -3,9 +3,49 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { E2E_AUTH_TOKEN, E2E_ENGINE_PORT, E2E_MOCK_PORT, startMockOpenAiServer } from "./mockOpenAi.ts";
+
+export type Killable = { kill: (signal?: NodeJS.Signals) => boolean };
+export type Closable = { close: () => unknown };
+
+export type BootWithEngineDeps = {
+  startMock: () => Promise<Closable>;
+  spawnEngine: () => Killable;
+  spawnVite: () => Killable;
+  waitForEngine: (engine: Killable) => Promise<void>;
+  waitForVite: () => Promise<void>;
+};
+
+export function stopWithEngineStack(parts: {
+  vite?: Killable | null;
+  engine?: Killable | null;
+  mock?: Closable | null;
+}): void {
+  parts.vite?.kill("SIGTERM");
+  parts.engine?.kill("SIGTERM");
+  void parts.mock?.close();
+}
+
+export async function bootWithEngine(
+  deps: BootWithEngineDeps,
+): Promise<{ stop: () => void; engine: Killable; vite: Killable }> {
+  const mock = await deps.startMock();
+  let engine: Killable | undefined;
+  let vite: Killable | undefined;
+  const stop = () => stopWithEngineStack({ vite, engine, mock });
+  try {
+    engine = deps.spawnEngine();
+    await deps.waitForEngine(engine);
+    vite = deps.spawnVite();
+    await deps.waitForVite();
+    return { stop, engine, vite };
+  } catch (error) {
+    stop();
+    throw error;
+  }
+}
 
 const supportDir = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = join(supportDir, "../../..");
@@ -39,7 +79,6 @@ async function main(): Promise<void> {
   for (const name of ["data", "config", "cache", "logs"]) {
     mkdirSync(join(home, name), { recursive: true });
   }
-  const mock = await startMockOpenAiServer(E2E_MOCK_PORT);
   if (!existsSync(engineRoot)) {
     throw new Error(`engine root missing: ${engineRoot}`);
   }
@@ -58,48 +97,51 @@ async function main(): Promise<void> {
     KRONOS_BIND_PORT: String(E2E_ENGINE_PORT),
     PYTHONUNBUFFERED: "1",
   };
-  const engine = spawn(python, ["-m", "kronos_engine"], {
-    cwd: engineRoot,
-    env: engineEnv,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  engine.on("error", (error) => {
-    console.error(error);
-    process.exit(1);
-  });
-  await waitForReady(engine);
-  const vite = spawn(pnpm, ["dev", "--host", "127.0.0.1", "--port", "1420", "--strictPort"], {
-    cwd: desktopRoot,
-    env: {
-      ...process.env,
-      ...sharedPath,
-      KRONOS_ENGINE_URL: `http://127.0.0.1:${E2E_ENGINE_PORT}`,
-      KRONOS_AUTH_TOKEN: E2E_AUTH_TOKEN,
-      KRONOS_CONFIG_HOME: join(home, "config"),
+  const { stop, engine, vite } = await bootWithEngine({
+    startMock: () => startMockOpenAiServer(E2E_MOCK_PORT),
+    spawnEngine: () => {
+      const child = spawn(python, ["-m", "kronos_engine"], {
+        cwd: engineRoot,
+        env: engineEnv,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      child.on("error", (error) => {
+        console.error(error);
+      });
+      return child;
     },
-    stdio: "inherit",
+    spawnVite: () => {
+      const child = spawn(pnpm, ["dev", "--host", "127.0.0.1", "--port", "1420", "--strictPort"], {
+        cwd: desktopRoot,
+        env: {
+          ...process.env,
+          ...sharedPath,
+          KRONOS_ENGINE_URL: `http://127.0.0.1:${E2E_ENGINE_PORT}`,
+          KRONOS_AUTH_TOKEN: E2E_AUTH_TOKEN,
+          KRONOS_CONFIG_HOME: join(home, "config"),
+        },
+        stdio: "inherit",
+      });
+      child.on("error", (error) => {
+        console.error(error);
+      });
+      return child;
+    },
+    waitForEngine: (child) => waitForReady(child as ChildProcess),
+    waitForVite: () => waitForHttp("http://127.0.0.1:1420/", 120_000),
   });
-  vite.on("error", (error) => {
-    console.error(error);
-    process.exit(1);
-  });
-  await waitForHttp("http://127.0.0.1:1420/", 120_000);
-
-  const stop = () => {
-    vite.kill("SIGTERM");
-    engine.kill("SIGTERM");
-    void mock.close();
-  };
+  const engineProc = engine as ChildProcess;
+  const viteProc = vite as ChildProcess;
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
-  engine.on("exit", (code) => {
+  engineProc.on("exit", (code) => {
     if (code && code !== 0) {
       console.error(`kronos_engine exited ${code}`);
       stop();
       process.exit(code);
     }
   });
-  vite.on("exit", (code) => {
+  viteProc.on("exit", (code) => {
     if (code && code !== 0) {
       console.error(`vite exited ${code}`);
       stop();
@@ -159,7 +201,17 @@ function waitForHttp(url: string, timeoutMs: number): Promise<void> {
   });
 }
 
-void main().catch((error: unknown) => {
-  console.error(error);
-  process.exit(1);
-});
+function isCliEntry(): boolean {
+  const entry = process.argv[1];
+  if (!entry) {
+    return false;
+  }
+  return resolve(fileURLToPath(import.meta.url)) === resolve(entry);
+}
+
+if (isCliEntry()) {
+  void main().catch((error: unknown) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
