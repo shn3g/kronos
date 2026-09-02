@@ -16,7 +16,7 @@ Hosted GitHub Actions may not always produce Release artifacts. If the Release h
 
 ```text
 pnpm install
-cd engine && pip install -e ".[dev]" && cd ..
+cd engine && pip install -e ".[dev]" pyinstaller && cd ..
 python3 scripts/build-engine.py
 pnpm tauri build
 ```

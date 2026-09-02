@@ -20,7 +20,7 @@ Install Node 22, pnpm 9.15, Python 3.11+, Rust, and the platform WebView. Python
 
 ```text
 pnpm install
-cd engine && pip install -e ".[dev]" && cd ..
+cd engine && pip install -e ".[dev]" pyinstaller && cd ..
 python3 scripts/build-engine.py
 pnpm tauri build
 ```
