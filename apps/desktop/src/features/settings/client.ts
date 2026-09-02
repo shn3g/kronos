@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { requestEngineJson, type EngineJsonResponse } from "../../engine/transport";
+
 export interface OpsSettingsView {
   otelExport: boolean;
   langfuseExport: boolean;
@@ -10,11 +12,6 @@ export interface SettingsPageClients {
   save(next: OpsSettingsView): Promise<OpsSettingsView>;
   doctor(): Promise<{ ready: boolean; findings: string[] }>;
   backup(): Promise<{ path: string; includesSecretStore: boolean }>;
-}
-
-interface EngineJsonResponse {
-  status: number;
-  body: string;
 }
 
 export function createProductionSettingsClient(
@@ -57,19 +54,6 @@ export function createProductionSettingsClient(
       };
     },
   };
-}
-
-async function requestEngineJson(
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<EngineJsonResponse> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<EngineJsonResponse>("engine_json", { method, path, body: body ?? null });
-  } catch {
-    return { status: 0, body: "" };
-  }
 }
 
 async function jsonRequest(

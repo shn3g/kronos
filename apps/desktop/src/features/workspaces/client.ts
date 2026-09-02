@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { requestEngineJson, type EngineJsonResponse } from "../../engine/transport";
+
 export type RepositoryStatus = "active" | "paused" | "disabled";
 
 export interface EnrolledRepository {
@@ -38,11 +40,6 @@ export interface RepositoriesClient {
   pause(id: string): Promise<EnrolledRepository>;
   disable(id: string): Promise<EnrolledRepository>;
   resume(id: string): Promise<EnrolledRepository>;
-}
-
-interface EngineJsonResponse {
-  status: number;
-  body: string;
 }
 
 export async function pickRepositoryFolder(): Promise<string | null> {
@@ -89,19 +86,6 @@ export function createProductionRepositoriesClient(
       return mapRepository(payload.repository);
     },
   };
-}
-
-async function requestEngineJson(
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<EngineJsonResponse> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<EngineJsonResponse>("engine_json", { method, path, body: body ?? null });
-  } catch {
-    return { status: 0, body: "" };
-  }
 }
 
 async function jsonRequest(

@@ -1,11 +1,12 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import process from "node:process";
+import { webEngineProxyPlugin } from "./src/engine/webEngineProxy";
 
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), webEngineProxyPlugin()],
   clearScreen: false,
   server: {
     port: 1420,

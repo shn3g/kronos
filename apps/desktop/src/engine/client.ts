@@ -46,6 +46,10 @@ async function readStateFromSidecar(): Promise<EngineConnectionState | null> {
     }
     return result;
   } catch {
-    return null;
+    const { probeEngineState } = await import("../api/kronosClient");
+    return probeEngineState({
+      baseUrl: "/kronos-engine",
+      token: "",
+    });
   }
 }

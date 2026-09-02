@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { requestEngineJson, type EngineJsonResponse } from "../../engine/transport";
+
 export interface SkillFinding {
   path: string;
   code: string;
@@ -35,11 +37,6 @@ export interface SkillsClient {
   activate(id: string): Promise<SkillRecord>;
   promote(id: string, human: boolean): Promise<SkillRecord>;
   disable(id: string): Promise<SkillRecord>;
-}
-
-interface EngineJsonResponse {
-  status: number;
-  body: string;
 }
 
 export function createProductionSkillsClient(
@@ -85,19 +82,6 @@ export function createProductionSkillsClient(
       return mapSkill(payload);
     },
   };
-}
-
-async function requestEngineJson(
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<EngineJsonResponse> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<EngineJsonResponse>("engine_json", { method, path, body: body ?? null });
-  } catch {
-    return { status: 0, body: "" };
-  }
 }
 
 async function jsonRequest(
