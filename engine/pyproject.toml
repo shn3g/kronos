@@ -13,6 +13,7 @@ dependencies = [
     "uvicorn>=0.32",
     "keyring>=25",
     "watchfiles>=1.0",
+    "pywinpty>=2.0; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
@@ -82,5 +83,7 @@ module = [
     "onnxruntime",
     "numpy",
     "watchfiles",
+    "winpty",
+    "winpty.*",
 ]
 ignore_missing_imports = true

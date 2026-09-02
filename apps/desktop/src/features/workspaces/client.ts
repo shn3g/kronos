@@ -51,6 +51,15 @@ export interface WorkspaceFileContents {
   binary: boolean;
 }
 
+export interface WorkspaceTerminalRun {
+  command: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  cancelled: boolean;
+  running?: boolean | undefined;
+  output: string;
+}
+
 export interface RepositoriesClient {
   list(): Promise<EnrolledRepository[]>;
   inspect(path: string): Promise<InspectResult>;
@@ -65,6 +74,12 @@ export interface RepositoriesClient {
   writeWorkspaceFile(id: string, path: string, content: string): Promise<void>;
   revertWrite(id: string, path: string): Promise<void>;
   commitFiles(id: string, message: string, paths: string[]): Promise<void>;
+  runWorkspaceCommand(id: string, command: string): Promise<WorkspaceTerminalRun>;
+  startWorkspaceShell(id: string): Promise<WorkspaceTerminalRun>;
+  writeWorkspaceShell(id: string, line: string): Promise<{ ok: boolean }>;
+  resizeWorkspaceShell(id: string, cols: number, rows: number): Promise<{ ok: boolean }>;
+  watchWorkspaceCommand(id: string): Promise<WorkspaceTerminalRun>;
+  cancelWorkspaceCommand(id: string): Promise<{ ok: boolean }>;
 }
 
 export async function pickRepositoryFolder(): Promise<string | null> {
@@ -146,6 +161,42 @@ export function createProductionRepositoriesClient(
     async commitFiles(id: string, message: string, paths: string[]) {
       await jsonRequest(request, "POST", `/repositories/${id}/commits`, { message, paths });
     },
+    async runWorkspaceCommand(id: string, command: string) {
+      const payload = await jsonRequest(request, "POST", `/repositories/${id}/terminal/runs`, {
+        command,
+      });
+      return mapTerminalRun(payload, command);
+    },
+    async startWorkspaceShell(id: string) {
+      const payload = await jsonRequest(request, "POST", `/repositories/${id}/terminal/sessions`);
+      return mapTerminalRun(payload, "shell");
+    },
+    async writeWorkspaceShell(id: string, line: string) {
+      const payload = await jsonRequest(request, "POST", `/repositories/${id}/terminal/sessions/input`, {
+        line,
+      });
+      return { ok: payload.ok === true };
+    },
+    async resizeWorkspaceShell(id: string, cols: number, rows: number) {
+      const payload = await jsonRequest(request, "POST", `/repositories/${id}/terminal/sessions/size`, {
+        cols,
+        rows,
+      });
+      return { ok: payload.ok === true };
+    },
+    async watchWorkspaceCommand(id: string) {
+      const payload = await jsonRequest(request, "GET", `/repositories/${id}/terminal/runs`);
+      return mapTerminalRun(payload);
+    },
+    async cancelWorkspaceCommand(id: string) {
+      const payload = await jsonRequest(
+        request,
+        "POST",
+        `/repositories/${id}/terminal/runs/cancel`,
+        {},
+      );
+      return { ok: payload.ok === true };
+    },
   };
 }
 
@@ -157,6 +208,17 @@ function mapChange(raw: unknown): WorkspaceFileChange {
     patch: stringField(item, "patch"),
     status: stringField(item, "status"),
     fromChat: item.from_chat === true,
+  };
+}
+
+function mapTerminalRun(payload: Record<string, unknown>, fallbackCommand = ""): WorkspaceTerminalRun {
+  return {
+    command: stringField(payload, "command") || fallbackCommand,
+    exitCode: typeof payload.exit_code === "number" ? payload.exit_code : null,
+    timedOut: payload.timed_out === true,
+    cancelled: payload.cancelled === true,
+    running: payload.running === true,
+    output: stringField(payload, "output"),
   };
 }
 

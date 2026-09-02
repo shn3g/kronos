@@ -25,6 +25,19 @@ function repos(overrides: Partial<RepositoriesClient> = {}): RepositoriesClient 
     writeWorkspaceFile: unused,
     revertWrite: unused,
     commitFiles: unused,
+    runWorkspaceCommand: unused,
+    startWorkspaceShell: unused,
+    writeWorkspaceShell: async () => ({ ok: true }),
+    resizeWorkspaceShell: async () => ({ ok: true }),
+    watchWorkspaceCommand: async () => ({
+      command: "",
+      exitCode: null,
+      timedOut: false,
+      cancelled: false,
+      running: false,
+      output: "",
+    }),
+    cancelWorkspaceCommand: async () => ({ ok: true }),
     ...overrides,
   };
 }

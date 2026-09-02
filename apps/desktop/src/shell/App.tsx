@@ -25,6 +25,7 @@ import { createProductionGoalsClient, type GoalsClient } from "../features/goals
 import { createProductionHomeClient, type HomeClient } from "../features/home/client";
 import { createProductionModelsClient, type ModelsClient } from "../features/models/client";
 import { RunsPage } from "../features/runs/RunsPage";
+import { TerminalPage } from "../features/terminal/TerminalPage";
 import { SettingsHub } from "../features/settings/SettingsHub";
 import {
   createProductionSettingsClient,
@@ -123,6 +124,7 @@ export function App({
   const [inspectorCollapsed, setInspectorCollapsed] = useState(() =>
     readFlag(INSPECTOR_STORAGE_KEY),
   );
+  const [terminalOpen, setTerminalOpen] = useState(false);
   const [revertError, setRevertError] = useState<string | null>(null);
   const [revertingPath, setRevertingPath] = useState<string | null>(null);
   const revertingRef = useRef(false);
@@ -279,6 +281,10 @@ export function App({
     });
   }
 
+  function toggleTerminal(): void {
+    setTerminalOpen((open) => !open);
+  }
+
   useEffect(() => {
     if (!engineReady || !modelKnown || !modelReady) {
       return;
@@ -299,6 +305,8 @@ export function App({
         return;
       }
       if (action === "toggle-terminal") {
+        event.preventDefault();
+        toggleTerminal();
         return;
       }
       if (action === "go-to-file") {
@@ -408,6 +416,7 @@ export function App({
         historyOpen={historyOpen}
         activityCollapsed={activityCollapsed}
         inspectorCollapsed={inspectorCollapsed}
+        terminalOpen={terminalOpen}
         onNewChat={startNewChat}
         onOpenWorkspace={() => {
           go({ activity: "workspaces" });
@@ -440,6 +449,7 @@ export function App({
         }}
         onToggleActivityBar={toggleActivityBar}
         onToggleInspector={toggleInspector}
+        onToggleTerminal={toggleTerminal}
         onOpenSettings={() => {
           go({ activity: "settings", settingsSection: "general" });
         }}
@@ -576,6 +586,16 @@ export function App({
               />
             )}
           </div>
+          <section className="app-terminal" hidden={!terminalOpen} aria-label="Terminal">
+            <TerminalPage
+              engineClient={engine}
+              repositoryId={workspaceId}
+              repositoriesClient={repos}
+              onOpenWorkspace={() => {
+                go({ activity: "workspaces" });
+              }}
+            />
+          </section>
         </div>
       </div>
       <GoToFilePalette

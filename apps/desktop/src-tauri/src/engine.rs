@@ -23,6 +23,7 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const ENGINE_JSON_TIMEOUT: Duration = Duration::from_secs(30);
 const ENGINE_JSON_GET_TIMEOUT: Duration = Duration::from_secs(8);
 const INDEX_JOB_TIMEOUT: Duration = Duration::from_secs(180);
+const TERMINAL_RUN_TIMEOUT: Duration = Duration::from_secs(90);
 const STREAM_READ_POLL: Duration = Duration::from_millis(200);
 const STREAM_MAX_IDLE: Duration = Duration::from_secs(300);
 const ENGINE_STREAM_EVENT: &str = "engine-stream";
@@ -1056,6 +1057,12 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
                     | ("POST", Some("index/watch"))
                     | ("POST", Some("commits"))
                     | ("POST", Some("writes/revert"))
+                    | ("GET", Some("terminal/runs"))
+                    | ("POST", Some("terminal/runs"))
+                    | ("POST", Some("terminal/runs/cancel"))
+                    | ("POST", Some("terminal/sessions"))
+                    | ("POST", Some("terminal/sessions/input"))
+                    | ("POST", Some("terminal/sessions/size"))
                     | ("POST", Some("pause" | "disable" | "remove" | "re-enrol" | "resume"))
             )
         }
@@ -1404,6 +1411,9 @@ fn engine_json_timeout(method: &str, path: &str) -> Duration {
     {
         return INDEX_JOB_TIMEOUT;
     }
+    if method == "POST" && normalized.ends_with("/terminal/runs") {
+        return TERMINAL_RUN_TIMEOUT;
+    }
     if method == "POST" || method == "PUT" {
         return ENGINE_JSON_TIMEOUT;
     }
@@ -1655,10 +1665,27 @@ mod tests {
         assert!(engine_path_allowed("POST", "/repositories/repo_alpha/commits"));
         assert!(engine_path_allowed("POST", "/repositories/repo_alpha/writes/revert"));
         assert!(engine_path_allowed("GET", "/repositories/repo_alpha/goal-readiness"));
+        assert!(engine_path_allowed("POST", "/repositories/repo_alpha/terminal/runs"));
+        assert!(engine_path_allowed("GET", "/repositories/repo_alpha/terminal/runs"));
+        assert!(engine_path_allowed(
+            "POST",
+            "/repositories/repo_alpha/terminal/runs/cancel"
+        ));
+        assert!(engine_path_allowed(
+            "POST",
+            "/repositories/repo_alpha/terminal/sessions"
+        ));
+        assert!(engine_path_allowed(
+            "POST",
+            "/repositories/repo_alpha/terminal/sessions/input"
+        ));
+        assert!(engine_path_allowed(
+            "POST",
+            "/repositories/repo_alpha/terminal/sessions/size"
+        ));
         assert!(!engine_path_allowed("GET", "/chat/sessions"));
         assert!(!engine_path_allowed("POST", "/chat/sessions"));
         assert!(!engine_path_allowed("POST", "/chat/sessions/chat_1/messages"));
-        assert!(!engine_path_allowed("POST", "/repositories/repo_alpha/terminal/runs"));
         assert!(!engine_path_allowed(
             "GET",
             "/conversations/conv_abc/images/../secret"
@@ -1844,6 +1871,14 @@ mod tests {
         assert_eq!(
             engine_json_timeout("POST", "/conversations/conv_abc/messages"),
             Duration::from_secs(30)
+        );
+        assert_eq!(
+            engine_json_timeout("POST", "/repositories/repo_alpha/terminal/runs"),
+            Duration::from_secs(90)
+        );
+        assert_eq!(
+            engine_json_timeout("GET", "/repositories/repo_alpha/terminal/runs"),
+            Duration::from_secs(8)
         );
         let src = include_str!("engine.rs");
         assert!(

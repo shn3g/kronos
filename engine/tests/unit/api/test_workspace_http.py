@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -148,6 +149,213 @@ async def test_workspace_files_list_and_read_fail_closed(
     assert payload["path"] == "src/app.py"
     assert payload["content"] == "print(1)\n"
     assert payload["binary"] is False
+
+
+@pytest.mark.asyncio
+async def test_workspace_terminal_run_fail_closed(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    http, headers, repo = client
+    enrolled = await http.post("/repositories", headers=headers, json={"path": str(repo)})
+    assert enrolled.status_code == 200
+    repo_id = enrolled.json()["repository"]["id"]
+
+    unauth = await http.post(f"/repositories/{repo_id}/terminal/runs", json={"command": "echo hi"})
+    assert unauth.status_code == 401
+
+    missing = await http.post(
+        "/repositories/repo_missing/terminal/runs",
+        headers=headers,
+        json={"command": "echo hi"},
+    )
+    assert missing.status_code == 404
+
+    empty = await http.post(
+        f"/repositories/{repo_id}/terminal/runs",
+        headers=headers,
+        json={"command": "   "},
+    )
+    assert empty.status_code == 400
+
+    (repo / "probe.py").write_text(
+        "from pathlib import Path\nprint(Path('hello.py').read_text())\n",
+        encoding="utf-8",
+    )
+    ran = await http.post(
+        f"/repositories/{repo_id}/terminal/runs",
+        headers=headers,
+        json={"command": f'"{sys.executable}" probe.py'},
+    )
+    assert ran.status_code == 200
+    payload = ran.json()
+    assert payload["exit_code"] == 0
+    assert payload["timed_out"] is False
+    assert payload["cancelled"] is False
+    assert "old" in payload["output"]
+
+
+@pytest.mark.asyncio
+async def test_workspace_terminal_cancel_stops_a_running_command(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    import asyncio
+
+    http, headers, repo = client
+    enrolled = await http.post("/repositories", headers=headers, json={"path": str(repo)})
+    assert enrolled.status_code == 200
+    repo_id = enrolled.json()["repository"]["id"]
+    (repo / "sleep.py").write_text(
+        "from pathlib import Path\nimport time\nPath('started.txt').write_text('1')\ntime.sleep(8)\n",
+        encoding="utf-8",
+    )
+
+    unauth = await http.post(f"/repositories/{repo_id}/terminal/runs/cancel")
+    assert unauth.status_code == 401
+
+    missing = await http.post("/repositories/repo_missing/terminal/runs/cancel", headers=headers)
+    assert missing.status_code == 404
+
+    idle = await http.post(f"/repositories/{repo_id}/terminal/runs/cancel", headers=headers)
+    assert idle.status_code == 200
+    assert idle.json()["ok"] is False
+
+    running = asyncio.create_task(
+        http.post(
+            f"/repositories/{repo_id}/terminal/runs",
+            headers=headers,
+            json={"command": f'"{sys.executable}" sleep.py'},
+            timeout=10,
+        )
+    )
+    started = repo / "started.txt"
+    for _ in range(80):
+        if started.exists():
+            break
+        await asyncio.sleep(0.05)
+    else:
+        running.cancel()
+        raise AssertionError("command did not start")
+
+    stopped = await http.post(f"/repositories/{repo_id}/terminal/runs/cancel", headers=headers)
+    assert stopped.status_code == 200
+    assert stopped.json()["ok"] is True
+    ran = await running
+    assert ran.status_code == 200
+    payload = ran.json()
+    assert payload["cancelled"] is True
+    assert payload["timed_out"] is False
+
+
+@pytest.mark.asyncio
+async def test_workspace_terminal_peek_streams_output_and_fail_closed(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    import asyncio
+
+    http, headers, repo = client
+    enrolled = await http.post("/repositories", headers=headers, json={"path": str(repo)})
+    repo_id = enrolled.json()["repository"]["id"]
+    (repo / "stream.py").write_text(
+        "import time\nprint('hello-live', flush=True)\ntime.sleep(4)\nprint('done-live', flush=True)\n",
+        encoding="utf-8",
+    )
+
+    unauth = await http.get(f"/repositories/{repo_id}/terminal/runs")
+    assert unauth.status_code == 401
+
+    missing = await http.get("/repositories/repo_missing/terminal/runs", headers=headers)
+    assert missing.status_code == 404
+
+    idle = await http.get(f"/repositories/{repo_id}/terminal/runs", headers=headers)
+    assert idle.status_code == 200
+    assert idle.json()["running"] is False
+
+    running = asyncio.create_task(
+        http.post(
+            f"/repositories/{repo_id}/terminal/runs",
+            headers=headers,
+            json={"command": f'"{sys.executable}" stream.py'},
+            timeout=10,
+        )
+    )
+    seen = False
+    for _ in range(80):
+        peeked = await http.get(f"/repositories/{repo_id}/terminal/runs", headers=headers)
+        if peeked.status_code == 200 and "hello-live" in peeked.json().get("output", ""):
+            assert peeked.json()["running"] is True
+            seen = True
+            break
+        await asyncio.sleep(0.05)
+    ran = await running
+    assert seen is True
+    assert ran.status_code == 200
+    assert "done-live" in ran.json()["output"]
+    assert ran.json()["running"] is False
+
+
+@pytest.mark.asyncio
+async def test_workspace_terminal_shell_session_fail_closed(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    import asyncio
+
+    http, headers, repo = client
+    enrolled = await http.post("/repositories", headers=headers, json={"path": str(repo)})
+    repo_id = enrolled.json()["repository"]["id"]
+
+    unauth = await http.post(f"/repositories/{repo_id}/terminal/sessions")
+    assert unauth.status_code == 401
+
+    missing = await http.post("/repositories/repo_missing/terminal/sessions", headers=headers)
+    assert missing.status_code == 404
+
+    started = await http.post(f"/repositories/{repo_id}/terminal/sessions", headers=headers)
+    assert started.status_code == 200
+    assert started.json()["running"] is True
+    try:
+        unauth_in = await http.post(
+            f"/repositories/{repo_id}/terminal/sessions/input",
+            json={"line": "echo hello-shell"},
+        )
+        assert unauth_in.status_code == 401
+
+        first = await http.post(
+            f"/repositories/{repo_id}/terminal/sessions/input",
+            headers=headers,
+            json={"line": "echo hello-shell\n"},
+        )
+        assert first.status_code == 200
+        assert first.json()["ok"] is True
+
+        seen_first = False
+        for _ in range(80):
+            peeked = await http.get(f"/repositories/{repo_id}/terminal/runs", headers=headers)
+            if peeked.status_code == 200 and "hello-shell" in peeked.json().get("output", ""):
+                assert peeked.json()["running"] is True
+                seen_first = True
+                break
+            await asyncio.sleep(0.05)
+        assert seen_first is True
+
+        second = await http.post(
+            f"/repositories/{repo_id}/terminal/sessions/input",
+            headers=headers,
+            json={"line": "echo second-line\n"},
+        )
+        assert second.status_code == 200
+        seen_second = False
+        for _ in range(80):
+            peeked = await http.get(f"/repositories/{repo_id}/terminal/runs", headers=headers)
+            output = peeked.json().get("output", "")
+            if "hello-shell" in output and "second-line" in output and peeked.json()["running"] is True:
+                seen_second = True
+                break
+            await asyncio.sleep(0.05)
+        assert seen_second is True
+    finally:
+        stopped = await http.post(f"/repositories/{repo_id}/terminal/runs/cancel", headers=headers)
+        assert stopped.status_code == 200
+        assert stopped.json()["ok"] is True
 
 
 @pytest.mark.asyncio

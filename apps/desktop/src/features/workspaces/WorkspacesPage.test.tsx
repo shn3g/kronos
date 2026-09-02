@@ -38,6 +38,23 @@ function repos(listImpl?: RepositoriesClient["list"]): RepositoriesClient {
     writeWorkspaceFile: async () => undefined,
     revertWrite: async () => undefined,
     commitFiles: async () => undefined,
+    runWorkspaceCommand: async () => {
+      throw new Error("runWorkspaceCommand should not run");
+    },
+    startWorkspaceShell: async () => {
+      throw new Error("startWorkspaceShell should not run");
+    },
+    writeWorkspaceShell: async () => ({ ok: true }),
+    resizeWorkspaceShell: async () => ({ ok: true }),
+    watchWorkspaceCommand: async () => ({
+      command: "",
+      exitCode: null,
+      timedOut: false,
+      cancelled: false,
+      running: false,
+      output: "",
+    }),
+    cancelWorkspaceCommand: async () => ({ ok: true }),
   };
 }
 
@@ -101,6 +118,23 @@ describe("WorkspacesPage", () => {
       writeWorkspaceFile: async () => undefined,
       revertWrite: async () => undefined,
       commitFiles: async () => undefined,
+      runWorkspaceCommand: async () => {
+        throw new Error("runWorkspaceCommand should not run");
+      },
+      startWorkspaceShell: async () => {
+        throw new Error("startWorkspaceShell should not run");
+      },
+      writeWorkspaceShell: async () => ({ ok: true }),
+      resizeWorkspaceShell: async () => ({ ok: true }),
+      watchWorkspaceCommand: async () => ({
+        command: "",
+        exitCode: null,
+        timedOut: false,
+        cancelled: false,
+        running: false,
+        output: "",
+      }),
+      cancelWorkspaceCommand: async () => ({ ok: true }),
     };
 
     render(
@@ -196,6 +230,23 @@ describe("WorkspacesPage", () => {
       writeWorkspaceFile: async () => undefined,
       revertWrite: async () => undefined,
       commitFiles: async () => undefined,
+      runWorkspaceCommand: async () => {
+        throw new Error("runWorkspaceCommand should not run");
+      },
+      startWorkspaceShell: async () => {
+        throw new Error("startWorkspaceShell should not run");
+      },
+      writeWorkspaceShell: async () => ({ ok: true }),
+      resizeWorkspaceShell: async () => ({ ok: true }),
+      watchWorkspaceCommand: async () => ({
+        command: "",
+        exitCode: null,
+        timedOut: false,
+        cancelled: false,
+        running: false,
+        output: "",
+      }),
+      cancelWorkspaceCommand: async () => ({ ok: true }),
     };
 
     render(<WorkspacesPage engineClient={engine("ready")} repositoriesClient={client} />);

@@ -9,6 +9,7 @@ interface MenuBarProps {
   historyOpen: boolean;
   activityCollapsed: boolean;
   inspectorCollapsed: boolean;
+  terminalOpen: boolean;
   onNewChat: () => void;
   onOpenWorkspace: () => void;
   onGoToFile: () => void;
@@ -20,6 +21,7 @@ interface MenuBarProps {
   onToggleHistory: () => void;
   onToggleActivityBar: () => void;
   onToggleInspector: () => void;
+  onToggleTerminal: () => void;
   onOpenSettings: () => void;
   onOpenModels: () => void;
 }
@@ -28,6 +30,7 @@ export function MenuBar({
   historyOpen,
   activityCollapsed,
   inspectorCollapsed,
+  terminalOpen,
   onNewChat,
   onOpenWorkspace,
   onGoToFile,
@@ -39,6 +42,7 @@ export function MenuBar({
   onToggleHistory,
   onToggleActivityBar,
   onToggleInspector,
+  onToggleTerminal,
   onOpenSettings,
   onOpenModels,
 }: MenuBarProps) {
@@ -212,6 +216,13 @@ export function MenuBar({
             onToggleInspector();
           }}
         />
+        <MenuItem
+          label={terminalOpen ? "Hide terminal" : "Terminal"}
+          onSelect={() => {
+            setOpen(null);
+            onToggleTerminal();
+          }}
+        />
       </Menu>
       <Menu
         id={helpId}
@@ -224,9 +235,11 @@ export function MenuBar({
         <p className="menu-help">
           Kronos is a locally installed desktop app for coding agents on your git folders. Ctrl+N
           or Cmd+N starts a new chat. Ctrl+B or Cmd+B hides the activity bar. Ctrl+Shift+J or
-          Cmd+Shift+J hides Changes. Ctrl+, or Cmd+, opens Settings. Escape closes menus. File →
-          Models assigns the orchestrator. Open a git folder from Workspaces. Use Go to file, Ask in
-          chat, or Open in Changes to edit files. Save writes the open file into the workspace.
+          Cmd+Shift+J hides Changes. Ctrl+` or Cmd+` shows Terminal. Ctrl+, or Cmd+, opens
+          Settings. Escape closes menus. File → Models assigns the orchestrator. Open a git folder
+          from Workspaces. Use Go to file, Ask in chat, or Open in Changes to edit files. Save
+          writes the open file into the workspace. In Terminal, the shell stays open as a real TTY.
+          Type in the panel. Stop ends the shell.
         </p>
       </Menu>
     </div>

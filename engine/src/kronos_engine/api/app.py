@@ -88,6 +88,11 @@ from kronos_engine.api.models import (
     TelegramAllowlistRequest,
     TelegramStatusResponse,
     TelegramTokenRequest,
+    TerminalCancelResponse,
+    TerminalRunRequest,
+    TerminalRunResponse,
+    TerminalShellInputRequest,
+    TerminalShellSizeRequest,
     VersionResponse,
     WorkspaceFileContentsResponse,
     WorkspaceFileItem,
@@ -136,6 +141,15 @@ from kronos_engine.application.workspace_changes import (
     mark_chat_writes,
 )
 from kronos_engine.application.workspace_files import list_workspace_files, read_workspace_file
+from kronos_engine.application.workspace_terminal import (
+    cancel_workspace_command,
+    peek_workspace_command,
+    resize_workspace_shell,
+    run_workspace_command,
+    start_workspace_shell,
+    terminal_run_key,
+    write_workspace_shell,
+)
 from kronos_engine.application.workspace_writes import (
     WorkspaceWriteTooLarge,
     forget_workspace_backups,
@@ -1343,6 +1357,131 @@ def create_app(
                 },
             )
         return {"ok": True, "path": reverted.path}
+
+    @app.post(
+        "/repositories/{repository_id}/terminal/runs",
+        response_model=TerminalRunResponse,
+    )
+    def run_repository_terminal(
+        repository_id: str,
+        body: TerminalRunRequest,
+        _: None = Depends(require_auth),
+    ) -> TerminalRunResponse:
+        command = body.command.strip()
+        if command == "":
+            raise HTTPException(status_code=400, detail="A command is required.")
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+        result = run_workspace_command(
+            Path(record.realpath),
+            command,
+            run_key=terminal_run_key(repository_id),
+        )
+        return TerminalRunResponse(
+            command=result["command"],
+            exit_code=result["exit_code"],
+            timed_out=result["timed_out"],
+            cancelled=result["cancelled"],
+            running=result["running"],
+            output=result["output"],
+        )
+
+    @app.get(
+        "/repositories/{repository_id}/terminal/runs",
+        response_model=TerminalRunResponse,
+    )
+    def peek_repository_terminal(
+        repository_id: str,
+        _: None = Depends(require_auth),
+    ) -> TerminalRunResponse:
+        with repository_service() as repos:
+            _load(repos, repository_id)
+        snapshot = peek_workspace_command(terminal_run_key(repository_id))
+        if snapshot is None:
+            return TerminalRunResponse(
+                command="",
+                exit_code=None,
+                timed_out=False,
+                cancelled=False,
+                running=False,
+                output="",
+            )
+        return TerminalRunResponse(
+            command=snapshot["command"],
+            exit_code=snapshot["exit_code"],
+            timed_out=snapshot["timed_out"],
+            cancelled=snapshot["cancelled"],
+            running=snapshot["running"],
+            output=snapshot["output"],
+        )
+
+    @app.post(
+        "/repositories/{repository_id}/terminal/runs/cancel",
+        response_model=TerminalCancelResponse,
+    )
+    def cancel_repository_terminal(
+        repository_id: str,
+        _: None = Depends(require_auth),
+    ) -> TerminalCancelResponse:
+        with repository_service() as repos:
+            _load(repos, repository_id)
+        return TerminalCancelResponse(ok=cancel_workspace_command(terminal_run_key(repository_id)))
+
+    @app.post(
+        "/repositories/{repository_id}/terminal/sessions",
+        response_model=TerminalRunResponse,
+    )
+    def start_repository_terminal_shell(
+        repository_id: str,
+        _: None = Depends(require_auth),
+    ) -> TerminalRunResponse:
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+        result = start_workspace_shell(Path(record.realpath), run_key=terminal_run_key(repository_id))
+        return TerminalRunResponse(
+            command=result["command"],
+            exit_code=result["exit_code"],
+            timed_out=result["timed_out"],
+            cancelled=result["cancelled"],
+            running=result["running"],
+            output=result["output"],
+        )
+
+    @app.post(
+        "/repositories/{repository_id}/terminal/sessions/input",
+        response_model=TerminalCancelResponse,
+    )
+    def write_repository_terminal_shell(
+        repository_id: str,
+        body: TerminalShellInputRequest,
+        _: None = Depends(require_auth),
+    ) -> TerminalCancelResponse:
+        with repository_service() as repos:
+            _load(repos, repository_id)
+        ok = write_workspace_shell(terminal_run_key(repository_id), body.line)
+        if not ok:
+            raise HTTPException(status_code=409, detail="No live terminal session. Start the shell first.")
+        return TerminalCancelResponse(ok=True)
+
+    @app.post(
+        "/repositories/{repository_id}/terminal/sessions/size",
+        response_model=TerminalCancelResponse,
+    )
+    def resize_repository_terminal_shell(
+        repository_id: str,
+        body: TerminalShellSizeRequest,
+        _: None = Depends(require_auth),
+    ) -> TerminalCancelResponse:
+        with repository_service() as repos:
+            _load(repos, repository_id)
+        ok = resize_workspace_shell(
+            terminal_run_key(repository_id),
+            cols=body.cols,
+            rows=body.rows,
+        )
+        if not ok:
+            raise HTTPException(status_code=409, detail="No live terminal session. Start the shell first.")
+        return TerminalCancelResponse(ok=True)
 
     GITHUB_APP_CREATE_URL = "https://github.com/settings/apps/new"
 

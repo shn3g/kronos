@@ -161,6 +161,131 @@ describe("createProductionRepositoriesClient", () => {
     });
   });
 
+  it("runs a workspace command through the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path, body) => {
+      expect(method).toBe("POST");
+      expect(path).toBe("/repositories/repo_alpha/terminal/runs");
+      expect(body).toEqual({ command: "python probe.py" });
+      return {
+        status: 200,
+        body: JSON.stringify({
+          command: "python probe.py",
+          exit_code: 0,
+          timed_out: false,
+          output: "from-workspace\n",
+        }),
+      };
+    });
+
+    await expect(client.runWorkspaceCommand("repo_alpha", "python probe.py")).resolves.toEqual({
+      command: "python probe.py",
+      exitCode: 0,
+      timedOut: false,
+      cancelled: false,
+      running: false,
+      output: "from-workspace\n",
+    });
+  });
+
+  it("stops a workspace command through the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path) => {
+      expect(method).toBe("POST");
+      expect(path).toBe("/repositories/repo_alpha/terminal/runs/cancel");
+      return {
+        status: 200,
+        body: JSON.stringify({ ok: true }),
+      };
+    });
+
+    await expect(client.cancelWorkspaceCommand("repo_alpha")).resolves.toEqual({ ok: true });
+  });
+
+  it("reads live terminal output through the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path) => {
+      expect(method).toBe("GET");
+      expect(path).toBe("/repositories/repo_alpha/terminal/runs");
+      return {
+        status: 200,
+        body: JSON.stringify({
+          command: "python stream.py",
+          exit_code: null,
+          timed_out: false,
+          cancelled: false,
+          running: true,
+          output: "hello-live\n",
+        }),
+      };
+    });
+
+    await expect(client.watchWorkspaceCommand("repo_alpha")).resolves.toEqual({
+      command: "python stream.py",
+      exitCode: null,
+      timedOut: false,
+      cancelled: false,
+      running: true,
+      output: "hello-live\n",
+    });
+  });
+
+  it("starts a workspace shell through the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path) => {
+      expect(method).toBe("POST");
+      expect(path).toBe("/repositories/repo_alpha/terminal/sessions");
+      return {
+        status: 200,
+        body: JSON.stringify({
+          command: "shell",
+          exit_code: null,
+          timed_out: false,
+          cancelled: false,
+          running: true,
+          output: "",
+        }),
+      };
+    });
+
+    await expect(client.startWorkspaceShell("repo_alpha")).resolves.toEqual({
+      command: "shell",
+      exitCode: null,
+      timedOut: false,
+      cancelled: false,
+      running: true,
+      output: "",
+    });
+  });
+
+  it("sends a shell line through the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path, body) => {
+      expect(method).toBe("POST");
+      expect(path).toBe("/repositories/repo_alpha/terminal/sessions/input");
+      expect(body).toEqual({ line: "echo hello-shell" });
+      return {
+        status: 200,
+        body: JSON.stringify({ ok: true }),
+      };
+    });
+
+    await expect(client.writeWorkspaceShell("repo_alpha", "echo hello-shell")).resolves.toEqual({
+      ok: true,
+    });
+  });
+
+  it("resizes a workspace shell through the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path, body) => {
+      expect(method).toBe("POST");
+      expect(path).toBe("/repositories/repo_alpha/terminal/sessions/size");
+      expect(body).toEqual({ cols: 100, rows: 24 });
+      return {
+        status: 200,
+        body: JSON.stringify({ ok: true }),
+      };
+    });
+
+    await expect(client.resizeWorkspaceShell("repo_alpha", 100, 24)).resolves.toEqual({
+      ok: true,
+    });
+  });
+
   it("writes a workspace file through writeWorkspaceFile", async () => {
     const client = createProductionRepositoriesClient(async (method, path, body) => {
       expect(method).toBe("PUT");

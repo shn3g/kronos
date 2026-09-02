@@ -153,6 +153,26 @@ function quietRepos(): RepositoriesClient {
     writeWorkspaceFile: unused,
     revertWrite: unused,
     commitFiles: unused,
+    runWorkspaceCommand: unused,
+    startWorkspaceShell: async () => ({
+      command: "shell",
+      exitCode: null,
+      timedOut: false,
+      cancelled: false,
+      running: true,
+      output: "",
+    }),
+    writeWorkspaceShell: async () => ({ ok: true }),
+    resizeWorkspaceShell: async () => ({ ok: true }),
+    watchWorkspaceCommand: async () => ({
+      command: "shell",
+      exitCode: null,
+      timedOut: false,
+      cancelled: false,
+      running: true,
+      output: "",
+    }),
+    cancelWorkspaceCommand: async () => ({ ok: true }),
   };
 }
 
@@ -487,6 +507,12 @@ describe("App shell", () => {
       "data-inspector-collapsed",
       "true",
     );
+
+    expect(screen.queryByRole("region", { name: /terminal/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: /^View$/ }));
+    await user.click(screen.getByRole("menuitem", { name: /^terminal$/i }));
+    expect(await screen.findByRole("region", { name: /terminal/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Terminal" })).toBeInTheDocument();
   });
 
   it("puts Models under File and Cut Copy Paste under Edit", async () => {
@@ -522,6 +548,8 @@ describe("App shell", () => {
     await screen.findByRole("heading", { level: 1, name: "Ask Kronos" });
     await user.keyboard("{Control>}{Shift>}j{/Shift}{/Control}");
     expect(screen.queryByRole("complementary", { name: /session details/i })).not.toBeInTheDocument();
+    await user.keyboard("{Control>}`{/Control}");
+    expect(await screen.findByRole("region", { name: /terminal/i })).toBeInTheDocument();
     await user.keyboard("{Control>},{/Control}");
     expect(await screen.findByRole("heading", { name: /^settings$/i })).toBeInTheDocument();
   });
