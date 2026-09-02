@@ -1,6 +1,7 @@
 /** @vitest-environment node */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DESKTOP_CLIENT_VERSION } from "../api/kronosClient";
 import { createProductionEngineClient } from "./client";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -33,7 +34,9 @@ describe("createProductionEngineClient", () => {
         });
       }
       if (url === "/kronos-engine/version") {
-        return new Response(JSON.stringify({ engine_version: "0.2.0", compatible: true }), {
+        return new Response(
+          JSON.stringify({ engine_version: DESKTOP_CLIENT_VERSION, compatible: true }),
+          {
           status: 200,
           headers: { "content-type": "application/json" },
         });
@@ -43,7 +46,10 @@ describe("createProductionEngineClient", () => {
     vi.stubGlobal("fetch", fetchImpl);
 
     const client = createProductionEngineClient();
-    await expect(client.getState()).resolves.toEqual({ status: "ready", version: "0.2.0" });
+    await expect(client.getState()).resolves.toEqual({
+      status: "ready",
+      version: DESKTOP_CLIENT_VERSION,
+    });
     expect(fetchImpl).toHaveBeenCalled();
   });
 });

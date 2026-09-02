@@ -2,6 +2,7 @@ import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
+import { DESKTOP_CLIENT_VERSION } from "../../api/kronosClient";
 import type { EngineClient } from "../../engine/client";
 import type { SettingsSection } from "../../shell/routes";
 import type { ModelsClient } from "../models/client";
@@ -9,7 +10,7 @@ import type { SettingsPageClients } from "./client";
 import { SettingsHub } from "./SettingsHub";
 
 function readyEngine(): EngineClient {
-  return { getState: async () => ({ status: "ready", version: "0.2.0" }) };
+  return { getState: async () => ({ status: "ready", version: DESKTOP_CLIENT_VERSION }) };
 }
 
 function emptyBackend() {

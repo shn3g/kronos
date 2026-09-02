@@ -6,7 +6,7 @@ Windows, macOS, and Linux. Licensed under the [GNU Affero General Public License
 
 ## Install
 
-Download a Windows NSIS installer, Linux `.deb`, or macOS `.app` from a [GitHub Release](https://github.com/shn3g/kronos/releases) (`v0.2.0` is the current preview). Or build with `pnpm tauri build`.
+Download a Windows NSIS installer, Linux `.deb`, or macOS `.app` from a [GitHub Release](https://github.com/shn3g/kronos/releases) (`v0.3.0` is the current preview). Or build with `pnpm tauri build`.
 
 Signing is not present. Windows SmartScreen and macOS Gatekeeper will warn. That is the OS. Use "Run anyway" or right-click Open for the unsigned path.
 
@@ -28,14 +28,14 @@ Contributor tests belong in [CONTRIBUTING.md](CONTRIBUTING.md). Walkthrough: [do
 
 ## Inside the app
 
-1. Open Kronos. Engine ready requires the sidecar (`python -m kronos_engine` on PATH).
-2. Workspaces: pick **your** git folder, Enrol. Kronos registers it in local SQLite. It does not write `.kronos/` into the tree at enrol.
-3. Enable Kronos shows a **preview** of `.kronos/config.yaml`, workflow, and CODEOWNERS. You commit those on **your** repo.
-4. Connections: two GitHub Apps (controller + isolated reviewer) and optional Telegram. Models: your keys in OS secret storage. Each role (orchestrator, planner, coder, reviewer, embedding) can be online or local.
-5. Chat is the orchestrator: it answers questions and creates draft goals with `/goal`. It does not edit files or call GitHub.
-6. Index: per-repo hybrid search under app cache. A watcher can reindex dirty working-tree files; unchanged chunk hashes skip re-embedding. FTS5 always; optional local ONNX or remote embeddings. Isolation by repository id. Weights are never downloaded.
-7. On enrol: empty lesson store. Modes `write_draft_prs` and above also need the safety gate (branch protection, Kronos PR workflow, CODEOWNERS, verified reviewer app).
-8. Leave `freeze: true` and `mode: observe` or `shadow` until you want writes.
+1. Open Kronos. If the local engine is down, the window says "The local engine is not running" and does not open chrome. The sidecar is `python -m kronos_engine` on PATH. Until 0.5.0 the engine **must match the desktop version**.
+2. Connect a model if no orchestrator is assigned. Keys go into the operating system secret store. Chat is then the main stage (menu bar, activity bar, inspector). A workspace folder is optional.
+3. Browser preview (same UI, no native window): start the engine, then `pnpm --filter @kronos/desktop dev` and open `http://localhost:1420`. The Vite `/kronos-engine` proxy adds the bearer on the server. `vite preview` stays engine-unavailable.
+4. Open a git folder from File or Workspaces when you want indexing and file tools. Chat can search, read, write, and run capped commands inside that folder. `/goal` creates a draft and reports readiness. Chat does not call GitHub. Files in the activity bar is a placeholder in 0.3.0.
+5. Enable Kronos shows a **preview** of `.kronos/config.yaml`, workflow, and CODEOWNERS. You commit those on **your** repo.
+6. Connections: two GitHub Apps (controller + isolated reviewer) and optional Telegram. Models: each role (orchestrator, planner, coder, reviewer, embedding) can be online or local.
+7. Index: per-repo hybrid search under app cache. A watcher can reindex dirty working-tree files; unchanged chunk hashes skip re-embedding. FTS5 always; optional local ONNX or remote embeddings. Isolation by repository id. Weights are never downloaded.
+8. On enrol: empty lesson store. Modes `write_draft_prs` and above also need the safety gate (branch protection, Kronos PR workflow, CODEOWNERS, verified reviewer app). Leave `freeze: true` and `mode: observe` or `shadow` until you want autonomous writes.
 
 **Skills:** global library under `skills/core/` shipped with Kronos. **Lessons:** per enrolled repo, empty at first, propose is not activate.
 

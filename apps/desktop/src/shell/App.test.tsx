@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
+import { DESKTOP_CLIENT_VERSION } from "../api/kronosClient";
 import { App } from "../shell/App";
 import type { EngineClient, EngineConnectionState } from "../engine/client";
 import type { EmbeddingBackend, ModelsClient, RoleAssignments } from "../features/models/client";
@@ -11,7 +12,7 @@ import type { GoalsClient } from "../features/goals/client";
 import type { SettingsPageClients } from "../features/settings/client";
 import { ACTIVE_WORKSPACE_STORAGE_KEY } from "./resolveWorkspace";
 
-const ENGINE_VERSION = "0.2.0";
+const ENGINE_VERSION = DESKTOP_CLIENT_VERSION;
 
 function clientOf(state: EngineConnectionState): EngineClient {
   return {

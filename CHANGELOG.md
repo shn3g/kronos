@@ -7,13 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-02
+
+Agent shell: Cursor-like desktop plus agentic chat. Files editor, Terminal, inspector revert/commit, Goals workbench, and a bundled engine are later releases.
+
+### Added
+
+- Cursor-like window: menu bar (File, Edit, View, Help), activity bar (Chat, Files, Goals, Workspaces, Settings), title-row workspace switcher, and a right inspector (Changes, Goals, Health). Engine-unavailable and Connect-a-model gates run before chrome. Connect a model assigns the **orchestrator** (and the other roles from the same provider). Files is a placeholder in this release.
+- Agentic chat: tools (`search_index`, `list_files`, `read_file`, `write_file`, `run_command`, `search_memory`, `create_goal`, `list_goals`), SSE tool and goal events, cancel, pasted images, `@file` mentions, token meter, and a composer model switcher. Chat writes files through tools inside the enrolled folder.
+- Browser preview through Vite `/kronos-engine` (bearer added on the dev server, never in the page). `vite preview` stays engine-unavailable.
+- Workspace HTTP: files list and contents, working-tree changes, local commit, and revert (engine plus Rust allowlist). Inspector Changes is **read-only** in this release.
+- `/goal` replies include readiness checks (workspace, models, mode/freeze, GitHub controller, reviewer app, branch protection, PR workflow, CODEOWNERS, budgets).
+
 ### Changed
 
 - CI and security workflows run on ready-for-review pull requests, not on push to `main`. Draft PRs keep version lockstep only. Installers still publish from `v*` tags. Ubuntu desktop CI also runs `cargo test` and clippy.
 
 ### Fixed
 
-- A desktop newer than the engine on PATH is now reported as incompatible instead of ready. The status banner shows both versions (`Engine ready. Desktop 0.2.0. Engine 0.2.0.`) and the incompatible message names the PATH engine to install.
+- A desktop newer than the engine on PATH is now reported as incompatible instead of ready. The status banner shows both versions (`Engine ready. Desktop 0.3.0. Engine 0.3.0.`) and the incompatible message names the PATH engine to install.
 
 ## [0.2.0] - 2026-09-01
 
@@ -42,6 +54,7 @@ Developed as 0.1.1–0.1.6 on this branch; tagged together as 0.2.0.
 
 First public desktop preview (`v0.1.0`). Enrol a git folder, leave freeze and observe/shadow until you want writes, unsigned Windows/Linux/macOS installers.
 
-[unreleased]: https://github.com/shn3g/kronos/compare/v0.2.0...HEAD
+[unreleased]: https://github.com/shn3g/kronos/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/shn3g/kronos/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/shn3g/kronos/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/shn3g/kronos/releases/tag/v0.1.0

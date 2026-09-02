@@ -4,10 +4,11 @@ File-level notes that accumulate as subsystems land.
 
 - [Quickstart](../quickstart.md)
 - [Desktop shell](desktop-shell.md)
+- [Agent desktop](agent-desktop.md)
 - [Engine lifecycle](engine.md)
 - [Repository enrolment](enrolment.md)
 - [Models, executors, and sandboxes](models.md)
-- [Chat orchestrator](chat.md)
+- [Chat](chat.md)
 - [GitHub Apps](../github-apps.md)
 - [Telegram](../telegram.md)
 - [Skills](../skills.md)

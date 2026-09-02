@@ -44,7 +44,7 @@ describe("probeEngineState", () => {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(
           JSON.stringify({
-            engine_version: "0.2.0",
+            engine_version: DESKTOP_CLIENT_VERSION,
             min_client_version: "0.1.0",
             compatible: true,
           }),
@@ -59,7 +59,7 @@ describe("probeEngineState", () => {
       baseUrl,
       token: "",
     });
-    expect(state).toEqual({ status: "ready", version: "0.2.0" });
+    expect(state).toEqual({ status: "ready", version: DESKTOP_CLIENT_VERSION });
   });
 
   it("reports ready only when health is ok and versions are compatible", async () => {
@@ -75,7 +75,7 @@ describe("probeEngineState", () => {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(
           JSON.stringify({
-            engine_version: "0.2.0",
+            engine_version: DESKTOP_CLIENT_VERSION,
             min_client_version: "0.1.0",
             compatible: true,
           }),
@@ -90,7 +90,7 @@ describe("probeEngineState", () => {
       baseUrl,
       token: "install-token",
     });
-    expect(state).toEqual({ status: "ready", version: "0.2.0" });
+    expect(state).toEqual({ status: "ready", version: DESKTOP_CLIENT_VERSION });
   });
 
   it("reports incompatible version when the engine says the client is incompatible", async () => {

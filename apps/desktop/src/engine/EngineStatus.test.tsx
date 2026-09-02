@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { DESKTOP_CLIENT_VERSION } from "../api/kronosClient";
 import { EngineStatus } from "./EngineStatus";
 
 describe("EngineStatus", () => {
@@ -20,7 +21,7 @@ describe("EngineStatus", () => {
 
     const status = screen.getByRole("status");
     expect(status).toHaveTextContent("Engine ready");
-    expect(status).toHaveTextContent("Desktop 0.2.0");
+    expect(status).toHaveTextContent(`Desktop ${DESKTOP_CLIENT_VERSION}`);
     expect(status).toHaveTextContent("Engine 2.4.1");
   });
 
@@ -29,7 +30,7 @@ describe("EngineStatus", () => {
       <EngineStatus
         state={{
           status: "incompatible",
-          clientVersion: "0.2.0",
+          clientVersion: DESKTOP_CLIENT_VERSION,
           engineVersion: "9.9.9",
         }}
       />,
@@ -37,7 +38,7 @@ describe("EngineStatus", () => {
 
     const status = screen.getByRole("status");
     expect(status).toHaveTextContent("Incompatible engine version");
-    expect(status).toHaveTextContent("0.2.0");
+    expect(status).toHaveTextContent(DESKTOP_CLIENT_VERSION);
     expect(status).toHaveTextContent("9.9.9");
     expect(status).toHaveTextContent("on PATH");
   });

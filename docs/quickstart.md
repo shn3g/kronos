@@ -6,7 +6,7 @@ Windows, macOS, and Linux. Licensed under GNU AGPL v3.0.
 
 ## Install
 
-Download a Windows NSIS installer, Linux `.deb`, or macOS `.app` from a [GitHub Release](https://github.com/shn3g/kronos/releases) (`v0.2.0` is the current preview).
+Download a Windows NSIS installer, Linux `.deb`, or macOS `.app` from a [GitHub Release](https://github.com/shn3g/kronos/releases) (`v0.3.0` is the current preview).
 
 Signing is not present. Windows SmartScreen and macOS Gatekeeper will warn. That is the OS. Use "Run anyway" or right-click Open for the unsigned path.
 
@@ -20,14 +20,14 @@ cd engine && pip install -e ".[dev]" && cd ..
 pnpm tauri build
 ```
 
-## Enable a repository
+## First run
 
-1. Open Kronos. Engine ready requires the sidecar (`python -m kronos_engine` on PATH).
-2. Workspaces: pick your git folder, Enrol. Kronos registers it in local SQLite. It does not write `.kronos/` into the tree at enrol.
-3. Enable Kronos shows a preview of `.kronos/config.yaml`, `.github/workflows/kronos-pr.yml`, and CODEOWNERS. Preview does not write the tree. You commit those on your repo. CODEOWNERS must cover `.kronos/**`.
-4. Connections: two GitHub Apps (controller + isolated reviewer) and optional Telegram. Models: your keys in OS secret storage.
-5. On enrol: empty lesson store; per-repo hybrid index under app cache (FTS5 always; optional local ONNX vectors if weights are on disk, never downloaded). Isolation by repository id.
-6. Leave `freeze: true` and `mode: observe` or `shadow` until you want writes.
+1. Open Kronos. If the local engine is down, the window says "The local engine is not running". The sidecar is `python -m kronos_engine` on PATH. Until 0.5.0 the engine **must match the desktop version**.
+2. Connect a model if no orchestrator is assigned. Keys go into the operating system secret store.
+3. Chat is the main stage without a folder. Open a git folder from File or Workspaces when you want indexing and file tools. Chat can search, read, write, and run capped commands inside that folder. `/goal` creates a draft and reports readiness. Paste a screenshot into chat to ask about the UI.
+4. Browser preview: start the engine, then `pnpm --filter @kronos/desktop dev` and open `http://localhost:1420`. The page never sees the engine token. `vite preview` stays engine-unavailable.
+5. Kronos registers enrolled folders in local SQLite. It does not write `.kronos/` into the tree at enrol.
+6. Optional later: enable a committed `.kronos/config.yaml` (preview of config, `.github/workflows/kronos-pr.yml`, and CODEOWNERS; you commit those on your repo; CODEOWNERS must cover `.kronos/**`), GitHub Apps, and Telegram. Leave `freeze: true` and `mode: observe` or `shadow` until you want autonomous git writes.
 
 The integration branch comes from committed `.kronos/config.yaml`. The in-app template default is `main`. The protected default branch is `policy.branches.protected` (template default `main`).
 

@@ -1,24 +1,33 @@
-# Chat orchestrator
+# Chat
 
-Chat is the orchestrator, not a sidecar to goals. It answers basic questions itself (cheap model, capped tokens) using packed index context and citations. Anything that needs real work becomes a draft goal. Executors then run inside sandbox, modes, freeze, and budgets.
+Chat is the main stage of the 0.3.0 desktop. `ChatService` runs an agent loop against the assigned **orchestrator** profile. It streams tokens, may call tools inside the enrolled folder, and can create a draft goal with `/goal`. Executors still run unattended work under sandbox, modes, freeze, and budgets.
 
 ## What chat does
 
-- Lists, creates, and loads per-repository conversations stored in local SQLite.
-- Streams assistant text through the desktop Rust command `engine_stream`. The WebView never sees the bearer token or the engine port.
-- Returns citations (path and line range) from the index context pack.
-- `/goal` (and an orchestrator JSON intent the UI does not show) creates a draft goal. Chat does not start the executor.
+- Lists, creates, and loads conversations in local SQLite. `repository_id` may be null: a chat without a workspace can explain Kronos. Tools that need a folder return a clear sentence.
+- Streams assistant text, tool cards, and goal readiness through the desktop Rust command `engine_stream`, or through `fetch` + `ReadableStream` in the Vite browser preview. The WebView never sees the bearer token or the engine port.
+- Calls tools from a fenced code block whose language is `tool` (JSON, not native function calling): `search_index`, `list_files`, `read_file`, `write_file`, `run_command`, `search_memory`, `create_goal`, `list_goals`. Writes stay inside the enrolled realpath (no absolute paths, `..`, or `.git`; locked prefixes on write). Commands are capped and timeboxed. Chat does not `git push`.
+- Accepts pasted images (png/jpeg/webp/gif, size and count capped) and `@file` mentions. Root `AGENTS.md`, `.cursorrules`, `CLAUDE.md`, and `.cursor/rules` are attached to the system prompt when a workspace is open.
+- `/goal` creates a draft goal either way, then replies with readiness checks in plain sentences (workspace active, planner/coder/reviewer assigned, mode allows writes, GitHub controller, reviewer app, branch protection, Kronos PR workflow, CODEOWNERS, budget). The goal does not start the executor from chat.
 
 ## What chat does not do
 
-- Edit files.
 - Call GitHub.
-- Invent tools. File writes, PRs, and merges stay on the goal/executor path.
+- Open a Files editor (path buttons go to the Files **placeholder** in 0.3.0).
+- Run an interactive terminal. `run_command` is a one-shot, capped shell in the workspace folder.
 
 ## Streaming
 
-The desktop Chat page calls Tauri `engine_stream` with an HTTP path on the loopback engine. Rust holds the token, reads SSE, and emits `engine-stream` events. Cancel uses `engine_stream_cancel`.
+Each SSE `data:` line is JSON:
+
+- `{"delta": "text"}`
+- `{"tool": {"id": "t1", "name": "read_file", "args": {...}, "status": "running"}}` then `{"tool": {"id": "t1", "name": "read_file", "status": "ok"|"error", "summary": "...", "output": "<clipped>"}}`
+- `{"goal": {"id": "goal_x", "state": "draft", "can_execute": false, "readiness": [{"id","label","ok","detail"}]}}`
+- `{"error": "sentence"}` (stream ends)
+- `{"content": "...", "citations": [...], "goal_refs": [...], "done": true}`
+
+Rust holds the token, reads SSE, and emits `engine-stream` events (`delta`, `tool`, `goal`, `error`, `done`). Cancel uses `engine_stream_cancel` plus `POST /conversations/{id}/cancel`. The browser preview uses the same paths through `/kronos-engine` with an `AbortController`.
 
 ## Configuration
 
-Assign an orchestrator profile on the Models page. A billed provider with no key, or a cost ceiling of zero, fails closed (HTTP 409) instead of calling the network.
+Assign an orchestrator profile (Connect a model on first run, or the composer switcher). A billed provider with no key, or a cost ceiling of zero, fails closed (HTTP 409) instead of calling the network. Until 0.5.0 the engine on PATH must match the desktop version.

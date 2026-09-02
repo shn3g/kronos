@@ -8,7 +8,7 @@ import { UpdatesPage, type UpdatesPageClients } from "./UpdatesPage";
 
 function engine(status: "unavailable" | "starting" | "ready" | "incompatible"): EngineClient {
   if (status === "ready") {
-    return { getState: async () => ({ status: "ready", version: "0.2.0" }) };
+    return { getState: async () => ({ status: "ready", version: DESKTOP_CLIENT_VERSION }) };
   }
   if (status === "incompatible") {
     return {
@@ -25,8 +25,8 @@ function engine(status: "unavailable" | "starting" | "ready" | "incompatible"): 
 function clients(overrides: Partial<UpdatesPageClients> = {}): UpdatesPageClients {
   return {
     status: async () => ({
-      engineVersion: "0.2.0",
-      clientVersion: "0.2.0",
+      engineVersion: DESKTOP_CLIENT_VERSION,
+      clientVersion: DESKTOP_CLIENT_VERSION,
       compatible: true,
       signed: false,
       checksumsPresent: true,
