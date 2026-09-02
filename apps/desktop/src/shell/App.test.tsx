@@ -774,6 +774,32 @@ describe("App shell", () => {
     expect(screen.getByRole("button", { name: /^goals$/i })).toHaveAttribute("aria-current", "page");
   });
 
+  it("shows the Goals workbench without a waiting flash once the shell is ready", async () => {
+    window.location.hash = "#/goals";
+    let probes = 0;
+    render(
+      <App
+        {...readyFrame({
+          engineClient: {
+            getState: async () => {
+              probes += 1;
+              if (probes === 1) {
+                return { status: "ready" as const, version: ENGINE_VERSION };
+              }
+              return new Promise(() => undefined);
+            },
+          },
+        })}
+      />,
+    );
+
+    expect(await screen.findByText(/create bounded goals/i)).toBeVisible();
+    const workbench = screen.getByRole("heading", { level: 1, name: /^goals$/i }).closest("section");
+    expect(workbench).not.toBeNull();
+    expect(workbench).toHaveTextContent(/create bounded goals/i);
+    expect(workbench).not.toHaveTextContent("Waiting for the engine.");
+  });
+
   it("mentions a workspace file in chat from the Files preview", async () => {
     const user = userEvent.setup();
     const session = liveSession();
