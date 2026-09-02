@@ -1,8 +1,12 @@
 name: CI
 
+# Jobs run only when a pull request is marked ready for review.
+# Draft opened/synchronize events are not in `on`, so they never start a run.
+# converted_to_draft starts a skipped run so concurrency can cancel an in-flight matrix.
+# There is no `on.push`: merging to main does not re-run tests. Tags use release.yml.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [ready_for_review, converted_to_draft]
 
 permissions:
   contents: read
@@ -14,6 +18,7 @@ concurrency:
 jobs:
   versions:
     name: Version lockstep
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

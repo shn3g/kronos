@@ -1,6 +1,6 @@
 # Kronos 0.2 → 0.5 Mega Plan: Agent Desktop
 
-> Execution notes (2026-09-02): do **not** merge [PR #14](https://github.com/shn3g/kronos/pull/14) (`reference-do-not-merge`). Copy files from it. This branch already includes [PR #15](https://github.com/shn3g/kronos/pull/15). CI now runs on **ready-for-review** pull requests only; merging to `main` does not re-test; `v*` tags run Release. Tag `v0.3.0` / `v0.4.0` / `v0.5.0` after each version commit is on `main`. Each subphase is implemented by a fresh agent and reviewed by a different agent.
+> Execution notes (2026-09-02): do **not** merge [PR #14](https://github.com/shn3g/kronos/pull/14) (`reference-do-not-merge`). Copy files from it. This branch already includes [PR #15](https://github.com/shn3g/kronos/pull/15). CI and Security run on **ready-for-review** only (draft opened/synchronize never start a run; converting back to draft cancels in-flight jobs). Merging to `main` does not re-test. `v*` tags run Release. Tag `v0.3.0` / `v0.4.0` / `v0.5.0` after each version commit is on `main`. Each subphase is implemented by a fresh agent and reviewed by a different agent.
 
 > For the implementing agent: this plan assumes zero prior context. Work task by task, TDD (failing test first), commit per task, one PR per phase. Copy code from the reference by file, never `git merge` it (histories diverged before 0.2.0).
 
@@ -162,8 +162,8 @@ SSE event shapes (each `data: <json>`):
 - Commit: `test(e2e): full-stack browser run against a real engine and a mock model`.
 
 ### 2.6 CI cost and Rust tests
-- [.github/workflows/ci.yml](.github/workflows/ci.yml): `concurrency: { group: ci-${{ github.ref }}, cancel-in-progress: true }`; Windows/macOS matrix legs and `desktop` bundle job run only when `github.event_name == 'push'` or `github.event.pull_request.draft == false`; Ubuntu legs always run; add `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml` and `cargo clippy -- -D warnings` to the Ubuntu desktop job; e2e `with-engine` on Ubuntu. Document in CONTRIBUTING: draft PR = lint + unit only; mark ready for the full matrix.
-- Commit: `ci: cheaper draft PRs, cancel superseded runs, run Rust tests`.
+- Done on `main` except attaching 2.5 `with-engine` e2e to the Linux frontend job. [.github/workflows/ci.yml](.github/workflows/ci.yml) and [security.yml](.github/workflows/security.yml) listen to `ready_for_review` and `converted_to_draft` only (every job `if: draft == false`). No `on.push`. Ubuntu desktop already runs `cargo test` and `clippy -D warnings`. After 2.5, add `with-engine` on Linux only.
+- Commit: `ci: run GitHub Actions only when a PR is marked ready for review`.
 
 ### 2.7 Release 0.4.0
 - Lockstep 0.4.0, CHANGELOG, docs (agent-desktop, operations), screenshots. Same verification list as 1.9 plus `with-engine` e2e.

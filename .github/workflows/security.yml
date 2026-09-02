@@ -1,8 +1,11 @@
 name: Security
 
+# Pull-request jobs run only when a PR is marked ready for review.
+# Draft opened/synchronize events are not in `on`. Merging to main does not run this workflow.
+# Weekly cron still audits main. converted_to_draft skips jobs and cancels an in-flight run.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [ready_for_review, converted_to_draft]
   schedule:
     - cron: "17 4 * * 1"
 
@@ -16,6 +19,7 @@ concurrency:
 jobs:
   audit:
     name: Dependency audit
+    if: github.event_name == 'schedule' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -51,6 +55,7 @@ jobs:
 
   secrets:
     name: Secret scanning
+    if: github.event_name == 'schedule' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -65,6 +70,7 @@ jobs:
 
   sbom:
     name: SBOM
+    if: github.event_name == 'schedule' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
