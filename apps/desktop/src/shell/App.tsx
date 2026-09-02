@@ -7,8 +7,18 @@ import {
   type EngineConnectionState,
 } from "../engine/client";
 import { EngineStatus } from "../engine/EngineStatus";
-import { ChatPage } from "../features/chat/ChatPage";
+import { ChatPage, type ChatMentionRequest } from "../features/chat/ChatPage";
 import { createProductionChatClient, type ChatClient } from "../features/chat/client";
+import { FilesPage } from "../features/files/FilesPage";
+import { GoToFilePalette } from "../features/files/GoToFilePalette";
+import {
+  ASK_IN_CHAT_EVENT,
+  FIND_IN_FILE_EVENT,
+  FIND_IN_FILES_EVENT,
+  GO_TO_LINE_EVENT,
+  REPLACE_IN_FILE_EVENT,
+} from "../features/files/fileEditor";
+import { safeWorkspaceRelPath } from "../features/files/workspacePath";
 import { createProductionIndexClient, type IndexClient } from "../features/index/client";
 import { GoalsPage, type GoalsPageClients } from "../features/goals/GoalsPage";
 import { createProductionGoalsClient, type GoalsClient } from "../features/goals/client";
@@ -96,6 +106,15 @@ export function App({
   const [route, setRoute] = useState<ShellRoute>(() => routeFromHash(window.location.hash));
   const [historyOpen, setHistoryOpen] = useState(false);
   const [newChatRequest, setNewChatRequest] = useState(0);
+  const [mentionRequest, setMentionRequest] = useState<ChatMentionRequest>({
+    path: "",
+    nonce: 0,
+    selectedText: "",
+    startLine: 0,
+    endLine: 0,
+  });
+  const [fileReveal, setFileReveal] = useState({ path: "", nonce: 0 });
+  const [goToFileOpen, setGoToFileOpen] = useState(false);
   const [orchestratorName, setOrchestratorName] = useState<string | null>(null);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("changes");
   const [activityCollapsed, setActivityCollapsed] = useState(() =>
@@ -162,6 +181,10 @@ export function App({
   });
 
   useEffect(() => {
+    setFileReveal({ path: "", nonce: 0 });
+  }, [session.workspaceId]);
+
+  useEffect(() => {
     const onHashChange = () => {
       setRoute(routeFromHash(window.location.hash));
     };
@@ -186,7 +209,12 @@ export function App({
     setNewChatRequest((current) => current + 1);
   }
 
-  function openFiles(): void {
+  function revealWorkspaceFile(path: string): void {
+    const safe = safeWorkspaceRelPath(path);
+    if (safe === "") {
+      return;
+    }
+    setFileReveal((current) => ({ path: safe, nonce: current.nonce + 1 }));
     go({ activity: "files" });
   }
 
@@ -225,20 +253,24 @@ export function App({
       if (!action) {
         return;
       }
-      if (
-        action === "toggle-terminal" ||
-        action === "go-to-file" ||
-        action === "find-in-files" ||
-        action === "ask-in-chat"
-      ) {
-        if (action === "go-to-file" || action === "find-in-files") {
-          event.preventDefault();
-          openFiles();
-        }
-        if (action === "ask-in-chat") {
-          event.preventDefault();
-          go({ activity: "chat" });
-        }
+      if (action === "toggle-terminal") {
+        return;
+      }
+      if (action === "go-to-file") {
+        event.preventDefault();
+        setGoToFileOpen(true);
+        return;
+      }
+      if (action === "find-in-files") {
+        event.preventDefault();
+        go({ activity: "files" });
+        window.dispatchEvent(new Event(FIND_IN_FILES_EVENT));
+        return;
+      }
+      if (action === "ask-in-chat") {
+        event.preventDefault();
+        window.dispatchEvent(new Event(ASK_IN_CHAT_EVENT));
+        go({ activity: "chat" });
         return;
       }
       event.preventDefault();
@@ -335,12 +367,27 @@ export function App({
         onOpenWorkspace={() => {
           go({ activity: "workspaces" });
         }}
-        onGoToFile={openFiles}
-        onFindInFile={openFiles}
-        onFindInFiles={openFiles}
-        onReplaceInFile={openFiles}
-        onGoToLine={openFiles}
+        onGoToFile={() => {
+          setGoToFileOpen(true);
+        }}
+        onFindInFile={() => {
+          go({ activity: "files" });
+          window.dispatchEvent(new Event(FIND_IN_FILE_EVENT));
+        }}
+        onFindInFiles={() => {
+          go({ activity: "files" });
+          window.dispatchEvent(new Event(FIND_IN_FILES_EVENT));
+        }}
+        onReplaceInFile={() => {
+          go({ activity: "files" });
+          window.dispatchEvent(new Event(REPLACE_IN_FILE_EVENT));
+        }}
+        onGoToLine={() => {
+          go({ activity: "files" });
+          window.dispatchEvent(new Event(GO_TO_LINE_EVENT));
+        }}
         onAskInChat={() => {
+          window.dispatchEvent(new Event(ASK_IN_CHAT_EVENT));
           go({ activity: "chat" });
         }}
         onToggleHistory={() => {
@@ -386,6 +433,7 @@ export function App({
                   repositoryId={workspaceId}
                   historyOpen={historyOpen}
                   newChatRequest={newChatRequest}
+                  mentionRequest={mentionRequest}
                   orchestratorName={orchestratorName}
                   indexClient={index}
                   modelsClient={models}
@@ -405,13 +453,33 @@ export function App({
                         }
                       : undefined
                   }
-                  onOpenPath={() => {
-                    go({ activity: "files" });
-                  }}
+                  onOpenPath={revealWorkspaceFile}
                 />
               </div>
-              <div hidden={activity !== "files"} className="app-main__panel">
-                <FilesPlaceholder />
+              <div hidden={activity !== "files"} className="app-main__panel app-main__panel--files">
+                <FilesPage
+                  engineClient={engine}
+                  repositoryId={workspaceId}
+                  repositoriesClient={repos}
+                  indexClient={index}
+                  onOpenWorkspace={() => {
+                    go({ activity: "workspaces" });
+                  }}
+                  onAskInChat={(path, selection) => {
+                    setMentionRequest((current) => ({
+                      path,
+                      nonce: current.nonce + 1,
+                      selectedText: selection?.text ?? "",
+                      startLine: selection?.startLine ?? 0,
+                      endLine: selection?.endLine ?? 0,
+                    }));
+                    go({ activity: "chat" });
+                  }}
+                  onWroteFile={() => {
+                    void session.refresh();
+                  }}
+                  revealRequest={fileReveal}
+                />
               </div>
               {activity === "goals" ? (
                 <div className="app-main__panel">
@@ -449,23 +517,24 @@ export function App({
                 changes={session.changes}
                 goals={session.goals}
                 checks={session.checks}
+                onOpenPath={revealWorkspaceFile}
               />
             )}
           </div>
         </div>
       </div>
+      <GoToFilePalette
+        open={goToFileOpen}
+        repositoryId={workspaceId}
+        repositoriesClient={repos}
+        onClose={() => {
+          setGoToFileOpen(false);
+        }}
+        onOpenWorkspace={() => {
+          go({ activity: "workspaces" });
+        }}
+        onSelect={revealWorkspaceFile}
+      />
     </div>
-  );
-}
-
-function FilesPlaceholder() {
-  return (
-    <section>
-      <p className="page-kicker">Files</p>
-      <h1 className="page-title">Files</h1>
-      <p className="page-body">
-        The editor arrives later. Open a git folder from Workspaces to browse files here.
-      </p>
-    </section>
   );
 }

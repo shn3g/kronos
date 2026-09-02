@@ -1,15 +1,16 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DESKTOP_CLIENT_VERSION } from "../api/kronosClient";
 import { App } from "../shell/App";
 import type { EngineClient, EngineConnectionState } from "../engine/client";
 import type { EmbeddingBackend, ModelsClient, RoleAssignments } from "../features/models/client";
-import type { ChatClient } from "../features/chat/client";
+import type { ChatClient, ChatStreamHandlers } from "../features/chat/client";
 import type { RepositoriesClient } from "../features/workspaces/client";
 import type { HomeClient } from "../features/home/client";
 import type { GoalsClient } from "../features/goals/client";
 import type { SettingsPageClients } from "../features/settings/client";
+import type { IndexClient } from "../features/index/client";
 import { ACTIVE_WORKSPACE_STORAGE_KEY } from "./resolveWorkspace";
 
 const ENGINE_VERSION = DESKTOP_CLIENT_VERSION;
@@ -146,7 +147,10 @@ function quietRepos(): RepositoriesClient {
     disable: unused,
     resume: unused,
     listChanges: async () => [],
+    listWorkspaceFiles: async () => [],
+    readWorkspaceFile: unused,
     writeFile: unused,
+    writeWorkspaceFile: unused,
   };
 }
 
@@ -260,6 +264,30 @@ function liveSession() {
       ],
     },
     settingsClient: quietSettings(),
+  };
+}
+
+function idleIndex(search: IndexClient["search"]): IndexClient {
+  const status = {
+    repositoryId: "repo_alpha",
+    commit: "abc123",
+    chunkCount: 1,
+    denseAvailable: false,
+    indexPath: "C:/cache/indexes/repo_alpha",
+    ready: true,
+    state: "idle" as const,
+    filesDone: 1,
+    filesTotal: 1,
+    chunksEmbedded: 0,
+    chunksSkipped: 0,
+    lastActivityAt: null,
+    watchEnabled: false,
+  };
+  return {
+    status: async () => status,
+    rebuild: async () => status,
+    setWatch: async () => status,
+    search,
   };
 }
 
@@ -440,7 +468,6 @@ describe("App shell", () => {
 
     await user.click(screen.getByRole("button", { name: /^files$/i }));
     expect(await screen.findByRole("heading", { level: 1, name: "Files" })).toBeInTheDocument();
-    expect(screen.getByText(/the editor arrives later/i)).toBeInTheDocument();
     expect(
       screen.getByText(/open a git folder from workspaces to browse files here/i),
     ).toBeInTheDocument();
@@ -537,5 +564,233 @@ describe("App shell", () => {
     expect(await screen.findByRole("heading", { name: /^goals$/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /^runs$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^goals$/i })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("mentions a workspace file in chat from the Files preview", async () => {
+    const user = userEvent.setup();
+    const session = liveSession();
+    render(
+      <App
+        {...readyFrame({
+          repositoriesClient: {
+            ...session.repositoriesClient,
+            listWorkspaceFiles: async () => [{ path: "src/app.py" }],
+            readWorkspaceFile: async () => ({
+              path: "src/app.py",
+              content: "print(1)\n",
+              binary: false,
+            }),
+          },
+          homeClient: session.homeClient,
+          goalsClient: session.goalsClient,
+        })}
+      />,
+    );
+
+    await screen.findByRole("heading", { level: 1, name: "Ask Kronos" });
+    await user.click(screen.getByRole("button", { name: /^files$/i }));
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    await user.click(await screen.findByRole("button", { name: /ask in chat/i }));
+    expect(await screen.findByRole("textbox", { name: /ask kronos/i })).toHaveValue("@src/app.py ");
+  });
+
+  it("opens a mentioned file in Files from the chat thread", async () => {
+    const user = userEvent.setup();
+    const session = liveSession();
+    const readWorkspaceFile = vi.fn(async (_id: string, path: string) => ({
+      path,
+      content: "print(1)\n",
+      binary: false,
+    }));
+    render(
+      <App
+        {...readyFrame({
+          chatClient: {
+            ...quietChat(),
+            streamMessage: async (_id: string, _content: string, handlers: ChatStreamHandlers) => {
+              handlers.onDone({
+                content: "I will inspect that file.",
+                citations: [],
+                goalRefs: [],
+              });
+            },
+          },
+          repositoriesClient: {
+            ...session.repositoriesClient,
+            listWorkspaceFiles: async () => [{ path: "src/app.py" }],
+            readWorkspaceFile,
+          },
+          homeClient: session.homeClient,
+          goalsClient: session.goalsClient,
+        })}
+      />,
+    );
+
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "Fix @src/app.py");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    await user.click(await screen.findByRole("button", { name: /open src\/app\.py/i }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Files" })).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "src/app.py" })).toHaveValue("print(1)\n");
+    expect(readWorkspaceFile).toHaveBeenCalledWith("repo_alpha", "src/app.py");
+  });
+
+  it("opens a changed file in Files from the Changes list", async () => {
+    const user = userEvent.setup();
+    const session = liveSession();
+    const readWorkspaceFile = vi.fn(async (_id: string, path: string) => ({
+      path,
+      content: "export function App() {}\n",
+      binary: false,
+    }));
+    render(
+      <App
+        {...readyFrame({
+          repositoriesClient: {
+            ...session.repositoriesClient,
+            listWorkspaceFiles: async () => [{ path: "src/App.tsx" }],
+            readWorkspaceFile,
+          },
+          homeClient: session.homeClient,
+          goalsClient: session.goalsClient,
+        })}
+      />,
+    );
+
+    await screen.findByRole("heading", { level: 1, name: "Ask Kronos" });
+    await user.click(await screen.findByRole("button", { name: /open src\/app\.tsx/i }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Files" })).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "src/App.tsx" })).toHaveValue(
+      "export function App() {}\n",
+    );
+    expect(readWorkspaceFile).toHaveBeenCalledWith("repo_alpha", "src/App.tsx");
+  });
+
+  it("opens a workspace file from Go to file with Ctrl+P", async () => {
+    const user = userEvent.setup();
+    const session = liveSession();
+    const readWorkspaceFile = vi.fn(async (_id: string, path: string) => ({
+      path,
+      content: "print(1)\n",
+      binary: false,
+    }));
+    render(
+      <App
+        {...readyFrame({
+          repositoriesClient: {
+            ...session.repositoriesClient,
+            listWorkspaceFiles: async () => [{ path: "src/app.py" }, { path: "README.md" }],
+            readWorkspaceFile,
+          },
+          homeClient: session.homeClient,
+          goalsClient: session.goalsClient,
+        })}
+      />,
+    );
+
+    await screen.findByRole("heading", { level: 1, name: "Ask Kronos" });
+    await user.keyboard("{Control>}p{/Control}");
+    await screen.findByRole("option", { name: "src/app.py" });
+    await user.type(screen.getByRole("combobox", { name: /go to file/i }), "app");
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Files" })).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "src/app.py" })).toHaveValue("print(1)\n");
+    expect(readWorkspaceFile).toHaveBeenCalledWith("repo_alpha", "src/app.py");
+    expect(screen.queryByRole("dialog", { name: /go to file/i })).not.toBeInTheDocument();
+  });
+
+  it("opens workspace search from Find in files with Ctrl+Shift+F", async () => {
+    const user = userEvent.setup();
+    const session = liveSession();
+    const search = vi.fn(async () => []);
+    render(
+      <App
+        {...readyFrame({
+          repositoriesClient: {
+            ...session.repositoriesClient,
+            listWorkspaceFiles: async () => [{ path: "src/app.py" }],
+          },
+          homeClient: session.homeClient,
+          goalsClient: session.goalsClient,
+          indexClient: idleIndex(search),
+        })}
+      />,
+    );
+
+    await screen.findByRole("heading", { level: 1, name: "Ask Kronos" });
+    await user.keyboard("{Control>}{Shift>}f{/Shift}{/Control}");
+    expect(await screen.findByRole("heading", { level: 1, name: "Files" })).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: /search contents/i })).toHaveFocus();
+  });
+
+  it("saves the open file from the File menu", async () => {
+    const user = userEvent.setup();
+    const session = liveSession();
+    const writeWorkspaceFile = vi.fn(async () => undefined);
+    render(
+      <App
+        {...readyFrame({
+          repositoriesClient: {
+            ...session.repositoriesClient,
+            listWorkspaceFiles: async () => [{ path: "src/app.py" }],
+            readWorkspaceFile: async () => ({
+              path: "src/app.py",
+              content: "print(1)\n",
+              binary: false,
+            }),
+            writeWorkspaceFile,
+          },
+          homeClient: session.homeClient,
+          goalsClient: session.goalsClient,
+        })}
+      />,
+    );
+
+    await screen.findByRole("heading", { level: 1, name: "Ask Kronos" });
+    await user.click(screen.getByRole("button", { name: /^files$/i }));
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    const editor = await screen.findByRole("textbox", { name: "src/app.py" });
+    await user.type(editor, "x");
+    await user.click(screen.getByRole("menuitem", { name: /^file$/i }));
+    await user.click(screen.getByRole("menuitem", { name: /^save$/i }));
+    expect(writeWorkspaceFile).toHaveBeenCalledWith("repo_alpha", "src/app.py", "print(1)\nx");
+  });
+
+  it("keeps unsaved Files edits when switching back from Chat", async () => {
+    const user = userEvent.setup();
+    const session = liveSession();
+    render(
+      <App
+        {...readyFrame({
+          repositoriesClient: {
+            ...session.repositoriesClient,
+            listWorkspaceFiles: async () => [{ path: "src/app.py" }],
+            readWorkspaceFile: async () => ({
+              path: "src/app.py",
+              content: "print(1)\n",
+              binary: false,
+            }),
+          },
+          homeClient: session.homeClient,
+          goalsClient: session.goalsClient,
+        })}
+      />,
+    );
+
+    await screen.findByRole("heading", { level: 1, name: "Ask Kronos" });
+    await user.click(screen.getByRole("button", { name: /^files$/i }));
+    await user.click(await screen.findByRole("treeitem", { name: "src" }));
+    await user.click(screen.getByRole("treeitem", { name: "app.py" }));
+    const open = await screen.findByRole("textbox", { name: "src/app.py" });
+    await user.type(open, "x");
+    await user.click(screen.getByRole("button", { name: /^chat$/i }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Ask Kronos" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^files$/i }));
+    expect(await screen.findByRole("textbox", { name: "src/app.py" })).toHaveValue("print(1)\nx");
   });
 });

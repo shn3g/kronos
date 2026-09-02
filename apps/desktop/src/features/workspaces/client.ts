@@ -41,6 +41,16 @@ export interface WorkspaceFileChange {
   fromChat: boolean;
 }
 
+export interface WorkspaceListedFile {
+  path: string;
+}
+
+export interface WorkspaceFileContents {
+  path: string;
+  content: string;
+  binary: boolean;
+}
+
 export interface RepositoriesClient {
   list(): Promise<EnrolledRepository[]>;
   inspect(path: string): Promise<InspectResult>;
@@ -49,7 +59,10 @@ export interface RepositoriesClient {
   disable(id: string): Promise<EnrolledRepository>;
   resume(id: string): Promise<EnrolledRepository>;
   listChanges(id: string): Promise<WorkspaceFileChange[]>;
+  listWorkspaceFiles(id: string): Promise<WorkspaceListedFile[]>;
+  readWorkspaceFile(id: string, path: string): Promise<WorkspaceFileContents>;
   writeFile(id: string, path: string, content: string): Promise<void>;
+  writeWorkspaceFile(id: string, path: string, content: string): Promise<void>;
 }
 
 export async function pickRepositoryFolder(): Promise<string | null> {
@@ -100,7 +113,29 @@ export function createProductionRepositoriesClient(
       const changes = Array.isArray(payload.changes) ? payload.changes : [];
       return changes.map(mapChange);
     },
+    async listWorkspaceFiles(id: string) {
+      const payload = await jsonRequest(request, "GET", `/repositories/${id}/files`);
+      const files = Array.isArray(payload.files) ? payload.files : [];
+      return files
+        .map((raw) => ({ path: stringField(asRecord(raw), "path") }))
+        .filter((item) => item.path !== "");
+    },
+    async readWorkspaceFile(id: string, path: string) {
+      const payload = await jsonRequest(
+        request,
+        "GET",
+        `/repositories/${id}/files/contents?path=${encodeURIComponent(path)}`,
+      );
+      return {
+        path: stringField(payload, "path") || path,
+        content: stringField(payload, "content"),
+        binary: payload.binary === true,
+      };
+    },
     async writeFile(id: string, path: string, content: string) {
+      await jsonRequest(request, "PUT", `/repositories/${id}/files/contents`, { path, content });
+    },
+    async writeWorkspaceFile(id: string, path: string, content: string) {
       await jsonRequest(request, "PUT", `/repositories/${id}/files/contents`, { path, content });
     },
   };

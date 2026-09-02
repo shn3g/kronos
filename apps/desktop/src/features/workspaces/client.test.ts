@@ -103,4 +103,50 @@ describe("createProductionRepositoriesClient", () => {
 
     await expect(client.writeFile("repo_alpha", "src/ok.ts", "const ok = false;")).resolves.toBeUndefined();
   });
+
+  it("lists workspace files from the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path) => {
+      expect(method).toBe("GET");
+      expect(path).toBe("/repositories/repo_alpha/files");
+      return {
+        status: 200,
+        body: JSON.stringify({ files: [{ path: "src/app.py" }, { path: "README.md" }] }),
+      };
+    });
+
+    await expect(client.listWorkspaceFiles("repo_alpha")).resolves.toEqual([
+      { path: "src/app.py" },
+      { path: "README.md" },
+    ]);
+  });
+
+  it("reads a workspace file through the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path) => {
+      expect(method).toBe("GET");
+      expect(path).toBe("/repositories/repo_alpha/files/contents?path=src%2Fapp.py");
+      return {
+        status: 200,
+        body: JSON.stringify({ path: "src/app.py", content: "print(1)\n", binary: false }),
+      };
+    });
+
+    await expect(client.readWorkspaceFile("repo_alpha", "src/app.py")).resolves.toEqual({
+      path: "src/app.py",
+      content: "print(1)\n",
+      binary: false,
+    });
+  });
+
+  it("writes a workspace file through writeWorkspaceFile", async () => {
+    const client = createProductionRepositoriesClient(async (method, path, body) => {
+      expect(method).toBe("PUT");
+      expect(path).toBe("/repositories/repo_alpha/files/contents");
+      expect(body).toEqual({ path: "src/ok.ts", content: "const ok = false;" });
+      return { status: 200, body: JSON.stringify({ path: "src/ok.ts", ok: true }) };
+    });
+
+    await expect(
+      client.writeWorkspaceFile("repo_alpha", "src/ok.ts", "const ok = false;"),
+    ).resolves.toBeUndefined();
+  });
 });

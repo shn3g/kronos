@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useEffect, useId, useState, type ReactNode } from "react";
+import { SAVE_FILE_EVENT } from "../features/files/fileEditor";
 
 export type MenuId = "file" | "edit" | "view" | "help" | null;
 
@@ -92,6 +93,7 @@ export function MenuBar({
           label="Save"
           onSelect={() => {
             setOpen(null);
+            window.dispatchEvent(new Event(SAVE_FILE_EVENT));
           }}
         />
         <MenuItem
@@ -223,8 +225,8 @@ export function MenuBar({
           Kronos is a locally installed desktop app for coding agents on your git folders. Ctrl+N
           or Cmd+N starts a new chat. Ctrl+B or Cmd+B hides the activity bar. Ctrl+Shift+J or
           Cmd+Shift+J hides Changes. Ctrl+, or Cmd+, opens Settings. Escape closes menus. File →
-          Models assigns the orchestrator. Open a git folder from Workspaces. The Files editor
-          arrives in a later release.
+          Models assigns the orchestrator. Open a git folder from Workspaces. Use Go to file, Ask in
+          chat, or Open in Changes to edit files. Save writes the open file into the workspace.
         </p>
       </Menu>
     </div>
