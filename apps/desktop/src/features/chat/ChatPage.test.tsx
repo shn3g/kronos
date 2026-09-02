@@ -350,6 +350,68 @@ describe("ChatPage", () => {
     expect(screen.queryByRole("button", { name: /^stop$/i })).not.toBeInTheDocument();
   });
 
+  it("does not reuse a conversation created after New chat during session setup", async () => {
+    const user = userEvent.setup();
+    let releaseFirst!: (summary: {
+      id: string;
+      title: string;
+      repositoryId: string | null;
+      createdAt: string;
+    }) => void;
+    const createConversation = vi.fn((repositoryId: string | null) => {
+      const n = createConversation.mock.calls.length;
+      const summary = {
+        id: `chat_${n}`,
+        title: "New chat",
+        repositoryId,
+        createdAt: "t",
+      };
+      if (n === 1) {
+        return new Promise<typeof summary>((resolve) => {
+          releaseFirst = resolve;
+        });
+      }
+      return Promise.resolve(summary);
+    });
+    const streamMessage = vi.fn(async (_id: string, _content: string, handlers: ChatStreamHandlers) => {
+      handlers.onDone({ content: "ok", citations: [], goalRefs: [] });
+    });
+    const props = {
+      chatClient: chatClient({ createConversation, streamMessage }),
+      repositoryId: null as string | null,
+      historyOpen: false,
+      onOpenWorkspace: () => undefined,
+    };
+    const { rerender } = render(<ChatPage {...props} newChatRequest={0} />);
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "First");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    await waitFor(() => expect(createConversation).toHaveBeenCalledTimes(1));
+
+    rerender(<ChatPage {...props} newChatRequest={1} />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Ask Kronos" })).toBeInTheDocument();
+
+    await act(async () => {
+      releaseFirst({
+        id: "chat_1",
+        title: "New chat",
+        repositoryId: null,
+        createdAt: "t",
+      });
+    });
+
+    const nextBox = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(nextBox, "Second");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    await waitFor(() => expect(streamMessage).toHaveBeenCalled());
+    expect(streamMessage).toHaveBeenCalledWith(
+      "chat_2",
+      "Second",
+      expect.objectContaining({ requestId: expect.any(String) }),
+    );
+    expect(streamMessage.mock.calls.map((call) => call[0])).not.toContain("chat_1");
+  });
+
   it("returns stream status to idle after a finished turn settles", async () => {
     const user = userEvent.setup();
     let handlers!: ChatStreamHandlers;

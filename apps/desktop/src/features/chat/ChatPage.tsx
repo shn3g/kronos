@@ -295,11 +295,14 @@ export function ChatPage({
     };
   }, [draft, indexClient, repositoryId]);
 
-  async function ensureSession(): Promise<string> {
+  async function ensureSession(epoch: number): Promise<string | null> {
     if (activeId) {
       return activeId;
     }
     const created = await chatClient.createConversation(repositoryId);
+    if (turnEpochRef.current !== epoch) {
+      return null;
+    }
     setSessions((current) => [created, ...current.filter((item) => item.id !== created.id)]);
     setActiveId(created.id);
     return created.id;
@@ -366,8 +369,8 @@ export function ChatPage({
     setMessages((current) => [...current, pending, assistant]);
     const epoch = turnEpochRef.current;
     try {
-      const id = await ensureSession();
-      if (turnEpochRef.current !== epoch) {
+      const id = await ensureSession(epoch);
+      if (id === null || turnEpochRef.current !== epoch) {
         return;
       }
       inflightRef.current = { conversationId: id, requestId };
