@@ -52,5 +52,11 @@ export function checksFromLocal(input: {
       ok: true,
       detail: "API keys stay in the operating system secret store.",
     },
+    {
+      id: "embeddings",
+      label: "Embeddings",
+      ok: false,
+      detail: "Dense embeddings are not configured. Sparse search only.",
+    },
   ];
 }

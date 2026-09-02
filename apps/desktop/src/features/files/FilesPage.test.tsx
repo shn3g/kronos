@@ -57,6 +57,8 @@ function repos(overrides: Partial<RepositoriesClient> = {}): RepositoriesClient 
     listWorkspaceFiles: async () => [{ path: "src/app.py" }, { path: "README.md" }],
     readWorkspaceFile: async () => ({ path: "src/app.py", content: "print(1)\n", binary: false }),
     writeWorkspaceFile: unused,
+    revertWrite: unused,
+    commitFiles: unused,
     ...overrides,
   };
 }

@@ -151,6 +151,8 @@ function quietRepos(): RepositoriesClient {
     readWorkspaceFile: unused,
     writeFile: unused,
     writeWorkspaceFile: unused,
+    revertWrite: unused,
+    commitFiles: unused,
   };
 }
 
@@ -191,7 +193,7 @@ function quietSettings(): SettingsPageClients {
   return {
     load: async () => ({ otelExport: false, langfuseExport: false }),
     save: async (next) => next,
-    doctor: async () => ({ ready: true, findings: [] }),
+    doctor: async () => ({ ready: true, findings: [], checks: [] }),
     backup: async () => ({ path: "", includesSecretStore: false }),
   };
 }
@@ -531,8 +533,8 @@ describe("App shell", () => {
     expect(await screen.findByRole("combobox", { name: /workspace/i })).toHaveValue("repo_alpha");
     expect(await screen.findByText("src/App.tsx")).toBeInTheDocument();
     expect(screen.getByText(/guard staff/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /revert /i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^commit$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /revert src\/app\.tsx/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^commit$/i })).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: /goals/i }));
     expect(await screen.findByText("Fix onboarding")).toBeInTheDocument();
     expect(screen.getByText("queued")).toBeInTheDocument();
@@ -543,6 +545,170 @@ describe("App shell", () => {
     expect(screen.getAllByText("Ready").length).toBeGreaterThanOrEqual(4);
     expect(screen.getByText(/the local engine is running/i)).toBeInTheDocument();
     expect(screen.getByText(/orchestrator model is assigned/i)).toBeInTheDocument();
+  });
+
+  it("reverts a chat write from the Changes list", async () => {
+    const user = userEvent.setup();
+    let changes = [
+      {
+        path: "src/App.tsx",
+        summary: "guard staff before calendar",
+        patch: "",
+        status: "M",
+        fromChat: true,
+      },
+    ];
+    const revertWrite = vi.fn(async () => {
+      changes = [];
+    });
+    const session = liveSession();
+    render(
+      <App
+        {...readyFrame({
+          repositoriesClient: {
+            ...session.repositoriesClient,
+            revertWrite,
+            listChanges: async () => changes,
+          },
+          homeClient: session.homeClient,
+          goalsClient: session.goalsClient,
+          settingsClient: session.settingsClient,
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("src/App.tsx")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /revert src\/app\.tsx/i }));
+    expect(revertWrite).toHaveBeenCalledWith("repo_alpha", "src/App.tsx");
+    expect(
+      await screen.findByText(/no file changes in this workspace yet/i),
+    ).toBeInTheDocument();
+  });
+
+  it("explains when a chat write cannot be reverted", async () => {
+    const user = userEvent.setup();
+    const session = liveSession();
+    render(
+      <App
+        {...readyFrame({
+          repositoriesClient: {
+            ...session.repositoriesClient,
+            revertWrite: async () => {
+              throw new Error("engine request failed: 409");
+            },
+          },
+          homeClient: session.homeClient,
+          goalsClient: session.goalsClient,
+          settingsClient: session.settingsClient,
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("src/App.tsx")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /revert src\/app\.tsx/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not revert that file. Check the workspace and try again.",
+    );
+    expect(screen.getByText("src/App.tsx")).toBeInTheDocument();
+  });
+
+  it("commits listed working-tree files from Changes", async () => {
+    const user = userEvent.setup();
+    let changes = [
+      {
+        path: "src/App.tsx",
+        summary: "guard staff before calendar",
+        patch: "",
+        status: "M",
+        fromChat: true,
+      },
+    ];
+    const commitFiles = vi.fn(async () => {
+      changes = [];
+    });
+    const session = liveSession();
+    render(
+      <App
+        {...readyFrame({
+          repositoriesClient: {
+            ...session.repositoriesClient,
+            listChanges: async () => changes,
+            commitFiles,
+          },
+          homeClient: session.homeClient,
+          goalsClient: session.goalsClient,
+          settingsClient: session.settingsClient,
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("src/App.tsx")).toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: /commit message/i }), "Fix App");
+    await user.click(screen.getByRole("button", { name: /^commit$/i }));
+    expect(commitFiles).toHaveBeenCalledWith("repo_alpha", "Fix App", ["src/App.tsx"]);
+    expect(
+      await screen.findByText(/no file changes in this workspace yet/i),
+    ).toBeInTheDocument();
+  });
+
+  it("explains when a local commit cannot be recorded", async () => {
+    const user = userEvent.setup();
+    const session = liveSession();
+    render(
+      <App
+        {...readyFrame({
+          repositoriesClient: {
+            ...session.repositoriesClient,
+            commitFiles: async () => {
+              throw new Error("engine request failed: 409");
+            },
+          },
+          homeClient: session.homeClient,
+          goalsClient: session.goalsClient,
+          settingsClient: session.settingsClient,
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("src/App.tsx")).toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: /commit message/i }), "Fix App");
+    await user.click(screen.getByRole("button", { name: /^commit$/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not commit those files. Check the message and try again.",
+    );
+    expect(screen.getByText("src/App.tsx")).toBeInTheDocument();
+  });
+
+  it("shows doctor health check details when the engine provides them", async () => {
+    const user = userEvent.setup();
+    const session = liveSession();
+    render(
+      <App
+        {...readyFrame({
+          repositoriesClient: session.repositoriesClient,
+          homeClient: session.homeClient,
+          goalsClient: session.goalsClient,
+          settingsClient: {
+            ...session.settingsClient,
+            doctor: async () => ({
+              ready: true,
+              findings: [],
+              checks: [
+                {
+                  id: "index",
+                  label: "Index",
+                  ok: true,
+                  detail: "Local ONNX backend, 42 chunks indexed.",
+                },
+              ],
+            }),
+          },
+        })}
+      />,
+    );
+
+    await user.click(await screen.findByRole("tab", { name: /health/i }));
+    expect(await screen.findByText(/local onnx backend, 42 chunks indexed/i)).toBeInTheDocument();
   });
 
   it("opens the Settings hub Models section from a hash deep link", async () => {

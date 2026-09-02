@@ -63,6 +63,8 @@ export interface RepositoriesClient {
   readWorkspaceFile(id: string, path: string): Promise<WorkspaceFileContents>;
   writeFile(id: string, path: string, content: string): Promise<void>;
   writeWorkspaceFile(id: string, path: string, content: string): Promise<void>;
+  revertWrite(id: string, path: string): Promise<void>;
+  commitFiles(id: string, message: string, paths: string[]): Promise<void>;
 }
 
 export async function pickRepositoryFolder(): Promise<string | null> {
@@ -137,6 +139,12 @@ export function createProductionRepositoriesClient(
     },
     async writeWorkspaceFile(id: string, path: string, content: string) {
       await jsonRequest(request, "PUT", `/repositories/${id}/files/contents`, { path, content });
+    },
+    async revertWrite(id: string, path: string) {
+      await jsonRequest(request, "POST", `/repositories/${id}/writes/revert`, { path });
+    },
+    async commitFiles(id: string, message: string, paths: string[]) {
+      await jsonRequest(request, "POST", `/repositories/${id}/commits`, { message, paths });
     },
   };
 }

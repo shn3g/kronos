@@ -10,7 +10,11 @@ export interface OpsSettingsView {
 export interface SettingsPageClients {
   load(): Promise<OpsSettingsView>;
   save(next: OpsSettingsView): Promise<OpsSettingsView>;
-  doctor(): Promise<{ ready: boolean; findings: string[] }>;
+  doctor(): Promise<{
+    ready: boolean;
+    findings: string[];
+    checks: { id: string; label: string; ok: boolean; detail: string }[];
+  }>;
   backup(): Promise<{ path: string; includesSecretStore: boolean }>;
 }
 
@@ -44,7 +48,28 @@ export function createProductionSettingsClient(
       const findings = Array.isArray(payload.findings)
         ? payload.findings.filter((item): item is string => typeof item === "string")
         : [];
-      return { ready: payload.ready === true, findings };
+      const checksRaw = Array.isArray(payload.checks) ? payload.checks : [];
+      return {
+        ready: payload.ready === true,
+        findings,
+        checks: checksRaw.flatMap((item) => {
+          if (typeof item !== "object" || item === null) {
+            return [];
+          }
+          const row = item as Record<string, unknown>;
+          if (typeof row.id !== "string" || typeof row.label !== "string") {
+            return [];
+          }
+          return [
+            {
+              id: row.id,
+              label: row.label,
+              ok: row.ok === true,
+              detail: typeof row.detail === "string" ? row.detail : "",
+            },
+          ];
+        }),
+      };
     },
     async backup() {
       const payload = await jsonRequest(request, "POST", "/ops/backup", {});

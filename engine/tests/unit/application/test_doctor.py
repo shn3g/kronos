@@ -210,6 +210,45 @@ def test_model_and_index_degradation_are_explained(tmp_path: Path) -> None:
     )
 
 
+class _BrokenSecretStore:
+    def put(self, name: str, value: str) -> None:
+        raise RuntimeError(name)
+
+    def get(self, name: str) -> str | None:
+        raise RuntimeError("plaintext keyring leak")
+
+    def delete(self, name: str) -> None:
+        raise RuntimeError(name)
+
+
+def test_doctor_marks_secrets_unhealthy_when_store_cannot_be_read(tmp_path: Path) -> None:
+    doctor = _doctor(tmp_path, _BrokenSecretStore())
+    report = doctor.check(client_version="0.1.0")
+    secrets = next(item for item in report.checks if item.id == "secrets")
+    assert secrets.ok is False
+    assert "not available" in secrets.detail.lower()
+    assert "plaintext" not in secrets.detail.lower()
+    assert "leak" not in secrets.detail.lower()
+
+
+def test_doctor_exposes_named_health_checks(tmp_path: Path) -> None:
+    doctor = _doctor(tmp_path, InMemorySecretStore())
+    report = doctor.check(client_version="0.1.0")
+    ids = [item.id for item in report.checks]
+    assert ids == ["engine", "model", "workspace", "index", "secrets", "embeddings"]
+    engine = next(item for item in report.checks if item.id == "engine")
+    assert engine.ok is True
+    model = next(item for item in report.checks if item.id == "model")
+    assert model.ok is False
+    assert "orchestrator" in model.detail.lower()
+    secrets = next(item for item in report.checks if item.id == "secrets")
+    assert secrets.ok is True
+    assert "secret store" in secrets.detail.lower()
+    embeddings = next(item for item in report.checks if item.id == "embeddings")
+    assert embeddings.ok is False
+    assert "sparse" in embeddings.detail.lower()
+
+
 def test_doctor_output_never_contains_os_secrets(tmp_path: Path) -> None:
     keyring = MemoryKeyring()
     store = OsSecretStore(tmp_path / "config", backend=keyring)

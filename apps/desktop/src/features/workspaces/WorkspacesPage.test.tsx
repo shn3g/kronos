@@ -36,6 +36,8 @@ function repos(listImpl?: RepositoriesClient["list"]): RepositoriesClient {
     readWorkspaceFile: async () => ({ path: "", content: "", binary: false }),
     writeFile: async () => undefined,
     writeWorkspaceFile: async () => undefined,
+    revertWrite: async () => undefined,
+    commitFiles: async () => undefined,
   };
 }
 
@@ -97,6 +99,8 @@ describe("WorkspacesPage", () => {
       readWorkspaceFile: async () => ({ path: "", content: "", binary: false }),
       writeFile: async () => undefined,
       writeWorkspaceFile: async () => undefined,
+      revertWrite: async () => undefined,
+      commitFiles: async () => undefined,
     };
 
     render(
@@ -190,6 +194,8 @@ describe("WorkspacesPage", () => {
       readWorkspaceFile: async () => ({ path: "", content: "", binary: false }),
       writeFile: async () => undefined,
       writeWorkspaceFile: async () => undefined,
+      revertWrite: async () => undefined,
+      commitFiles: async () => undefined,
     };
 
     render(<WorkspacesPage engineClient={engine("ready")} repositoriesClient={client} />);

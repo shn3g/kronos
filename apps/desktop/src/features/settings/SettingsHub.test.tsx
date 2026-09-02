@@ -66,7 +66,7 @@ function quietSettings(): SettingsPageClients {
   return {
     load: async () => ({ otelExport: false, langfuseExport: false }),
     save: async (next) => next,
-    doctor: async () => ({ ready: true, findings: [] }),
+    doctor: async () => ({ ready: true, findings: [], checks: [] }),
     backup: async () => ({ path: "", includesSecretStore: false }),
   };
 }

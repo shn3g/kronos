@@ -188,4 +188,38 @@ describe("InspectorDrawer", () => {
     expect(screen.getByText("Fix onboarding")).toBeInTheDocument();
     expect(screen.getByText("queued")).toBeInTheDocument();
   });
+
+  it("shows revert errors from the Changes list", () => {
+    render(
+      <InspectorDrawer
+        tab="changes"
+        onTab={() => undefined}
+        changes={[{ path: "src/App.tsx", summary: "Modified src/App.tsx" }]}
+        goals={[]}
+        checks={[]}
+        onRevert={() => undefined}
+        revertError="Could not revert that file. Check the workspace and try again."
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Could not revert that file. Check the workspace and try again.",
+    );
+  });
+
+  it("shows commit errors from the Changes list", () => {
+    render(
+      <InspectorDrawer
+        tab="changes"
+        onTab={() => undefined}
+        changes={[{ path: "src/App.tsx", summary: "Modified src/App.tsx" }]}
+        goals={[]}
+        checks={[]}
+        onCommit={() => undefined}
+        commitError="Could not commit those files. Check the message and try again."
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Could not commit those files. Check the message and try again.",
+    );
+  });
 });

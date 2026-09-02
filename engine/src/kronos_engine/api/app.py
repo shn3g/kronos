@@ -584,11 +584,14 @@ def create_app(
     def doctor_service() -> Iterator[DoctorService]:
         conn = database.connect()
         try:
+            resolved = _resolve_embedder(conn)
             yield DoctorService(
                 conn,
                 settings,
                 store,
                 Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn)),
+                indexer=_indexing_service(conn),
+                embedder_backend=resolved.backend,
             )
         finally:
             conn.close()
@@ -1887,6 +1890,15 @@ def create_app(
                 "model_degraded": report.model_degraded,
                 "index_degraded": report.index_degraded,
                 "findings": [item.detail for item in report.findings],
+                "checks": [
+                    {
+                        "id": item.id,
+                        "label": item.label,
+                        "ok": item.ok,
+                        "detail": item.detail,
+                    }
+                    for item in report.checks
+                ],
             }
 
     @app.post("/ops/backup")

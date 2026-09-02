@@ -117,8 +117,15 @@ async def test_doctor_backup_dead_letters_and_settings_hide_secrets(
     http, headers, tmp_path, _secrets = client
     doctor = await http.get("/ops/doctor", headers=headers)
     assert doctor.status_code == 200
-    assert doctor.json()["ready"] is True
-    assert BOT not in str(doctor.json())
+    doctor_body = doctor.json()
+    assert doctor_body["ready"] is True
+    checks = doctor_body.get("checks")
+    assert isinstance(checks, list)
+    assert len(checks) >= 5
+    assert all(
+        isinstance(item.get("id"), str) and isinstance(item.get("detail"), str) for item in checks
+    )
+    assert BOT not in str(doctor_body)
 
     backup = await http.post("/ops/backup", json={"dest": str(tmp_path / "bak")}, headers=headers)
     assert backup.status_code == 200

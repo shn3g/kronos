@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createProductionEngineClient,
   type EngineClient,
@@ -123,6 +123,12 @@ export function App({
   const [inspectorCollapsed, setInspectorCollapsed] = useState(() =>
     readFlag(INSPECTOR_STORAGE_KEY),
   );
+  const [revertError, setRevertError] = useState<string | null>(null);
+  const [revertingPath, setRevertingPath] = useState<string | null>(null);
+  const revertingRef = useRef(false);
+  const [commitError, setCommitError] = useState<string | null>(null);
+  const [committing, setCommitting] = useState(false);
+  const committingRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -178,7 +184,46 @@ export function App({
     repositoriesClient: repos,
     homeClient: home,
     goalsClient: goals,
+    settingsClient: settings,
   });
+
+  async function revertChange(path: string): Promise<void> {
+    if (!session.workspaceId || revertingRef.current) {
+      return;
+    }
+    revertingRef.current = true;
+    setRevertError(null);
+    setCommitError(null);
+    setRevertingPath(path);
+    try {
+      await repos.revertWrite(session.workspaceId, path);
+      await session.refresh();
+    } catch {
+      setRevertError("Could not revert that file. Check the workspace and try again.");
+    } finally {
+      revertingRef.current = false;
+      setRevertingPath(null);
+    }
+  }
+
+  async function commitChanges(message: string, paths: string[]): Promise<void> {
+    if (!session.workspaceId || committingRef.current || paths.length === 0) {
+      return;
+    }
+    committingRef.current = true;
+    setCommitting(true);
+    setCommitError(null);
+    setRevertError(null);
+    try {
+      await repos.commitFiles(session.workspaceId, message, paths);
+      await session.refresh();
+    } catch {
+      setCommitError("Could not commit those files. Check the message and try again.");
+    } finally {
+      committingRef.current = false;
+      setCommitting(false);
+    }
+  }
 
   useEffect(() => {
     setFileReveal({ path: "", nonce: 0 });
@@ -517,6 +562,16 @@ export function App({
                 changes={session.changes}
                 goals={session.goals}
                 checks={session.checks}
+                onRevert={(path) => {
+                  void revertChange(path);
+                }}
+                revertError={revertError}
+                revertingPath={revertingPath}
+                onCommit={(message, paths) => {
+                  void commitChanges(message, paths);
+                }}
+                commitError={commitError}
+                committing={committing}
                 onOpenPath={revealWorkspaceFile}
               />
             )}
