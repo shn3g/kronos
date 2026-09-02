@@ -28,6 +28,7 @@ from kronos_engine.api.models import (
     AutonomyRequest,
     BackupRequest,
     ChatMessageRequest,
+    CommitRequest,
     ConversationCreateRequest,
     ConversationDetailResponse,
     ConversationListResponse,
@@ -84,6 +85,11 @@ from kronos_engine.api.models import (
     TelegramStatusResponse,
     TelegramTokenRequest,
     VersionResponse,
+    WorkspaceFileContentsResponse,
+    WorkspaceFileItem,
+    WorkspaceFilesResponse,
+    WorkspaceWriteRequest,
+    WorkspaceWriteResponse,
 )
 from kronos_engine.application.chat import (
     ChatService,
@@ -117,6 +123,18 @@ from kronos_engine.application.repositories import (
 )
 from kronos_engine.application.safety import SafetyElevationRefused
 from kronos_engine.application.verification import GateRunner
+from kronos_engine.application.workspace_changes import (
+    commit_working_tree,
+    list_working_tree_changes,
+    mark_chat_writes,
+)
+from kronos_engine.application.workspace_files import list_workspace_files, read_workspace_file
+from kronos_engine.application.workspace_writes import (
+    WorkspaceWriteTooLarge,
+    forget_workspace_backups,
+    revert_workspace_write,
+    write_workspace_file,
+)
 from kronos_engine.config.repository import (
     EnrolmentPreview,
     github_owner,
@@ -173,7 +191,7 @@ from kronos_engine.skills.quarantine import (
     SkillSourcePort,
     SkillStillQuarantined,
 )
-from kronos_engine.state.conversations import ConversationRecord
+from kronos_engine.state.conversations import ConversationRecord, SqliteConversationStore
 from kronos_engine.state.database import Database
 from kronos_engine.state.event_store import SqliteEventStore
 from kronos_engine.state.github_apps import SqliteGithubAppStore
@@ -278,6 +296,14 @@ def create_app(
         conn = database.connect()
         try:
             yield Recorder(conn, SqliteEventStore(conn), SqliteOutbox(conn))
+        finally:
+            conn.close()
+
+    @contextmanager
+    def file_backups() -> Iterator[SqliteConversationStore]:
+        conn = database.connect()
+        try:
+            yield SqliteConversationStore(conn)
         finally:
             conn.close()
 
@@ -1028,6 +1054,149 @@ def create_app(
                     )
 
         return StreamingResponse(generate(), media_type="text/event-stream")
+
+    @app.get("/repositories/{repository_id}/changes")
+    def list_working_changes(
+        repository_id: str,
+        _: None = Depends(require_auth),
+    ) -> dict[str, object]:
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+        changes = list_working_tree_changes(Path(record.realpath))
+        with file_backups() as backups:
+            marked = mark_chat_writes(changes, backups.list_backup_paths(record.id.value))
+        return {"changes": marked}
+
+    @app.post("/repositories/{repository_id}/commits")
+    def commit_working_changes(
+        repository_id: str,
+        body: CommitRequest,
+        _: None = Depends(require_auth),
+    ) -> dict[str, object]:
+        message = body.message.strip()
+        if message == "":
+            raise HTTPException(status_code=400, detail="A commit message is required.")
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+        try:
+            result = commit_working_tree(Path(record.realpath), message, body.paths)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        committed = result.get("paths")
+        chosen = [str(item) for item in committed] if isinstance(committed, list) else []
+        with file_backups() as backups:
+            forget_workspace_backups(backups, record.id.value, chosen)
+        return result
+
+    @app.get("/repositories/{repository_id}/files", response_model=WorkspaceFilesResponse)
+    def list_repository_files(
+        repository_id: str,
+        _: None = Depends(require_auth),
+    ) -> WorkspaceFilesResponse:
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+        files = list_workspace_files(Path(record.realpath))
+        return WorkspaceFilesResponse(
+            files=[WorkspaceFileItem(path=item["path"]) for item in files]
+        )
+
+    @app.get(
+        "/repositories/{repository_id}/files/contents",
+        response_model=WorkspaceFileContentsResponse,
+    )
+    def read_repository_file(
+        repository_id: str,
+        _: None = Depends(require_auth),
+        path: Annotated[str, Query()] = "",
+    ) -> WorkspaceFileContentsResponse:
+        rel = path.strip()
+        if rel == "":
+            raise HTTPException(status_code=400, detail="A file path is required.")
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+        try:
+            payload = read_workspace_file(Path(record.realpath), rel)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return WorkspaceFileContentsResponse(
+            path=payload["path"],
+            content=payload["content"],
+            binary=payload["binary"],
+        )
+
+    @app.put(
+        "/repositories/{repository_id}/files/contents",
+        response_model=WorkspaceWriteResponse,
+    )
+    def write_repository_file(
+        repository_id: str,
+        body: WorkspaceWriteRequest,
+        _: None = Depends(require_auth),
+    ) -> WorkspaceWriteResponse:
+        rel = body.path.strip()
+        if rel == "":
+            raise HTTPException(status_code=400, detail="A file path is required.")
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+        with file_backups() as backups:
+            try:
+                written = write_workspace_file(
+                    Path(record.realpath),
+                    record.id.value,
+                    rel,
+                    body.content,
+                    backups=backups,
+                    locked_prefixes=record.policy.paths.locked_prefixes,
+                    now=datetime.now(tz=UTC).isoformat(),
+                )
+            except WorkspaceWriteTooLarge as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            except ValueError as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+        with recorder() as events:
+            events.emit(
+                "git.wrote",
+                {
+                    "repository_id": record.id.value,
+                    "path": written.path,
+                    "summary": written.summary,
+                    "patch": written.patch,
+                },
+            )
+        return WorkspaceWriteResponse(path=written.path, ok=True)
+
+    @app.post("/repositories/{repository_id}/writes/revert")
+    def revert_repository_write(
+        repository_id: str,
+        body: PathRequest,
+        _: None = Depends(require_auth),
+    ) -> dict[str, object]:
+        rel = body.path.strip()
+        if rel == "":
+            raise HTTPException(status_code=400, detail="A file path is required.")
+        with repository_service() as repos:
+            record = _load(repos, repository_id)
+        with file_backups() as backups:
+            try:
+                reverted = revert_workspace_write(
+                    Path(record.realpath),
+                    record.id.value,
+                    rel,
+                    backups=backups,
+                )
+            except ValueError as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+        with recorder() as events:
+            events.emit(
+                "git.reverted",
+                {
+                    "repository_id": record.id.value,
+                    "path": reverted.path,
+                    "summary": reverted.summary,
+                    "patch": "",
+                },
+            )
+        return {"ok": True, "path": reverted.path}
 
     GITHUB_APP_CREATE_URL = "https://github.com/settings/apps/new"
 

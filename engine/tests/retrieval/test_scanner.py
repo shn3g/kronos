@@ -88,6 +88,24 @@ def test_working_tree_overlay_indexes_uncommitted_and_untracked_files(tmp_path: 
     assert "UNTRACKED_TOKEN" in overlay["src/untracked.py"].text
 
 
+def test_working_tree_changes_report_a_status_letter_per_path(tmp_path: Path) -> None:
+    from kronos_engine.indexing.scanner import working_tree_changes
+
+    root = init_git_repo(
+        tmp_path / "statuses",
+        files={"src/mod.py": "OLD = 1\n", "src/gone.py": "GONE = 1\n"},
+    )
+    (root / "src/mod.py").write_text("NEW = 2\n", encoding="utf-8")
+    (root / "src/gone.py").unlink()
+    (root / "src/fresh.py").write_text("FRESH = 3\n", encoding="utf-8")
+
+    statuses = {path: status for status, path in working_tree_changes(root)}
+
+    assert statuses["src/mod.py"] == "M"
+    assert statuses["src/gone.py"] == "D"
+    assert statuses["src/fresh.py"] == "A"
+
+
 def test_working_tree_overlay_drops_deleted_tracked_files(tmp_path: Path) -> None:
     from kronos_engine.indexing.scanner import scan_with_working_tree
 

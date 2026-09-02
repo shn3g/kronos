@@ -35,6 +35,35 @@ class PathRequest(BaseModel):
     policy: dict[str, Any] | None = None
 
 
+class CommitRequest(BaseModel):
+    message: str
+    paths: list[str] | None = None
+
+
+class WorkspaceFileItem(BaseModel):
+    path: str
+
+
+class WorkspaceFilesResponse(BaseModel):
+    files: list[WorkspaceFileItem]
+
+
+class WorkspaceFileContentsResponse(BaseModel):
+    path: str
+    content: str
+    binary: bool
+
+
+class WorkspaceWriteRequest(BaseModel):
+    path: str
+    content: str
+
+
+class WorkspaceWriteResponse(BaseModel):
+    path: str
+    ok: bool
+
+
 class PreviewFileModel(BaseModel):
     path: str
     action: str

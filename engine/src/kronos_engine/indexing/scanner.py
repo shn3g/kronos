@@ -190,6 +190,23 @@ def list_dirty_paths(git_root: Path) -> tuple[str, ...]:
     return tuple(found)
 
 
+def working_tree_changes(git_root: Path) -> tuple[tuple[str, str], ...]:
+    """Dirty and untracked paths relative to HEAD as (status, path). status is A, M, D, or R."""
+    root = git_root.resolve()
+    raw = _git_bytes(root, "diff", "--name-status", "--find-renames", "-z", "HEAD")
+    found = [(status, path) for status, path, _renamed in _parse_name_status(raw)]
+    seen = {path for _status, path in found}
+    untracked = _git_bytes(root, "ls-files", "-o", "--exclude-standard", "-z")
+    for entry in untracked.split(b"\0"):
+        if not entry:
+            continue
+        posix = entry.decode("utf-8").replace("\\", "/")
+        if posix not in seen:
+            seen.add(posix)
+            found.append(("A", posix))
+    return tuple(found)
+
+
 def should_skip_path(posix: str, policy: RepositoryPolicy) -> bool:
     if _should_skip_path(posix, policy.indexing.exclude_prefixes):
         return True
