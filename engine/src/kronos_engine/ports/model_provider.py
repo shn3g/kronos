@@ -17,7 +17,7 @@ class CompletionRequest:
     prompt: str
     fallback_model_id: str | None = None
     fallback_billed: bool = False
-    messages: Sequence[Mapping[str, str]] | None = None
+    messages: Sequence[Mapping[str, object]] | None = None
 
 
 @dataclass(frozen=True, slots=True)

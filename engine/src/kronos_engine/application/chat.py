@@ -447,12 +447,12 @@ def _completion_messages(
     history: Sequence[ConversationMessage],
     user_text: str,
     pack: ContextPack,
-) -> tuple[dict[str, str], ...]:
+) -> tuple[dict[str, object], ...]:
     context_blocks = [
         f"{item.path}:{item.start_line}-{item.end_line}\n{item.text}" for item in pack.items
     ]
     context = "\n\n".join(context_blocks) if context_blocks else "(no retrieved context)"
-    messages: list[dict[str, str]] = [
+    messages: list[dict[str, object]] = [
         {"role": "system", "content": f"{_SYSTEM_PROMPT}\n\nContext:\n{context}"}
     ]
     for item in history:
