@@ -40,7 +40,7 @@ describe("createProductionModelsClient", () => {
           role: "coder",
           billed: false,
           modelId: "",
-          limits: { maxTokens: 0, maxAttempts: 0, timeoutSeconds: 0, costCeiling: 0 },
+          limits: { maxTokens: 0, maxAttempts: 0, timeoutSeconds: 0, costCeiling: 0, contextWindow: 32000 },
         },
       ],
       assignments: {
@@ -184,7 +184,7 @@ describe("createProductionModelsClient", () => {
           role: "coder",
           billed: true,
           modelId: "gpt-4o-mini",
-          limits: { maxTokens: 0, maxAttempts: 0, timeoutSeconds: 0, costCeiling: 0 },
+          limits: { maxTokens: 0, maxAttempts: 0, timeoutSeconds: 0, costCeiling: 0, contextWindow: 32000 },
         },
       ],
     });
@@ -242,7 +242,7 @@ describe("createProductionModelsClient", () => {
           role: "coder",
           billed: false,
           modelId: "",
-          limits: { maxTokens: 0, maxAttempts: 0, timeoutSeconds: 0, costCeiling: 0 },
+          limits: { maxTokens: 0, maxAttempts: 0, timeoutSeconds: 0, costCeiling: 0, contextWindow: 32000 },
         },
       ],
     });
@@ -259,6 +259,7 @@ describe("createProductionModelsClient", () => {
           max_attempts: 3,
           timeout_seconds: 60,
           cost_ceiling: 1.5,
+          context_window: 32000,
         },
       });
       return {
@@ -274,6 +275,7 @@ describe("createProductionModelsClient", () => {
             max_attempts: 3,
             timeout_seconds: 60,
             cost_ceiling: 1.5,
+            context_window: 64000,
           },
         }),
       };
@@ -287,6 +289,7 @@ describe("createProductionModelsClient", () => {
           maxAttempts: 3,
           timeoutSeconds: 60,
           costCeiling: 1.5,
+          contextWindow: 32000,
         },
       }),
     ).resolves.toEqual({
@@ -300,7 +303,36 @@ describe("createProductionModelsClient", () => {
         maxAttempts: 3,
         timeoutSeconds: 60,
         costCeiling: 1.5,
+        contextWindow: 64000,
       },
     });
+  });
+
+  it("defaults context_window to 32000 when the engine omits it", async () => {
+    const client = createProductionModelsClient(async () => ({
+      status: 200,
+      body: JSON.stringify({
+        detected: [],
+        profiles: [
+          {
+            id: "prof_local",
+            display_name: "Local",
+            role: "orchestrator",
+            billed: false,
+            limits: { max_tokens: 1024 },
+          },
+        ],
+        assignments: {
+          orchestrator: "prof_local",
+          planner: null,
+          coder: null,
+          reviewer: null,
+          embedding: null,
+        },
+      }),
+    }));
+
+    const snapshot = await client.snapshot();
+    expect(snapshot.profiles[0]?.limits.contextWindow).toBe(32000);
   });
 });

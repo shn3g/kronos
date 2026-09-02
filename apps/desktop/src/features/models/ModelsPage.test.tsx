@@ -12,6 +12,7 @@ const DEFAULT_LIMITS: ResourceLimits = {
   maxAttempts: 3,
   timeoutSeconds: 120,
   costCeiling: 0,
+  contextWindow: 32000,
 };
 
 function engine(status: "unavailable" | "starting" | "ready"): EngineClient {
@@ -352,6 +353,7 @@ describe("ModelsPage", () => {
                   maxAttempts: 3,
                   timeoutSeconds: 120,
                   costCeiling: 0,
+                  contextWindow: 32000,
                 },
               },
             ],

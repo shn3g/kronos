@@ -50,7 +50,7 @@ function profile(id: string, role: string) {
     role,
     billed: false,
     modelId: "llama3",
-    limits: { maxTokens: 0, maxAttempts: 0, timeoutSeconds: 0, costCeiling: 0 },
+    limits: { maxTokens: 0, maxAttempts: 0, timeoutSeconds: 0, costCeiling: 0, contextWindow: 32000 },
   };
 }
 
@@ -128,6 +128,7 @@ function quietChat(): ChatClient {
     streamMessage: async () => undefined,
     cancelStream: async () => undefined,
     getGoal: async () => ({ id: "goal_1", state: "draft", title: "" }),
+    getImage: async () => ({ mime: "image/png", data: "" }),
   };
 }
 
@@ -144,6 +145,7 @@ function quietRepos(): RepositoriesClient {
     disable: unused,
     resume: unused,
     listChanges: async () => [],
+    writeFile: unused,
   };
 }
 
@@ -422,7 +424,7 @@ describe("App shell", () => {
     const user = userEvent.setup();
     render(<App {...readyFrame()} />);
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Chat" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Ask Kronos" })).toBeInTheDocument();
     expect(screen.getByRole("menubar", { name: /application/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^File$/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^Edit$/ })).toBeInTheDocument();
@@ -461,7 +463,7 @@ describe("App shell", () => {
     const user = userEvent.setup();
     render(<App {...readyFrame()} />);
 
-    await screen.findByRole("heading", { level: 1, name: "Chat" });
+    await screen.findByRole("heading", { level: 1, name: "Ask Kronos" });
     await user.click(screen.getByRole("menuitem", { name: /^File$/ }));
     expect(screen.getByRole("menuitem", { name: /^models$/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^save$/i })).toBeInTheDocument();
@@ -487,7 +489,7 @@ describe("App shell", () => {
     const user = userEvent.setup();
     render(<App {...readyFrame()} />);
 
-    await screen.findByRole("heading", { level: 1, name: "Chat" });
+    await screen.findByRole("heading", { level: 1, name: "Ask Kronos" });
     await user.keyboard("{Control>}{Shift>}j{/Shift}{/Control}");
     expect(screen.queryByRole("complementary", { name: /session details/i })).not.toBeInTheDocument();
     await user.keyboard("{Control>},{/Control}");

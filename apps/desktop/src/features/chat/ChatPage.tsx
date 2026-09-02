@@ -1,550 +1,1160 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { EngineClient } from "../../engine/client";
+import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
+import { ConnectModelGate } from "../../shell/ConnectModelGate";
+import { safeWorkspaceRelPath } from "../files/workspacePath";
+import type { IndexClient } from "../index/client";
+import type { ModelsClient, ModelProfileOption, RoleAssignments } from "../models/client";
+import { DEFAULT_CONTEXT_WINDOW } from "../models/client";
+import { ChatMarkdown } from "./ChatMarkdown";
+import { ChatPathButton } from "./ChatPathButton";
 import {
-  createProductionRepositoriesClient,
-  type EnrolledRepository,
-} from "../workspaces/client";
-import {
-  createProductionChatClient,
-  type ChatClient,
-  type ChatMessage,
-  type ConversationSummary,
-  type GoalSnippet,
+  chatContextMeterLabel,
+  chatContextUsage,
+  chatContextWarning,
+} from "./contextMeter";
+import { CopyTextButton } from "./CopyTextButton";
+import type {
+  ChatClient,
+  ChatGoalEvent,
+  ChatMessage,
+  ChatToolEvent,
+  ConversationSummary,
 } from "./client";
+import {
+  appendAskInChatDraft,
+  excerptFromMentionRequest,
+  insertMention,
+  mentionQueryAtCursor,
+  mentionSegments,
+  uniqueMentionPaths,
+} from "./mentionQuery";
+import {
+  MAX_CHAT_IMAGES_PER_TURN,
+  clipboardHasFiles,
+  dataUrlForChatImage,
+  imageFilesFromClipboard,
+  pastedImageError,
+  readPastedImageFile,
+  userMessageSegments,
+  type ChatComposerImage,
+} from "./pastedImage";
+import { toolCardLabel } from "./toolCard";
 
-export type { ChatClient } from "./client";
+const EMPTY_MENTION_REQUEST = { path: "", nonce: 0, selectedText: "", startLine: 0, endLine: 0 };
 
-export interface ChatPageClients extends ChatClient {
-  listRepositories(): Promise<EnrolledRepository[]>;
+export interface ChatMentionRequest {
+  path: string;
+  nonce: number;
+  selectedText?: string;
+  startLine?: number;
+  endLine?: number;
+}
+
+interface ThreadItem extends ChatMessage {
+  goalEvent?: ChatGoalEvent;
+  streaming?: boolean;
 }
 
 interface ChatPageProps {
-  engineClient: EngineClient;
-  chatClient?: ChatPageClients;
+  chatClient: ChatClient;
+  repositoryId: string | null;
+  historyOpen: boolean;
+  newChatRequest?: number;
+  mentionRequest?: ChatMentionRequest;
+  orchestratorName?: string | null;
+  indexClient?: IndexClient;
+  modelsClient?: ModelsClient;
+  onOpenWorkspace: () => void;
+  onOpenModels?: () => void;
+  onOpenGoals?: () => void;
+  onApplyFile?: ((path: string, content: string) => Promise<void>) | undefined;
+  onOpenPath?: ((path: string) => void) | undefined;
 }
 
-type AssistantBlock =
-  | { type: "paragraph"; text: string }
-  | { type: "code"; language: string; text: string };
-
-const productionChat = createProductionChatClient();
-const productionRepos = createProductionRepositoriesClient();
-const productionPageClient: ChatPageClients = {
-  ...productionChat,
-  listRepositories: () => productionRepos.list(),
-};
-
-export function ChatPage({ engineClient, chatClient }: ChatPageProps) {
-  const client = chatClient ?? productionPageClient;
-  const [ready, setReady] = useState(false);
-  const [repositories, setRepositories] = useState<EnrolledRepository[]>([]);
-  const [selectedRepoId, setSelectedRepoId] = useState("");
-  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  const [selectedConvId, setSelectedConvId] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+export function ChatPage({
+  chatClient,
+  repositoryId,
+  historyOpen,
+  newChatRequest = 0,
+  mentionRequest = EMPTY_MENTION_REQUEST,
+  orchestratorName = null,
+  indexClient,
+  modelsClient,
+  onOpenWorkspace,
+  onOpenModels,
+  onOpenGoals,
+  onApplyFile,
+  onOpenPath,
+}: ChatPageProps) {
+  const [sessions, setSessions] = useState<ConversationSummary[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ThreadItem[]>([]);
   const [draft, setDraft] = useState("");
-  const [streaming, setStreaming] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [goalStates, setGoalStates] = useState<Record<string, GoalSnippet>>({});
-  const requestIdRef = useRef<string | null>(null);
-  const selectedConvRef = useRef(selectedConvId);
-  selectedConvRef.current = selectedConvId;
-  const loadGenerationRef = useRef(0);
-  const skipReloadForConvRef = useRef<string | null>(null);
+  const [mentionPaths, setMentionPaths] = useState<string[]>([]);
+  const [mentionHighlight, setMentionHighlight] = useState(0);
+  const [mentionHint, setMentionHint] = useState<"building" | "empty" | null>(null);
+  const [composerImages, setComposerImages] = useState<ChatComposerImage[]>([]);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [profiles, setProfiles] = useState<ModelProfileOption[]>([]);
+  const [assignments, setAssignments] = useState<RoleAssignments | null>(null);
+  const [contextWindow, setContextWindow] = useState(DEFAULT_CONTEXT_WINDOW);
+  const [modelLabel, setModelLabel] = useState<string | null>(orchestratorName);
+  const inflightRef = useRef<{ conversationId: string; requestId: string } | null>(null);
+  const threadRef = useRef<HTMLOListElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const skipSelectRef = useRef(false);
 
-  const goalIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const message of messages) {
-      for (const id of message.goalRefs) {
-        ids.add(id);
-      }
-    }
-    return [...ids];
-  }, [messages]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const apply = () => {
-      void engineClient.getState().then((state) => {
-        if (!cancelled) {
-          setReady(state.status === "ready");
-        }
-      });
-    };
-    apply();
-    const interval = window.setInterval(apply, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [engineClient]);
+  function closeMentionPicker(): void {
+    setMentionPaths([]);
+    setMentionHighlight(0);
+    setMentionHint(null);
+  }
 
   useEffect(() => {
-    if (!ready) {
+    setModelLabel(orchestratorName);
+  }, [orchestratorName]);
+
+  useEffect(() => {
+    if (!modelsClient) {
       return;
     }
     let cancelled = false;
-    void client.listRepositories().then((items) => {
-      if (cancelled) {
-        return;
-      }
-      setRepositories(items);
-      setSelectedRepoId((current) => current || items[0]?.id || "");
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [client, ready]);
-
-  useEffect(() => {
-    if (!ready || !selectedRepoId) {
-      return;
-    }
-    let cancelled = false;
-    void client.listConversations(selectedRepoId).then((items) => {
-      if (cancelled) {
-        return;
-      }
-      setConversations(items);
-      setSelectedConvId((current) => {
-        if (current && items.some((item) => item.id === current)) {
-          return current;
-        }
-        return items[0]?.id || "";
-      });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [client, ready, selectedRepoId]);
-
-  useEffect(() => {
-    if (!ready || !selectedConvId) {
-      return;
-    }
-    const generation = loadGenerationRef.current;
-    const convId = selectedConvId;
-    let cancelled = false;
-    void client.getConversation(convId).then((detail) => {
-      if (cancelled || selectedConvRef.current !== convId) {
-        return;
-      }
-      if (loadGenerationRef.current !== generation) {
-        return;
-      }
-      if (skipReloadForConvRef.current === convId) {
-        return;
-      }
-      setMessages(detail.messages);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [client, ready, selectedConvId]);
-
-  useEffect(() => {
-    if (!ready || goalIds.length === 0) {
-      return;
-    }
-    let cancelled = false;
-    const refresh = () => {
-      void Promise.all(goalIds.map((id) => client.getGoal(id))).then((snippets) => {
+    void modelsClient.snapshot().then(
+      (snapshot) => {
         if (cancelled) {
           return;
         }
-        setGoalStates((current) => {
-          const next = { ...current };
-          for (const snippet of snippets) {
-            next[snippet.id] = snippet;
-          }
-          return next;
-        });
-      });
-    };
-    refresh();
-    const interval = window.setInterval(refresh, 1500);
+        applySnapshot(snapshot.profiles, snapshot.assignments);
+      },
+      () => undefined,
+    );
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
     };
-  }, [client, ready, goalIds]);
+  }, [modelsClient]);
 
-  if (!ready) {
-    return (
-      <section className="chat-page">
-        <p className="page-kicker">Chat</p>
-        <h1 className="page-title">Chat</h1>
-        <p className="page-body">
-          Connect a compatible engine to chat with the orchestrator. Replies stay closed until the
-          local engine is ready.
-        </p>
-      </section>
-    );
-  }
-
-  function allowConversationReload() {
-    skipReloadForConvRef.current = null;
-    loadGenerationRef.current += 1;
-  }
-
-  async function onNewConversation() {
-    if (!selectedRepoId) {
-      return;
-    }
-    setError(null);
-    try {
-      const created = await client.createConversation(selectedRepoId);
-      allowConversationReload();
-      setConversations((current) => [created, ...current]);
-      setSelectedConvId(created.id);
-      setMessages([]);
-    } catch {
-      setError("Could not create a conversation.");
+  function applySnapshot(nextProfiles: ModelProfileOption[], nextAssignments: RoleAssignments): void {
+    setProfiles(nextProfiles);
+    setAssignments(nextAssignments);
+    const orch = nextProfiles.find((item) => item.id === nextAssignments.orchestrator);
+    if (orch) {
+      setModelLabel(orch.displayName);
+      setContextWindow(orch.limits.contextWindow || DEFAULT_CONTEXT_WINDOW);
+    } else {
+      setContextWindow(DEFAULT_CONTEXT_WINDOW);
     }
   }
 
-  async function onDeleteConversation() {
-    if (!selectedConvId) {
-      return;
-    }
-    const id = selectedConvId;
-    setError(null);
-    try {
-      await client.deleteConversation(id);
-      allowConversationReload();
-      const remaining = conversations.filter((item) => item.id !== id);
-      setConversations(remaining);
-      const nextId = remaining[0]?.id || "";
-      setSelectedConvId(nextId);
-      if (!nextId) {
-        setMessages([]);
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      repositoryId ? chatClient.listConversations(repositoryId) : Promise.resolve([]),
+      chatClient.listConversations(null),
+    ]).then(async ([scoped, loose]) => {
+      if (cancelled) {
+        return;
       }
-    } catch {
-      setError("Could not delete the conversation.");
+      const items = mergeHistory(scoped, loose, repositoryId);
+      setSessions(items);
+      const first = items[0];
+      if (!first || skipSelectRef.current) {
+        return;
+      }
+      setActiveId(first.id);
+      const payload = await chatClient.getConversation(first.id);
+      if (!cancelled) {
+        setMessages(payload.messages);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [chatClient, repositoryId]);
+
+  useEffect(() => {
+    if (newChatRequest === 0) {
+      return;
     }
+    skipSelectRef.current = true;
+    void startNewChat();
+  }, [newChatRequest]);
+
+  useEffect(() => {
+    if (mentionRequest.nonce === 0 || mentionRequest.path.trim() === "") {
+      return;
+    }
+    setDraft((current) =>
+      appendAskInChatDraft(current, mentionRequest.path, excerptFromMentionRequest(mentionRequest)),
+    );
+    requestAnimationFrame(() => {
+      composerRef.current?.focus();
+    });
+  }, [mentionRequest]);
+
+  useEffect(() => {
+    const node = threadRef.current;
+    if (node) {
+      node.scrollTop = node.scrollHeight;
+    }
+  }, [messages, busy]);
+
+  useEffect(() => {
+    composerRef.current?.focus();
+  }, [chatClient]);
+
+  useEffect(() => {
+    if (!indexClient || !repositoryId) {
+      closeMentionPicker();
+      return;
+    }
+    const cursor = composerRef.current?.selectionStart ?? draft.length;
+    const mention = mentionQueryAtCursor(draft, cursor);
+    if (!mention || mention.query === "") {
+      closeMentionPicker();
+      return;
+    }
+    let cancelled = false;
+    void Promise.all([
+      indexClient.status(repositoryId),
+      indexClient.search(repositoryId, mention.query),
+    ]).then(
+      ([status, hits]) => {
+        if (cancelled) {
+          return;
+        }
+        const paths = uniqueMentionPaths(hits).slice(0, 8);
+        setMentionPaths(paths);
+        setMentionHighlight(0);
+        if (paths.length > 0) {
+          setMentionHint(null);
+        } else if (!status.ready) {
+          setMentionHint("building");
+        } else {
+          setMentionHint("empty");
+        }
+      },
+      () => {
+        if (!cancelled) {
+          closeMentionPicker();
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [draft, indexClient, repositoryId]);
+
+  async function ensureSession(): Promise<string> {
+    if (activeId) {
+      return activeId;
+    }
+    const created = await chatClient.createConversation(repositoryId);
+    setSessions((current) => [created, ...current.filter((item) => item.id !== created.id)]);
+    setActiveId(created.id);
+    return created.id;
+  }
+
+  async function startNewChat(): Promise<void> {
+    setActiveId(null);
+    setMessages([]);
+    setDraft("");
+    setComposerImages([]);
+    setError(null);
+    closeMentionPicker();
   }
 
   async function onSend() {
-    const content = draft.trim();
-    if (!content || streaming) {
+    await sendText(draft.trim(), { clearDraft: true, images: composerImages });
+  }
+
+  async function onRetry() {
+    await sendText(lastUserMessageText(messages), { clearDraft: false, images: [] });
+  }
+
+  async function sendText(
+    text: string,
+    options: { clearDraft: boolean; images: ChatComposerImage[] },
+  ): Promise<void> {
+    if ((text === "" && options.images.length === 0) || busy) {
       return;
     }
-    let conversationId = selectedConvId;
-    if (!conversationId) {
-      if (!selectedRepoId) {
-        return;
-      }
-      try {
-        const created = await client.createConversation(selectedRepoId);
-        conversationId = created.id;
-        setConversations((current) => [created, ...current]);
-        setSelectedConvId(created.id);
-      } catch {
-        setError("Could not create a conversation.");
-        return;
-      }
-    }
     const requestId = crypto.randomUUID();
-    requestIdRef.current = requestId;
-    skipReloadForConvRef.current = conversationId;
-    loadGenerationRef.current += 1;
-    const userMessage: ChatMessage = {
-      id: `local-user-${requestId}`,
+    const pending: ThreadItem = {
+      id: `local_user_${requestId}`,
       role: "user",
-      content,
+      content: text,
       citations: [],
       goalRefs: [],
+      toolName: null,
+      toolStatus: null,
+      toolJson: null,
+      previewUrls: options.images.map((image) => image.previewUrl),
     };
-    const assistantMessage: ChatMessage = {
-      id: `local-asst-${requestId}`,
+    const assistantId = `local_asst_${requestId}`;
+    const assistant: ThreadItem = {
+      id: assistantId,
       role: "assistant",
       content: "",
       citations: [],
       goalRefs: [],
+      toolName: null,
+      toolStatus: null,
+      toolJson: null,
+      streaming: true,
     };
-    setDraft("");
     setError(null);
-    setStreaming(true);
-    setMessages((current) => [...current, userMessage, assistantMessage]);
+    if (options.clearDraft) {
+      setDraft("");
+      setComposerImages([]);
+    }
+    closeMentionPicker();
+    setMessages((current) => [...current, pending, assistant]);
     try {
-      await client.streamMessage(conversationId, content, {
+      const id = await ensureSession();
+      inflightRef.current = { conversationId: id, requestId };
+      setBusy(true);
+      let failed = false;
+      await chatClient.streamMessage(id, text, {
         requestId,
+        images: options.images.map((image) => ({ mime: image.mime, data: image.data })),
         onDelta: (delta) => {
           setMessages((current) =>
             current.map((item) =>
-              item.id === assistantMessage.id ? { ...item, content: item.content + delta } : item,
+              item.id === assistantId ? { ...item, content: item.content + delta } : item,
             ),
           );
+        },
+        onTool: (tool) => {
+          setMessages((current) => upsertToolMessage(current, tool, assistantId));
+        },
+        onGoal: (goal) => {
+          setMessages((current) => upsertGoalMessage(current, goal, assistantId));
         },
         onDone: (result) => {
           setMessages((current) =>
             current.map((item) =>
-              item.id === assistantMessage.id
+              item.id === assistantId
                 ? {
                     ...item,
                     content: result.content || item.content,
                     citations: result.citations,
                     goalRefs: result.goalRefs,
+                    streaming: false,
                   }
                 : item,
             ),
           );
         },
-        onError: (message) => {
-          setError(message);
-          setMessages((current) =>
-            current.filter((item) => item.id !== assistantMessage.id || item.content.length > 0),
-          );
+        onError: () => {
+          failed = true;
         },
       });
+      if (failed) {
+        setMessages((current) => current.filter((item) => item.id !== pending.id && item.id !== assistantId));
+        if (options.clearDraft) {
+          setDraft(text);
+          setComposerImages(options.images);
+        }
+        setError("Could not send that message. Check the model connection and try again.");
+      }
+    } catch {
+      setMessages((current) => current.filter((item) => item.id !== pending.id && item.id !== assistantId));
+      if (options.clearDraft) {
+        setDraft(text);
+        setComposerImages(options.images);
+      }
+      setError("Could not send that message. Check the model connection and try again.");
     } finally {
-      setStreaming(false);
-      requestIdRef.current = null;
+      inflightRef.current = null;
+      setBusy(false);
     }
+  }
+
+  async function addImageFiles(files: File[]): Promise<void> {
+    if (files.length === 0) {
+      setError(pastedImageError("type"));
+      return;
+    }
+    const accepted: ChatComposerImage[] = [];
+    let failure: "type" | "size" | null = null;
+    for (const file of files) {
+      const result = await readPastedImageFile(file);
+      if (!result.ok) {
+        failure = result.reason;
+        continue;
+      }
+      accepted.push({
+        id: `local_${crypto.randomUUID()}`,
+        mime: result.mime,
+        data: result.data,
+        previewUrl: dataUrlForChatImage(result.mime, result.data),
+      });
+    }
+    if (accepted.length === 0) {
+      setError(pastedImageError(failure ?? "type"));
+      return;
+    }
+    const room = MAX_CHAT_IMAGES_PER_TURN - composerImages.length;
+    if (room <= 0) {
+      setError(pastedImageError("limit"));
+      return;
+    }
+    if (accepted.length > room) {
+      setError(pastedImageError("limit"));
+    } else if (failure) {
+      setError(pastedImageError(failure));
+    } else {
+      setError(null);
+    }
+    setComposerImages((current) => [...current, ...accepted.slice(0, room)]);
+  }
+
+  function removeComposerImage(id: string): void {
+    setComposerImages((current) => current.filter((image) => image.id !== id));
+  }
+
+  async function onComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>): Promise<void> {
+    const data = event.clipboardData;
+    if (!clipboardHasFiles(data)) {
+      return;
+    }
+    event.preventDefault();
+    closeMentionPicker();
+    try {
+      await addImageFiles(imageFilesFromClipboard(data));
+    } catch {
+      setError("Could not read that image. Use Add image instead.");
+    }
+  }
+
+  function applyMention(path: string): void {
+    const cursor = composerRef.current?.selectionStart ?? draft.length;
+    const mention = mentionQueryAtCursor(draft, cursor);
+    if (!mention) {
+      return;
+    }
+    const next = insertMention(draft, mention.start, mention.query, path);
+    setDraft(next);
+    closeMentionPicker();
+    requestAnimationFrame(() => {
+      const node = composerRef.current;
+      if (!node) {
+        return;
+      }
+      const caret = mention.start + 1 + path.length + 1;
+      node.focus();
+      node.setSelectionRange(caret, caret);
+      node.style.height = "auto";
+      node.style.height = `${Math.min(200, Math.max(44, node.scrollHeight))}px`;
+    });
   }
 
   async function onStop() {
-    const requestId = requestIdRef.current;
-    if (!requestId) {
+    const inflight = inflightRef.current;
+    if (!inflight) {
+      setBusy(false);
       return;
     }
-    await client.cancelStream(requestId);
+    try {
+      await chatClient.cancelStream(inflight.conversationId, inflight.requestId);
+    } catch {
+      setError("Could not stop this turn. Wait for it to finish, then try again.");
+    }
   }
 
-  const selectedConversation = conversations.find((item) => item.id === selectedConvId) ?? null;
+  useEffect(() => {
+    if (!busy) {
+      return;
+    }
+    function onKey(event: KeyboardEvent): void {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      void onStop();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [busy]);
+
+  async function onSelectProfile(profileId: string): Promise<void> {
+    if (!modelsClient || !assignments) {
+      setModelMenuOpen(false);
+      return;
+    }
+    setModelMenuOpen(false);
+    const next: RoleAssignments = {
+      orchestrator: profileId,
+      planner: assignments.planner ?? profileId,
+      coder: assignments.coder ?? profileId,
+      reviewer: assignments.reviewer ?? profileId,
+      embedding: assignments.embedding ?? profileId,
+    };
+    try {
+      const saved = await modelsClient.assign({
+        orchestrator: next.orchestrator ?? profileId,
+        planner: next.planner ?? profileId,
+        coder: next.coder ?? profileId,
+        reviewer: next.reviewer ?? profileId,
+        embedding: next.embedding ?? profileId,
+      });
+      applySnapshot(profiles, saved);
+    } catch {
+      setError("Could not switch the orchestrator model. Try again.");
+    }
+  }
+
+  const contextUsage = chatContextUsage(
+    [...messages.map((item) => item.content), draft],
+    contextWindow,
+  );
+  const contextLabel = chatContextMeterLabel(contextUsage);
+  const contextWarn = chatContextWarning(contextUsage.ratio);
+  const contextPercent = Math.round(contextUsage.ratio * 100);
 
   return (
-    <section className="chat-page">
-      <p className="page-kicker">Chat</p>
-      <h1 className="page-title">Chat</h1>
-      <p className="page-body">
-        The orchestrator answers cheap questions itself and turns real work into goals. Prefix a
-        message with /goal to delegate.
-      </p>
-      <div className="chat-page__toolbar">
-        {repositories.length ? (
-          <label className="index-page__field" htmlFor="chat-repo">
-            Repository
-            <select
-              id="chat-repo"
-              value={selectedRepoId}
-              onChange={(event) => {
-                allowConversationReload();
-                setSelectedRepoId(event.target.value);
-                setSelectedConvId("");
-                setMessages([]);
-              }}
-            >
-              {repositories.map((repo) => (
-                <option key={repo.id} value={repo.id}>
-                  {repo.displayName}
-                </option>
-              ))}
-            </select>
-          </label>
+    <div className="chat-layout">
+      {historyOpen ? (
+        <aside className="chat-history" aria-label="Chat history">
+          <button type="button" className="btn-quiet" onClick={() => void startNewChat()}>
+            New chat
+          </button>
+          <ul className="chat-history__list">
+            {sessions.map((item) => (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className="chat-history__item"
+                  aria-current={item.id === activeId ? "true" : undefined}
+                  onClick={() => {
+                    setActiveId(item.id);
+                    void chatClient.getConversation(item.id).then((payload) => {
+                      setMessages(payload.messages);
+                    });
+                  }}
+                >
+                  {item.title}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </aside>
+      ) : null}
+      <section className="chat-stage">
+        {messages.length === 0 ? (
+          <div className="chat-empty">
+            <h1 className="chat-empty__title">Ask Kronos</h1>
+            <p>
+              {repositoryId
+                ? "Chat can search this workspace, read and write files, run commands, and start a longer goal when you want unattended work. AGENTS.md and Cursor rules files in this folder are followed on every turn. Apply on a code block writes that file here. Click a file mention to open it in Files. Paste a screenshot to ask about the UI."
+                : "You can ask how Kronos works now. Paste a screenshot, or open a git folder to index code."}
+            </p>
+            {repositoryId ? null : (
+              <button type="button" className="btn-quiet" onClick={onOpenWorkspace}>
+                Open folder
+              </button>
+            )}
+          </div>
         ) : (
-          <p className="index-page__empty">Enrol a repository before chatting.</p>
+          <ol className="chat-thread" ref={threadRef} aria-live="polite">
+            {messages.map((item) => (
+              <li
+                key={item.id}
+                className={`chat-bubble chat-bubble--${item.role}${item.streaming ? " chat-bubble--streaming" : ""}`}
+                data-tool={item.toolName ?? undefined}
+              >
+                {item.goalEvent ? (
+                  <GoalCard goal={item.goalEvent} onOpenGoals={onOpenGoals} />
+                ) : item.role === "assistant" ? (
+                  <>
+                    {item.content.trim() !== "" || item.streaming ? (
+                      <ChatMarkdown source={item.content} onApply={onApplyFile} onOpenPath={onOpenPath} />
+                    ) : null}
+                    {item.citations.length > 0 ? (
+                      <ul className="chat-citations">
+                        {item.citations.map((citation) => (
+                          <li key={`${citation.path}:${citation.startLine}`}>
+                            <span className="chat-citations__chip">
+                              {citation.path}:{citation.startLine}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </>
+                ) : item.role === "user" ? (
+                  <UserMessage
+                    content={item.content}
+                    previewUrls={item.previewUrls}
+                    conversationId={activeId}
+                    chatClient={chatClient}
+                    onOpenPath={onOpenPath}
+                  />
+                ) : item.role === "tool" ? (
+                  <ToolCard message={item} />
+                ) : (
+                  <p>{item.content}</p>
+                )}
+              </li>
+            ))}
+          </ol>
         )}
-        <div className="chat-page__toolbar-actions">
-          <button type="button" className="btn-quiet" onClick={() => void onNewConversation()}>
-            New conversation
-          </button>
-          <button
-            type="button"
-            className="btn-quiet"
-            onClick={() => void onDeleteConversation()}
-            disabled={!selectedConvId}
-          >
-            Delete
-          </button>
-        </div>
-      </div>
-      <div className="chat-page__layout">
-        <aside className="chat-page__sidebar">
-          {conversations.length ? (
-            <ul className="chat-page__conversations">
-              {conversations.map((item) => (
-                <li key={item.id}>
+        {busy ? (
+          <p className="chat-turn-status" aria-live="polite">
+            Working on this turn.
+          </p>
+        ) : null}
+        {error ? (
+          <div className="chat-send-error">
+            <p className="wizard__error">{error}</p>
+            <button type="button" className="btn-quiet" onClick={() => void onSend()}>
+              Try again
+            </button>
+          </div>
+        ) : null}
+        {!busy && !error && lastUserMessageText(messages) !== "" ? (
+          <div className="chat-retry">
+            <button type="button" className="btn-quiet" onClick={() => void onRetry()}>
+              Retry
+            </button>
+          </div>
+        ) : null}
+        <div
+          className="chat-composer-wrap"
+          onDragOver={(event: DragEvent<HTMLDivElement>) => {
+            event.preventDefault();
+          }}
+          onDrop={(event: DragEvent<HTMLDivElement>) => {
+            if (!clipboardHasFiles(event.dataTransfer)) {
+              return;
+            }
+            event.preventDefault();
+            void addImageFiles(imageFilesFromClipboard(event.dataTransfer));
+          }}
+        >
+          {mentionHint ? (
+            <p className="chat-mentions chat-mentions--hint" role="status">
+              {mentionHint === "building"
+                ? "The search index is still building."
+                : "No matching files."}
+            </p>
+          ) : null}
+          {mentionPaths.length > 0 ? (
+            <ul className="chat-mentions" id="chat-mentions" role="listbox" aria-label="Workspace files">
+              {mentionPaths.map((path, index) => (
+                <li key={path} role="presentation">
                   <button
                     type="button"
-                    className="workspace-card"
-                    aria-current={item.id === selectedConvId ? "true" : undefined}
-                    onClick={() => {
-                      if (skipReloadForConvRef.current !== item.id) {
-                        allowConversationReload();
-                      }
-                      setSelectedConvId(item.id);
+                    id={`chat-mention-${index}`}
+                    className="chat-mentions__item"
+                    role="option"
+                    aria-selected={index === mentionHighlight}
+                    title={path}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      applyMention(path);
                     }}
                   >
-                    <p className="workspace-card__name">{item.title}</p>
+                    {path}
                   </button>
                 </li>
               ))}
             </ul>
-          ) : (
-            <p className="index-page__empty">No conversations yet.</p>
-          )}
-        </aside>
-        <div className="chat-page__main">
-          <div className="chat-page__thread" aria-live="polite">
-            {messages.length === 0 ? (
-              <p className="index-page__empty">
-                {selectedConversation
-                  ? "Send a message to start this thread."
-                  : "Create a conversation or send a message."}{" "}
-                Need a model? <a href="#/settings/models">Models</a>
-              </p>
-            ) : (
-              messages.map((message) => (
-                <article
-                  key={message.id}
-                  className="chat-page__bubble"
-                  data-role={message.role}
-                >
-                  <p className="chat-page__role">{message.role}</p>
-                  {message.role === "assistant" ? (
-                    <AssistantBody content={message.content} />
-                  ) : (
-                    <p className="chat-page__text">{message.content}</p>
-                  )}
-                  {message.citations.length ? (
-                    <ul className="chat-page__citations">
-                      {message.citations.map((citation) => (
-                        <li key={`${citation.path}:${citation.startLine}`}>
-                          <span className="chat-page__chip">
-                            {citation.path}:{citation.startLine}
-                          </span>
+          ) : null}
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            multiple
+            className="visually-hidden"
+            aria-label="Add image"
+            onChange={(event) => {
+              const files = [...(event.target.files ?? [])];
+              event.target.value = "";
+              if (files.length > 0) {
+                void addImageFiles(files);
+              }
+            }}
+          />
+          <label className="chat-composer">
+            <span className="visually-hidden">Ask Kronos</span>
+            {composerImages.length > 0 ? (
+              <ul className="chat-composer__images" aria-label="Pasted images">
+                {composerImages.map((image) => (
+                  <li key={image.id} className="chat-composer__image">
+                    <img src={image.previewUrl} alt="Pasted image" />
+                    <button
+                      type="button"
+                      className="btn-quiet"
+                      aria-label="Remove pasted image"
+                      onClick={() => {
+                        removeComposerImage(image.id);
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <textarea
+              ref={composerRef}
+              className="chat-composer__input"
+              value={draft}
+              placeholder={
+                repositoryId
+                  ? "Ask Kronos. Paste a screenshot, or type @ to mention a file."
+                  : "Ask Kronos. Paste a screenshot."
+              }
+              aria-label="Ask Kronos"
+              aria-autocomplete="list"
+              aria-expanded={mentionPaths.length > 0}
+              aria-controls={mentionPaths.length > 0 ? "chat-mentions" : undefined}
+              aria-activedescendant={
+                mentionPaths.length > 0 ? `chat-mention-${mentionHighlight}` : undefined
+              }
+              rows={2}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                const node = event.target;
+                node.style.height = "auto";
+                node.style.height = `${Math.min(200, Math.max(44, node.scrollHeight))}px`;
+              }}
+              onPaste={(event) => {
+                void onComposerPaste(event);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && (mentionPaths.length > 0 || mentionHint)) {
+                  event.preventDefault();
+                  closeMentionPicker();
+                  return;
+                }
+                if (event.key === "ArrowDown" && mentionPaths.length > 0) {
+                  event.preventDefault();
+                  setMentionHighlight((current) => Math.min(mentionPaths.length - 1, current + 1));
+                  return;
+                }
+                if (event.key === "ArrowUp" && mentionPaths.length > 0) {
+                  event.preventDefault();
+                  setMentionHighlight((current) => Math.max(0, current - 1));
+                  return;
+                }
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  const chosen = mentionPaths[mentionHighlight] ?? mentionPaths[0];
+                  if (chosen) {
+                    applyMention(chosen);
+                    return;
+                  }
+                  void onSend();
+                }
+              }}
+            />
+            <span className="chat-composer__toolbar">
+              {modelLabel ? (
+                <span className="chat-composer__model-wrap">
+                  <button
+                    type="button"
+                    className="chat-composer__model"
+                    aria-haspopup={modelsClient ? "menu" : undefined}
+                    aria-expanded={modelsClient ? modelMenuOpen : undefined}
+                    onClick={() => {
+                      if (modelsClient) {
+                        setModelMenuOpen((open) => !open);
+                        return;
+                      }
+                      onOpenModels?.();
+                    }}
+                  >
+                    {modelLabel}
+                  </button>
+                  {modelsClient && modelMenuOpen ? (
+                    <ul className="chat-model-menu" role="menu" aria-label="Orchestrator models">
+                      {profiles.map((profile) => (
+                        <li key={profile.id} role="none">
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="chat-model-menu__item"
+                            onClick={() => {
+                              void onSelectProfile(profile.id);
+                            }}
+                          >
+                            {profile.displayName}
+                          </button>
                         </li>
                       ))}
+                      <li role="none">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="chat-model-menu__item"
+                          onClick={() => {
+                            setModelMenuOpen(false);
+                            setConnectOpen(true);
+                          }}
+                        >
+                          Connect a model…
+                        </button>
+                      </li>
                     </ul>
                   ) : null}
-                  {message.goalRefs.map((id) => {
-                    const goal = goalStates[id];
-                    return (
-                      <article key={id} className="chat-page__goal-card">
-                        <p className="workspace-card__name">{id}</p>
-                        <p className="workspace-card__meta">{goal?.state ?? "loading"}</p>
-                        {goal?.title ? (
-                          <p className="workspace-card__status">{goal.title}</p>
-                        ) : null}
-                        <a href="#/goals">Goals</a>
-                      </article>
-                    );
-                  })}
-                </article>
-              ))
-            )}
-          </div>
-          {error ? (
-            <p className="wizard__error">
-              {error}{" "}
-              <a href="#/settings/models">Models</a>
-            </p>
-          ) : null}
-          <form
-            className="chat-page__composer"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void onSend();
+                </span>
+              ) : null}
+              <span
+                className="chat-context"
+                data-context-full={contextUsage.ratio >= 0.8 ? "true" : undefined}
+              >
+                <span
+                  className="chat-context__bar"
+                  role="progressbar"
+                  aria-label={contextLabel}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={contextPercent}
+                >
+                  <span className="chat-context__fill" style={{ width: `${contextPercent}%` }} />
+                </span>
+                <span className="chat-context__label">{contextLabel}</span>
+              </span>
+              <button
+                type="button"
+                className="btn-quiet"
+                onClick={() => {
+                  imageInputRef.current?.click();
+                }}
+              >
+                Add image
+              </button>
+              <button
+                type="button"
+                className={busy ? "btn-quiet" : "btn-primary"}
+                disabled={busy || (draft.trim() === "" && composerImages.length === 0)}
+                onClick={() => void onSend()}
+              >
+                {busy ? "Working" : "Send"}
+              </button>
+              {busy ? (
+                <button type="button" className="btn-primary" onClick={() => void onStop()}>
+                  Stop
+                </button>
+              ) : null}
+            </span>
+            {contextWarn ? (
+              <p className="chat-context__warn" role="status">
+                {contextWarn}
+              </p>
+            ) : null}
+          </label>
+        </div>
+      </section>
+      {connectOpen && modelsClient ? (
+        <div
+          className="chat-model-dialog-backdrop"
+          role="presentation"
+          onClick={() => {
+            setConnectOpen(false);
+          }}
+        >
+          <div
+            className="chat-model-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Connect a model"
+            onClick={(event) => {
+              event.stopPropagation();
             }}
           >
-            <label className="index-page__field" htmlFor="chat-message">
-              Message
-              <textarea
-                id="chat-message"
-                className="wizard__input"
-                value={draft}
-                onChange={(event) => {
-                  setDraft(event.target.value);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    void onSend();
-                  }
-                }}
-              />
-            </label>
-            {streaming ? (
-              <button type="button" className="btn-quiet" onClick={() => void onStop()}>
-                Stop
-              </button>
-            ) : (
-              <button type="submit" className="btn-primary" disabled={!draft.trim()}>
-                Send
-              </button>
-            )}
-          </form>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function AssistantBody({ content }: { content: string }) {
-  const blocks = splitAssistantBlocks(content);
-  if (blocks.length === 0) {
-    return <p className="chat-page__text">{content}</p>;
-  }
-  return (
-    <div className="chat-page__assistant-body">
-      {blocks.map((block, index) =>
-        block.type === "code" ? (
-          <div key={`code-${index}`} className="chat-page__code">
+            <ConnectModelGate
+              modelsClient={modelsClient}
+              onConnected={() => {
+                setConnectOpen(false);
+                void modelsClient.snapshot().then((snapshot) => {
+                  applySnapshot(snapshot.profiles, snapshot.assignments);
+                });
+              }}
+            />
             <button
               type="button"
               className="btn-quiet"
               onClick={() => {
-                void navigator.clipboard?.writeText(block.text);
+                setConnectOpen(false);
               }}
             >
-              Copy
+              Close
             </button>
-            <pre>
-              <code>{block.text}</code>
-            </pre>
           </div>
-        ) : (
-          <p key={`p-${index}`} className="chat-page__text">
-            {block.text}
-          </p>
-        ),
-      )}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function splitAssistantBlocks(content: string): AssistantBlock[] {
-  const blocks: AssistantBlock[] = [];
-  const fence = /```([^\n]*)\n([\s\S]*?)```/g;
-  let last = 0;
-  let match = fence.exec(content);
-  while (match) {
-    const before = content.slice(last, match.index).trim();
-    if (before) {
-      for (const para of before.split(/\n\n+/)) {
-        if (para.trim()) {
-          blocks.push({ type: "paragraph", text: para.trim() });
+function mergeHistory(
+  scoped: ConversationSummary[],
+  loose: ConversationSummary[],
+  repositoryId: string | null,
+): ConversationSummary[] {
+  const seen = new Set<string>();
+  const items: ConversationSummary[] = [];
+  for (const item of [...scoped, ...loose]) {
+    if (seen.has(item.id)) {
+      continue;
+    }
+    if (item.repositoryId !== null && item.repositoryId !== repositoryId) {
+      continue;
+    }
+    seen.add(item.id);
+    items.push(item);
+  }
+  return items;
+}
+
+function upsertToolMessage(
+  current: ThreadItem[],
+  tool: ChatToolEvent,
+  assistantId: string,
+): ThreadItem[] {
+  const id = `tool-${tool.id}`;
+  const next: ThreadItem = {
+    id,
+    role: "tool",
+    content: tool.summary ?? "",
+    citations: [],
+    goalRefs: [],
+    toolName: tool.name,
+    toolStatus: tool.status,
+    toolJson: JSON.stringify({
+      args: tool.args ?? {},
+      summary: tool.summary ?? "",
+      output: tool.output ?? "",
+    }),
+  };
+  const existing = current.findIndex((item) => item.id === id);
+  if (existing >= 0) {
+    return current.map((item, index) => (index === existing ? next : item));
+  }
+  const assistantIndex = current.findIndex((item) => item.id === assistantId);
+  if (assistantIndex < 0) {
+    return [...current, next];
+  }
+  return [...current.slice(0, assistantIndex), next, ...current.slice(assistantIndex)];
+}
+
+function upsertGoalMessage(
+  current: ThreadItem[],
+  goal: ChatGoalEvent,
+  assistantId: string,
+): ThreadItem[] {
+  const id = `goal-${goal.id}`;
+  const next: ThreadItem = {
+    id,
+    role: "assistant",
+    content: "",
+    citations: [],
+    goalRefs: [goal.id],
+    toolName: null,
+    toolStatus: null,
+    toolJson: null,
+    goalEvent: goal,
+  };
+  const existing = current.findIndex((item) => item.id === id);
+  if (existing >= 0) {
+    return current.map((item, index) => (index === existing ? next : item));
+  }
+  const assistantIndex = current.findIndex((item) => item.id === assistantId);
+  if (assistantIndex < 0) {
+    return [...current, next];
+  }
+  return [...current.slice(0, assistantIndex), next, ...current.slice(assistantIndex)];
+}
+
+function ToolCard({ message }: { message: ThreadItem }) {
+  const parsed = parseToolJson(message.toolJson);
+  const summary = parsed.summary || message.content;
+  const output = parsed.output || (message.toolName === "run_command" ? message.content : "");
+  return (
+    <>
+      <p className="chat-bubble__tool">{toolCardLabel(message.toolName, message.toolStatus)}</p>
+      {summary && summary !== output ? <p>{summary}</p> : null}
+      {output ? (
+        message.toolName === "run_command" ? (
+          <div className="chat-bubble__output-wrap">
+            <CopyTextButton text={output} idleLabel="Copy output" />
+            <pre className="chat-bubble__output">{output}</pre>
+          </div>
+        ) : (
+          <details className="chat-bubble__details" open={message.toolStatus === "ok"}>
+            <summary>Output</summary>
+            <div className="chat-bubble__output-wrap">
+              <CopyTextButton text={output} idleLabel="Copy output" />
+              <pre className="chat-bubble__output">{output}</pre>
+            </div>
+          </details>
+        )
+      ) : null}
+    </>
+  );
+}
+
+function GoalCard({
+  goal,
+  onOpenGoals,
+}: {
+  goal: ChatGoalEvent;
+  onOpenGoals: (() => void) | undefined;
+}) {
+  return (
+    <article className="chat-goal-card">
+      <p className="chat-goal-card__id">{goal.id}</p>
+      <p className="chat-goal-card__state">{goal.state}</p>
+      <ul className="chat-goal-card__checks">
+        {goal.readiness.map((check) => (
+          <li key={check.id}>
+            {check.label}: {check.ok ? "ready." : check.detail}
+          </li>
+        ))}
+      </ul>
+      {onOpenGoals ? (
+        <button type="button" className="btn-quiet" onClick={onOpenGoals}>
+          Open in Goals
+        </button>
+      ) : null}
+    </article>
+  );
+}
+
+function parseToolJson(raw: string | null): { summary: string; output: string } {
+  if (!raw) {
+    return { summary: "", output: "" };
+  }
+  try {
+    const parsed = JSON.parse(raw) as { summary?: unknown; output?: unknown };
+    return {
+      summary: typeof parsed.summary === "string" ? parsed.summary : "",
+      output: typeof parsed.output === "string" ? parsed.output : "",
+    };
+  } catch {
+    return { summary: "", output: "" };
+  }
+}
+
+function UserMessage({
+  content,
+  previewUrls,
+  conversationId,
+  chatClient,
+  onOpenPath,
+}: {
+  content: string;
+  previewUrls: string[] | undefined;
+  conversationId: string | null;
+  chatClient: ChatClient;
+  onOpenPath: ((path: string) => void) | undefined;
+}) {
+  if (previewUrls && previewUrls.length > 0) {
+    return (
+      <>
+        {content.trim() !== "" ? <UserMentionText content={content} onOpenPath={onOpenPath} /> : null}
+        {previewUrls.map((url) => (
+          <img key={url} className="chat-bubble__image" alt="Pasted image" src={url} />
+        ))}
+      </>
+    );
+  }
+  const segments = userMessageSegments(content);
+  return (
+    <>
+      {segments.map((part, index) => {
+        if (part.kind === "image" && conversationId) {
+          return (
+            <ChatPastedImage
+              key={`${part.value}:${index}`}
+              conversationId={conversationId}
+              imageId={part.value}
+              chatClient={chatClient}
+            />
+          );
         }
-      }
-    }
-    blocks.push({
-      type: "code",
-      language: match[1]?.trim() ?? "",
-      text: match[2] ?? "",
-    });
-    last = match.index + match[0].length;
-    match = fence.exec(content);
+        if (part.kind === "image") {
+          return (
+            <span key={`${part.value}:${index}`} className="chat-bubble__image-fallback">
+              Pasted image
+            </span>
+          );
+        }
+        return <UserMentionText key={`${part.value}:${index}`} content={part.value} onOpenPath={onOpenPath} />;
+      })}
+    </>
+  );
+}
+
+function ChatPastedImage({
+  conversationId,
+  imageId,
+  chatClient,
+}: {
+  conversationId: string;
+  imageId: string;
+  chatClient: ChatClient;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void chatClient.getImage(conversationId, imageId).then(
+      (payload) => {
+        if (!cancelled) {
+          setSrc(dataUrlForChatImage(payload.mime, payload.data));
+        }
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [chatClient, imageId, conversationId]);
+  if (!src) {
+    return <span className="chat-bubble__image-fallback">Pasted image</span>;
   }
-  const after = content.slice(last).trim();
-  if (after) {
-    for (const para of after.split(/\n\n+/)) {
-      if (para.trim()) {
-        blocks.push({ type: "paragraph", text: para.trim() });
-      }
+  return <img className="chat-bubble__image" alt="Pasted image" src={src} />;
+}
+
+function UserMentionText({
+  content,
+  onOpenPath,
+}: {
+  content: string;
+  onOpenPath: ((path: string) => void) | undefined;
+}) {
+  return (
+    <p>
+      {mentionSegments(content).map((part, index) => {
+        if (part.kind !== "path") {
+          return <span key={`${part.value}:${index}`}>{part.value}</span>;
+        }
+        const path = safeWorkspaceRelPath(part.value);
+        if (onOpenPath && path !== "") {
+          return <ChatPathButton key={`${part.value}:${index}`} path={path} onOpen={onOpenPath} />;
+        }
+        return <code key={`${part.value}:${index}`}>{part.value}</code>;
+      })}
+    </p>
+  );
+}
+
+function lastUserMessageText(messages: ChatMessage[]): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const item = messages[index];
+    if (item?.role === "user") {
+      return item.content.trim();
     }
   }
-  return blocks;
+  return "";
 }

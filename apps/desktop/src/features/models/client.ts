@@ -11,11 +11,14 @@ export interface DetectedTool {
   present: boolean;
 }
 
+export const DEFAULT_CONTEXT_WINDOW = 32_000;
+
 export interface ResourceLimits {
   maxTokens: number;
   maxAttempts: number;
   timeoutSeconds: number;
   costCeiling: number;
+  contextWindow: number;
 }
 
 export interface ModelProfileOption {
@@ -110,6 +113,7 @@ export function createProductionModelsClient(
           max_attempts: patch.limits.maxAttempts,
           timeout_seconds: patch.limits.timeoutSeconds,
           cost_ceiling: patch.limits.costCeiling,
+          context_window: patch.limits.contextWindow,
         },
       });
       return mapProfile(payload);
@@ -203,11 +207,13 @@ function mapProfile(item: unknown): ModelProfileOption {
 
 function mapLimits(raw: unknown): ResourceLimits {
   const record = asRecord(raw);
+  const window = numberField(record, "context_window");
   return {
     maxTokens: numberField(record, "max_tokens"),
     maxAttempts: numberField(record, "max_attempts"),
     timeoutSeconds: numberField(record, "timeout_seconds"),
     costCeiling: numberField(record, "cost_ceiling"),
+    contextWindow: window > 0 ? window : DEFAULT_CONTEXT_WINDOW,
   };
 }
 

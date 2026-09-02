@@ -544,5 +544,6 @@ function limitsFromProfile(profile: ModelProfileOption, draft: ProfileDraft): Re
     maxAttempts: profile.limits?.maxAttempts ?? 3,
     timeoutSeconds: profile.limits?.timeoutSeconds ?? 120,
     costCeiling: draft.costCeiling,
+    contextWindow: profile.limits?.contextWindow ?? 32_000,
   };
 }

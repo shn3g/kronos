@@ -39,7 +39,7 @@ function plannerProfile(id: string) {
     role: "planner",
     billed: false,
     modelId: "llama3",
-    limits: { maxTokens: 0, maxAttempts: 0, timeoutSeconds: 0, costCeiling: 0 },
+    limits: { maxTokens: 0, maxAttempts: 0, timeoutSeconds: 0, costCeiling: 0, contextWindow: 32000 },
   };
 }
 

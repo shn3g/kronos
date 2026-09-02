@@ -7,8 +7,9 @@ import {
   type EngineConnectionState,
 } from "../engine/client";
 import { EngineStatus } from "../engine/EngineStatus";
-import { ChatPage, type ChatPageClients } from "../features/chat/ChatPage";
+import { ChatPage } from "../features/chat/ChatPage";
 import { createProductionChatClient, type ChatClient } from "../features/chat/client";
+import { createProductionIndexClient, type IndexClient } from "../features/index/client";
 import { GoalsPage, type GoalsPageClients } from "../features/goals/GoalsPage";
 import { createProductionGoalsClient, type GoalsClient } from "../features/goals/client";
 import { createProductionHomeClient, type HomeClient } from "../features/home/client";
@@ -43,6 +44,7 @@ const productionRepos = createProductionRepositoriesClient();
 const productionHome = createProductionHomeClient();
 const productionGoals = createProductionGoalsClient();
 const productionSettings = createProductionSettingsClient();
+const productionIndex = createProductionIndexClient();
 const ACTIVITY_BAR_STORAGE_KEY = "kronos.activityBarCollapsed";
 const INSPECTOR_STORAGE_KEY = "kronos.inspectorCollapsed";
 
@@ -65,6 +67,7 @@ interface AppProps {
   homeClient?: HomeClient;
   goalsClient?: GoalsClient;
   settingsClient?: SettingsPageClients;
+  indexClient?: IndexClient;
 }
 
 export function App({
@@ -75,6 +78,7 @@ export function App({
   homeClient,
   goalsClient,
   settingsClient,
+  indexClient,
 }: AppProps) {
   const engine = engineClient ?? productionEngine;
   const models = modelsClient ?? productionModels;
@@ -83,6 +87,7 @@ export function App({
   const home = homeClient ?? productionHome;
   const goals = goalsClient ?? productionGoals;
   const settings = settingsClient ?? productionSettings;
+  const index = indexClient ?? productionIndex;
   const [engineState, setEngineState] = useState<EngineConnectionState>({
     status: "starting",
   });
@@ -90,6 +95,8 @@ export function App({
   const [modelKnown, setModelKnown] = useState(false);
   const [route, setRoute] = useState<ShellRoute>(() => routeFromHash(window.location.hash));
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [newChatRequest, setNewChatRequest] = useState(0);
+  const [orchestratorName, setOrchestratorName] = useState<string | null>(null);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("changes");
   const [activityCollapsed, setActivityCollapsed] = useState(() =>
     readFlag(ACTIVITY_BAR_STORAGE_KEY),
@@ -135,8 +142,11 @@ export function App({
       if (cancelled) {
         return;
       }
-      setModelReady(Boolean(snapshot.assignments.orchestrator));
+      const assigned = snapshot.assignments.orchestrator;
+      setModelReady(Boolean(assigned));
       setModelKnown(true);
+      const profile = snapshot.profiles.find((item) => item.id === assigned);
+      setOrchestratorName(profile?.displayName ?? null);
     });
     return () => {
       cancelled = true;
@@ -173,6 +183,7 @@ export function App({
 
   function startNewChat(): void {
     go({ activity: "chat" });
+    setNewChatRequest((current) => current + 1);
   }
 
   function openFiles(): void {
@@ -305,14 +316,11 @@ export function App({
   }
 
   const activity: ActivityId = route.activity;
-  const chatPageClient: ChatPageClients = {
-    ...chat,
-    listRepositories: () => repos.list(),
-  };
   const goalsPageClient: GoalsPageClients = {
     ...goals,
     listRepositories: () => repos.list(),
   };
+  const workspaceId = session.workspaceId;
 
   return (
     <div className="app-shell">
@@ -372,8 +380,35 @@ export function App({
             data-inspector-collapsed={inspectorCollapsed ? "true" : "false"}
           >
             <main id="main" className="app-main" tabIndex={-1}>
-              <div hidden={activity !== "chat"} className="app-main__panel">
-                <ChatPage engineClient={engine} chatClient={chatPageClient} />
+              <div hidden={activity !== "chat"} className="app-main__panel app-main__panel--chat">
+                <ChatPage
+                  chatClient={chat}
+                  repositoryId={workspaceId}
+                  historyOpen={historyOpen}
+                  newChatRequest={newChatRequest}
+                  orchestratorName={orchestratorName}
+                  indexClient={index}
+                  modelsClient={models}
+                  onOpenWorkspace={() => {
+                    go({ activity: "workspaces" });
+                  }}
+                  onOpenModels={() => {
+                    go({ activity: "settings", settingsSection: "models" });
+                  }}
+                  onOpenGoals={() => {
+                    go({ activity: "goals" });
+                  }}
+                  onApplyFile={
+                    workspaceId
+                      ? async (path, content) => {
+                          await repos.writeFile(workspaceId, path, content);
+                        }
+                      : undefined
+                  }
+                  onOpenPath={() => {
+                    go({ activity: "files" });
+                  }}
+                />
               </div>
               <div hidden={activity !== "files"} className="app-main__panel">
                 <FilesPlaceholder />

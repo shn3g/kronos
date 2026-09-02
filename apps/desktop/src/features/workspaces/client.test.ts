@@ -92,4 +92,15 @@ describe("createProductionRepositoriesClient", () => {
       },
     ]);
   });
+
+  it("writes a workspace file through PUT /repositories/{id}/files/contents", async () => {
+    const client = createProductionRepositoriesClient(async (method, path, body) => {
+      expect(method).toBe("PUT");
+      expect(path).toBe("/repositories/repo_alpha/files/contents");
+      expect(body).toEqual({ path: "src/ok.ts", content: "const ok = false;" });
+      return { status: 200, body: JSON.stringify({ path: "src/ok.ts", ok: true }) };
+    });
+
+    await expect(client.writeFile("repo_alpha", "src/ok.ts", "const ok = false;")).resolves.toBeUndefined();
+  });
 });

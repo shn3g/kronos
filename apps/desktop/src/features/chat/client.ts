@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { DESKTOP_CLIENT_VERSION } from "../../api/kronosClient";
 import { requestEngineJson, type EngineJsonResponse } from "../../engine/transport";
 
 export interface ChatCitation {
@@ -10,12 +11,12 @@ export interface ChatCitation {
 
 export interface ConversationSummary {
   id: string;
-  repositoryId: string;
+  repositoryId: string | null;
   title: string;
   createdAt: string;
 }
 
-export type ChatRole = "user" | "assistant" | "system";
+export type ChatRole = "user" | "assistant" | "system" | "tool";
 
 export interface ChatMessage {
   id: string;
@@ -23,6 +24,10 @@ export interface ChatMessage {
   content: string;
   citations: ChatCitation[];
   goalRefs: string[];
+  toolName: string | null;
+  toolStatus: string | null;
+  toolJson: string | null;
+  previewUrls?: string[];
 }
 
 export interface ConversationDetail {
@@ -36,6 +41,34 @@ export interface GoalSnippet {
   title: string;
 }
 
+export interface ChatImagePayload {
+  mime: string;
+  data: string;
+}
+
+export interface ChatReadinessCheck {
+  id: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface ChatToolEvent {
+  id: string;
+  name: string;
+  status: string;
+  args?: Record<string, unknown>;
+  summary?: string;
+  output?: string;
+}
+
+export interface ChatGoalEvent {
+  id: string;
+  state: string;
+  canExecute: boolean;
+  readiness: ChatReadinessCheck[];
+}
+
 export interface ChatStreamDone {
   content: string;
   citations: ChatCitation[];
@@ -44,19 +77,24 @@ export interface ChatStreamDone {
 
 export interface ChatStreamHandlers {
   requestId: string;
+  images?: readonly ChatImagePayload[];
   onDelta: (delta: string) => void;
+  onTool?: (tool: ChatToolEvent) => void;
+  onGoal?: (goal: ChatGoalEvent) => void;
   onDone: (result: ChatStreamDone) => void;
   onError: (message: string) => void;
 }
 
 export interface EngineStreamPayload {
-  requestId: string;
+  requestId?: string;
   delta?: string;
   done: boolean;
   error?: string;
   content?: string;
   citations?: ChatCitation[];
   goalRefs?: string[];
+  tool?: unknown;
+  goal?: unknown;
 }
 
 export interface EngineStreamTransport {
@@ -71,8 +109,8 @@ export interface EngineStreamTransport {
 }
 
 export interface ChatClient {
-  listConversations(repositoryId: string): Promise<ConversationSummary[]>;
-  createConversation(repositoryId: string, title?: string): Promise<ConversationSummary>;
+  listConversations(repositoryId: string | null): Promise<ConversationSummary[]>;
+  createConversation(repositoryId: string | null, title?: string): Promise<ConversationSummary>;
   getConversation(id: string): Promise<ConversationDetail>;
   deleteConversation(id: string): Promise<void>;
   streamMessage(
@@ -80,32 +118,48 @@ export interface ChatClient {
     content: string,
     handlers: ChatStreamHandlers,
   ): Promise<void>;
-  cancelStream(requestId: string): Promise<void>;
+  cancelStream(conversationId: string, requestId: string): Promise<void>;
   getGoal(id: string): Promise<GoalSnippet>;
+  getImage(conversationId: string, imageId: string): Promise<ChatImagePayload>;
 }
+
+const WEB_ENGINE_BASE = "/kronos-engine";
 
 export function createProductionChatClient(options: {
   request?: (method: string, path: string, body?: unknown) => Promise<EngineJsonResponse>;
   stream?: EngineStreamTransport;
+  fetchImpl?: typeof fetch;
+  webBase?: string;
 } = {}): ChatClient {
   const request = options.request ?? requestEngineJson;
   const stream = options.stream ?? tauriStreamTransport();
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const webBase = (options.webBase ?? WEB_ENGINE_BASE).replace(/\/$/, "");
+  const abortByRequest = new Map<string, AbortController>();
   return {
     async listConversations(repositoryId) {
-      const payload = await jsonRequest(
-        request,
-        "GET",
-        `/repositories/${repositoryId}/conversations`,
-      );
+      const path =
+        repositoryId === null
+          ? "/conversations"
+          : `/repositories/${repositoryId}/conversations`;
+      const payload = await jsonRequest(request, "GET", path);
       const items = Array.isArray(payload.conversations) ? payload.conversations : [];
       return items.map(mapConversation);
     },
     async createConversation(repositoryId, title) {
+      const conversationTitle = title ?? "New conversation";
+      if (repositoryId === null) {
+        const payload = await jsonRequest(request, "POST", "/conversations", {
+          repository_id: null,
+          title: conversationTitle,
+        });
+        return mapConversation(payload);
+      }
       const payload = await jsonRequest(
         request,
         "POST",
         `/repositories/${repositoryId}/conversations`,
-        { title: title ?? "New conversation" },
+        { title: conversationTitle },
       );
       return mapConversation(payload);
     },
@@ -121,40 +175,38 @@ export function createProductionChatClient(options: {
       await jsonRequest(request, "DELETE", `/conversations/${id}`);
     },
     async streamMessage(conversationId, content, handlers) {
+      const body: Record<string, unknown> = { content };
+      if (handlers.images && handlers.images.length > 0) {
+        body.images = handlers.images;
+      }
+      const args = {
+        method: "POST",
+        path: `/conversations/${conversationId}/messages`,
+        body,
+        requestId: handlers.requestId,
+      };
       const unlisten = await stream.listen((payload) => {
-        if (payload.requestId !== handlers.requestId) {
+        if (payload.requestId && payload.requestId !== handlers.requestId) {
           return;
         }
-        if (payload.delta) {
-          handlers.onDelta(payload.delta);
-        }
-        if (payload.error) {
-          handlers.onError(payload.error);
-          return;
-        }
-        if (payload.done) {
-          handlers.onDone({
-            content: payload.content ?? "",
-            citations: payload.citations ?? [],
-            goalRefs: payload.goalRefs ?? [],
-          });
-        }
+        dispatchStreamPayload(payload, handlers);
       });
       try {
-        await stream.start({
-          method: "POST",
-          path: `/conversations/${conversationId}/messages`,
-          body: { content },
-          requestId: handlers.requestId,
-        });
-      } catch {
-        handlers.onError("Could not stream the orchestrator reply.");
+        try {
+          await stream.start(args);
+        } catch {
+          await fetchSseFallback(fetchImpl, webBase, args, handlers, abortByRequest);
+        }
       } finally {
         unlisten();
+        abortByRequest.delete(handlers.requestId);
       }
     },
-    async cancelStream(requestId) {
+    async cancelStream(conversationId, requestId) {
+      abortByRequest.get(requestId)?.abort();
+      abortByRequest.delete(requestId);
       await stream.cancel(requestId);
+      await jsonRequest(request, "POST", `/conversations/${conversationId}/cancel`, {});
     },
     async getGoal(id) {
       const payload = await jsonRequest(request, "GET", `/goals/${id}`);
@@ -165,7 +217,177 @@ export function createProductionChatClient(options: {
         title: stringField(goal, "title"),
       };
     },
+    async getImage(conversationId, imageId) {
+      const payload = await jsonRequest(
+        request,
+        "GET",
+        `/conversations/${conversationId}/images/${imageId}`,
+      );
+      return {
+        mime: stringField(payload, "mime"),
+        data: stringField(payload, "data"),
+      };
+    },
   };
+}
+
+export function parseEngineSseDataLine(line: string): EngineStreamPayload | null {
+  const trimmed = line.trimEnd().replace(/\r$/, "");
+  if (!trimmed.startsWith("data:")) {
+    return null;
+  }
+  const data = trimmed.slice(5).trim();
+  if (data === "" || data === "[DONE]") {
+    return null;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(data);
+  } catch {
+    return null;
+  }
+  const record = asRecord(value);
+  if (typeof record.tool !== "undefined") {
+    return { done: false, tool: record.tool };
+  }
+  if (typeof record.goal !== "undefined") {
+    return { done: false, goal: record.goal };
+  }
+  if (typeof record.error === "string") {
+    return { done: true, error: record.error };
+  }
+  const done = record.done === true || (typeof record.content === "string" && "citations" in record);
+  if (done) {
+    const citations = Array.isArray(record.citations) ? record.citations : [];
+    const goalRefs = Array.isArray(record.goal_refs)
+      ? record.goal_refs
+      : Array.isArray(record.goalRefs)
+        ? record.goalRefs
+        : [];
+    return {
+      done: true,
+      content: typeof record.content === "string" ? record.content : "",
+      citations: citations.map(mapCitation),
+      goalRefs: goalRefs.filter((item): item is string => typeof item === "string"),
+    };
+  }
+  if (typeof record.delta === "string") {
+    return { done: false, delta: record.delta };
+  }
+  return null;
+}
+
+function dispatchStreamPayload(payload: EngineStreamPayload, handlers: ChatStreamHandlers): void {
+  if (payload.delta) {
+    handlers.onDelta(payload.delta);
+  }
+  if (typeof payload.tool !== "undefined") {
+    handlers.onTool?.(mapToolEvent(payload.tool));
+  }
+  if (typeof payload.goal !== "undefined") {
+    handlers.onGoal?.(mapGoalEvent(payload.goal));
+  }
+  if (payload.error) {
+    handlers.onError(payload.error);
+    return;
+  }
+  if (payload.done) {
+    handlers.onDone({
+      content: payload.content ?? "",
+      citations: payload.citations ?? [],
+      goalRefs: payload.goalRefs ?? [],
+    });
+  }
+}
+
+async function fetchSseFallback(
+  fetchImpl: typeof fetch,
+  webBase: string,
+  args: { method: string; path: string; body: unknown; requestId: string },
+  handlers: ChatStreamHandlers,
+  abortByRequest: Map<string, AbortController>,
+): Promise<void> {
+  const controller = new AbortController();
+  abortByRequest.set(args.requestId, controller);
+  let response: Response;
+  try {
+    response = await fetchImpl(`${webBase}${args.path}`, {
+      method: args.method,
+      headers: {
+        Accept: "text/event-stream",
+        "Content-Type": "application/json",
+        "X-Kronos-Client-Version": DESKTOP_CLIENT_VERSION,
+      },
+      body: JSON.stringify(args.body),
+      signal: controller.signal,
+    });
+  } catch {
+    if (controller.signal.aborted) {
+      return;
+    }
+    handlers.onError("Could not stream the orchestrator reply.");
+    return;
+  }
+  if (!response.ok) {
+    handlers.onError("Could not stream the orchestrator reply.");
+    return;
+  }
+  const streamBody = response.body;
+  if (!streamBody) {
+    const text = await response.text();
+    dispatchSseBuffer(text, handlers);
+    return;
+  }
+  const reader = streamBody.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) {
+        buffer += decoder.decode();
+        dispatchSseBuffer(buffer, handlers);
+        break;
+      }
+      buffer += decoder.decode(next.value, { stream: true });
+      const split = splitSseBuffer(buffer);
+      buffer = split.rest;
+      for (const line of split.lines) {
+        const payload = parseEngineSseDataLine(line);
+        if (payload) {
+          dispatchStreamPayload(payload, handlers);
+        }
+      }
+    }
+  } catch {
+    if (!controller.signal.aborted) {
+      handlers.onError("Could not stream the orchestrator reply.");
+    }
+  }
+}
+
+function splitSseBuffer(buffer: string): { lines: string[]; rest: string } {
+  const lines: string[] = [];
+  let rest = buffer;
+  while (true) {
+    const index = rest.indexOf("\n");
+    if (index === -1) {
+      break;
+    }
+    lines.push(rest.slice(0, index));
+    rest = rest.slice(index + 1);
+  }
+  return { lines, rest };
+}
+
+function dispatchSseBuffer(buffer: string, handlers: ChatStreamHandlers): void {
+  const split = splitSseBuffer(buffer.endsWith("\n") ? buffer : `${buffer}\n`);
+  for (const line of split.lines) {
+    const payload = parseEngineSseDataLine(line);
+    if (payload) {
+      dispatchStreamPayload(payload, handlers);
+    }
+  }
 }
 
 function tauriStreamTransport(): EngineStreamTransport {
@@ -222,7 +444,7 @@ function mapConversation(raw: unknown): ConversationSummary {
   const item = asRecord(raw);
   return {
     id: stringField(item, "id"),
-    repositoryId: stringField(item, "repository_id"),
+    repositoryId: stringOrNull(item.repository_id),
     title: stringField(item, "title"),
     createdAt: stringField(item, "created_at"),
   };
@@ -242,6 +464,9 @@ function mapMessage(raw: unknown): ChatMessage {
     content: stringField(item, "content"),
     citations: citations.map(mapCitation),
     goalRefs: goalRefs.filter((value): value is string => typeof value === "string"),
+    toolName: stringOrNull(item.tool_name),
+    toolStatus: stringOrNull(item.tool_status),
+    toolJson: stringOrNull(item.tool_json),
   };
 }
 
@@ -256,8 +481,40 @@ function mapCitation(raw: unknown): ChatCitation {
   };
 }
 
+function mapToolEvent(raw: unknown): ChatToolEvent {
+  const item = asRecord(raw);
+  const args = asRecord(item.args);
+  return {
+    id: stringField(item, "id"),
+    name: stringField(item, "name"),
+    status: stringField(item, "status"),
+    ...(Object.keys(args).length > 0 ? { args } : {}),
+    ...(typeof item.summary === "string" ? { summary: item.summary } : {}),
+    ...(typeof item.output === "string" ? { output: item.output } : {}),
+  };
+}
+
+function mapGoalEvent(raw: unknown): ChatGoalEvent {
+  const item = asRecord(raw);
+  const readinessRaw = Array.isArray(item.readiness) ? item.readiness : [];
+  return {
+    id: stringField(item, "id"),
+    state: stringField(item, "state"),
+    canExecute: item.can_execute === true || item.canExecute === true,
+    readiness: readinessRaw.map((row) => {
+      const check = asRecord(row);
+      return {
+        id: stringField(check, "id"),
+        label: stringField(check, "label"),
+        ok: check.ok === true,
+        detail: stringField(check, "detail"),
+      };
+    }),
+  };
+}
+
 function parseRole(value: unknown): ChatRole {
-  if (value === "user" || value === "assistant" || value === "system") {
+  if (value === "user" || value === "assistant" || value === "system" || value === "tool") {
     return value;
   }
   return "assistant";
@@ -270,4 +527,8 @@ function asRecord(value: unknown): Record<string, unknown> {
 function stringField(record: Record<string, unknown>, key: string): string {
   const value = record[key];
   return typeof value === "string" ? value : "";
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
 }

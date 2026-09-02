@@ -49,6 +49,7 @@ export interface RepositoriesClient {
   disable(id: string): Promise<EnrolledRepository>;
   resume(id: string): Promise<EnrolledRepository>;
   listChanges(id: string): Promise<WorkspaceFileChange[]>;
+  writeFile(id: string, path: string, content: string): Promise<void>;
 }
 
 export async function pickRepositoryFolder(): Promise<string | null> {
@@ -98,6 +99,9 @@ export function createProductionRepositoriesClient(
       const payload = await jsonRequest(request, "GET", `/repositories/${id}/changes`);
       const changes = Array.isArray(payload.changes) ? payload.changes : [];
       return changes.map(mapChange);
+    },
+    async writeFile(id: string, path: string, content: string) {
+      await jsonRequest(request, "PUT", `/repositories/${id}/files/contents`, { path, content });
     },
   };
 }
