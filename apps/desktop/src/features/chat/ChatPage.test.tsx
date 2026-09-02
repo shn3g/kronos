@@ -504,6 +504,7 @@ describe("ChatPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Local llama" }));
     await user.click(await screen.findByRole("menuitem", { name: "Hosted gpt" }));
+    expect(assign).toHaveBeenCalledTimes(1);
     expect(assign).toHaveBeenCalledWith({
       orchestrator: "prof_other",
       planner: "prof_plan",
@@ -511,6 +512,51 @@ describe("ChatPage", () => {
       reviewer: "prof_rev",
       embedding: "prof_emb",
     });
+  });
+
+  it("does not fill other roles from the selected orchestrator profile", async () => {
+    const user = userEvent.setup();
+    const assign = vi.fn(async (assignments: RoleAssignments) => assignments);
+    render(
+      <ChatPage
+        chatClient={chatClient()}
+        repositoryId={null}
+        historyOpen={false}
+        orchestratorName="Local llama"
+        modelsClient={modelsClient({
+          snapshot: async () => ({
+            detected: [],
+            profiles: [
+              {
+                id: "prof_local",
+                displayName: "Local llama",
+                role: "orchestrator",
+                billed: false,
+                modelId: "llama3",
+                limits: EMPTY_LIMITS,
+              },
+              {
+                id: "prof_other",
+                displayName: "Hosted gpt",
+                role: "orchestrator",
+                billed: true,
+                modelId: "gpt-4o-mini",
+                limits: { ...EMPTY_LIMITS, contextWindow: 8_000 },
+              },
+            ],
+            assignments: { ...emptyAssignments(), planner: null },
+            embeddingBackend: embeddingBackend(),
+          }),
+          assign,
+        })}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Local llama" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Hosted gpt" }));
+    expect(assign).not.toHaveBeenCalled();
+    expect(await screen.findByText(/could not switch the orchestrator/i)).toBeInTheDocument();
   });
 
   it("opens Connect a model as a dialog from the switcher", async () => {

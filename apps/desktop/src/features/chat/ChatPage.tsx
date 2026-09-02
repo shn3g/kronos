@@ -490,21 +490,27 @@ export function ChatPage({
       return;
     }
     setModelMenuOpen(false);
-    const next: RoleAssignments = {
+    const planner = assignments.planner;
+    const coder = assignments.coder;
+    const reviewer = assignments.reviewer;
+    const embedding = assignments.embedding;
+    if (!planner || !coder || !reviewer || !embedding) {
+      setError("Could not switch the orchestrator model. Try again.");
+      return;
+    }
+    const selected = profiles.find((item) => item.id === profileId);
+    const payload = {
       orchestrator: profileId,
-      planner: assignments.planner ?? profileId,
-      coder: assignments.coder ?? profileId,
-      reviewer: assignments.reviewer ?? profileId,
-      embedding: assignments.embedding ?? profileId,
+      planner,
+      coder,
+      reviewer,
+      embedding,
     };
     try {
-      const saved = await modelsClient.assign({
-        orchestrator: next.orchestrator ?? profileId,
-        planner: next.planner ?? profileId,
-        coder: next.coder ?? profileId,
-        reviewer: next.reviewer ?? profileId,
-        embedding: next.embedding ?? profileId,
-      });
+      const saved =
+        selected && selected.role !== "orchestrator"
+          ? await modelsClient.assign(payload, { confirmSharedRoles: true })
+          : await modelsClient.assign(payload);
       applySnapshot(profiles, saved);
     } catch {
       setError("Could not switch the orchestrator model. Try again.");
