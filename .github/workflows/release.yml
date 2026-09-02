@@ -88,11 +88,11 @@ jobs:
           fi
 
       - name: Build desktop artifact
+        working-directory: apps/desktop
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        shell: bash
-        run: bash scripts/tauri-ci-build.sh ${{ matrix.bundle }}
+        run: pnpm tauri build --bundles ${{ matrix.bundle }}
 
       - name: Record Darwin updater architecture
         if: runner.os == 'macOS'
@@ -164,16 +164,15 @@ jobs:
               *.app.tar.gz) cp "$file" "upload/$(basename "$file")" ;;
             esac
           done < <(find dist -type f \( -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.app.tar.gz' \) -print0)
+          if [ -d upload ]; then
+            (cd upload && sha256sum -- * > SHA256SUMS)
+          fi
           python3 scripts/release-latest-json.py \
             --artifacts dist \
             --version "${TAG#v}" \
             --changelog CHANGELOG.md \
             --release-base-url "https://github.com/${{ github.repository }}/releases/download/${TAG}" \
-            --output upload/latest.json \
-            --allow-missing-signatures
-          if [ -d upload ]; then
-            (cd upload && sha256sum -- * > SHA256SUMS)
-          fi
+            --output upload/latest.json
           mapfile -t assets < <(find upload -type f)
           if [ "${#assets[@]}" -eq 0 ]; then
             echo "no installer assets to publish"

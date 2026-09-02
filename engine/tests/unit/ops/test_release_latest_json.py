@@ -83,30 +83,6 @@ def test_darwin_arch_marker_overrides_default_flag(tmp_path: Path) -> None:
     assert "darwin-aarch64" not in platforms
 
 
-def test_allow_missing_signatures_omits_latest_json(tmp_path: Path) -> None:
-    artifacts = tmp_path / "bundle"
-    nsis = artifacts / "nsis"
-    nsis.mkdir(parents=True)
-    (nsis / "Kronos_0.5.0_x64-setup.exe").write_bytes(b"nsis")
-    out = tmp_path / "latest.json"
-
-    exit_code = main(
-        [
-            "--artifacts",
-            str(artifacts),
-            "--version",
-            "0.5.0",
-            "--release-base-url",
-            "https://example.test",
-            "--output",
-            str(out),
-            "--allow-missing-signatures",
-        ]
-    )
-    assert exit_code == 0
-    assert not out.is_file()
-
-
 def test_missing_signature_fails_closed(tmp_path: Path) -> None:
     artifacts = tmp_path / "bundle"
     nsis = artifacts / "nsis"

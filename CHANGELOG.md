@@ -23,10 +23,6 @@ One-click install, agent chat, local embeddings, and signed in-app updates (fail
 - README and quickstart Install sections describe download, run, and connect a model. Dev PATH engines should still match the desktop version.
 - Threat model documents embedding downloads and the in-app updater (pinned URLs, SHA-256, minisign pubkey, fail-closed empty pubkey). Unsigned SmartScreen/Gatekeeper warnings remain.
 
-### Fixed
-
-- Release and desktop CI skip updater artifact signing when `TAURI_SIGNING_PRIVATE_KEY` is unset, so installers still publish. `latest.json` is omitted until signatures exist.
-
 ## [0.4.0] - 2026-09-02
 
 Workbench: Files editor, Changes revert/commit, Health, Terminal, Goals workbench, and full-stack Playwright on Linux CI. Not one-click yet (no bundled engine, embeddings installer, or updater - those are 0.5.0).

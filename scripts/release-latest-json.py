@@ -123,11 +123,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", default="latest.json")
     parser.add_argument("--darwin-arch", default="aarch64")
     parser.add_argument(
-        "--allow-missing-signatures",
-        action="store_true",
-        help="Exit 0 without writing latest.json when updater signatures are absent",
-    )
-    parser.add_argument(
         "--pub-date",
         default=datetime.now(tz=UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     )
@@ -154,12 +149,6 @@ def main(argv: list[str] | None = None) -> int:
         )
     except MissingSignatureError as error:
         print(str(error), file=sys.stderr)
-        if args.allow_missing_signatures:
-            print(
-                "omitting latest.json (updater signatures are required for in-app updates)",
-                file=sys.stderr,
-            )
-            return 0
         return 1
 
     payload = build_latest_json(
