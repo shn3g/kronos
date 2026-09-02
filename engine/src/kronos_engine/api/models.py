@@ -435,6 +435,7 @@ class OpsSettingsRequest(BaseModel):
 
 class ConversationCreateRequest(BaseModel):
     title: str = "New conversation"
+    repository_id: str | None = None
 
 
 class ConversationModel(BaseModel):
@@ -457,6 +458,9 @@ class ConversationMessageModel(BaseModel):
     model: str | None = None
     token_count: int | None = None
     created_at: str
+    tool_name: str | None = None
+    tool_status: str | None = None
+    tool_json: str | None = None
 
 
 class ConversationDetailResponse(BaseModel):
@@ -464,5 +468,28 @@ class ConversationDetailResponse(BaseModel):
     messages: list[ConversationMessageModel]
 
 
+class ChatImagePayload(BaseModel):
+    mime: str
+    data: str
+
+
 class ChatMessageRequest(BaseModel):
-    content: str
+    content: str = ""
+    images: list[ChatImagePayload] | None = None
+
+
+class ChatImageResponse(BaseModel):
+    mime: str
+    data: str
+
+
+class GoalReadinessCheckModel(BaseModel):
+    id: str
+    label: str
+    ok: bool
+    detail: str
+
+
+class GoalReadinessResponse(BaseModel):
+    checks: list[GoalReadinessCheckModel]
+    can_execute: bool

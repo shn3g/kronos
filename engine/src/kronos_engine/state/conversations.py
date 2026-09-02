@@ -89,6 +89,21 @@ class SqliteConversationStore:
             for row in rows
         )
 
+    def list_all(self) -> Sequence[ConversationRecord]:
+        rows = self._conn.execute(
+            "SELECT id, repository_id, title, created_at FROM conversations "
+            "ORDER BY created_at, id"
+        ).fetchall()
+        return tuple(
+            ConversationRecord(
+                id=row["id"],
+                repository_id=row["repository_id"],
+                title=row["title"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        )
+
     def delete(self, conversation_id: str) -> None:
         self.get(conversation_id)
         self._conn.execute(
@@ -151,6 +166,52 @@ class SqliteConversationStore:
         )
         self._conn.commit()
         return record
+
+    def update_message(
+        self,
+        message_id: str,
+        *,
+        content: str,
+        tool_status: str | None = None,
+        citations: Sequence[dict[str, object]] | None = None,
+        goal_refs: Sequence[str] | None = None,
+        model: str | None = None,
+        token_count: int | None = None,
+    ) -> None:
+        row = self._conn.execute(
+            "SELECT * FROM conversation_messages WHERE id = ?",
+            (message_id,),
+        ).fetchone()
+        if row is None:
+            raise LookupError(f"message not found: {message_id}")
+        citations_json = (
+            json.dumps([dict(item) for item in citations])
+            if citations is not None
+            else row["citations_json"]
+        )
+        refs_json = json.dumps(list(goal_refs)) if goal_refs is not None else row["goal_refs_json"]
+        self._conn.execute(
+            """
+            UPDATE conversation_messages
+            SET content = ?, tool_status = ?, citations_json = ?, goal_refs_json = ?,
+                model = ?, token_count = ?
+            WHERE id = ?
+            """,
+            (
+                content,
+                tool_status,
+                citations_json,
+                refs_json,
+                model if model is not None else row["model"],
+                token_count if token_count is not None else row["token_count"],
+                message_id,
+            ),
+        )
+        self._conn.commit()
+
+    def delete_message(self, message_id: str) -> None:
+        self._conn.execute("DELETE FROM conversation_messages WHERE id = ?", (message_id,))
+        self._conn.commit()
 
     def list_messages(self, conversation_id: str) -> Sequence[ConversationMessage]:
         rows = self._conn.execute(

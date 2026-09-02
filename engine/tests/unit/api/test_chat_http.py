@@ -16,7 +16,12 @@ from kronos_engine.adapters.secrets.os_store import SecretStoreError
 from kronos_engine.api.app import create_app
 from kronos_engine.config.paths import resolve_paths
 from kronos_engine.config.settings import Settings
+from kronos_engine.ports.model_provider import CompletionRequest, CompletionResult, TokenUsage
 from kronos_engine.state.database import Database
+
+TINY_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -280,3 +285,217 @@ async def _read_sse(response: object) -> dict[str, object]:
             final = parsed
     assert final is not None
     return final
+
+
+def _scripted(replies: list[str]):
+    remaining = list(replies)
+
+    def complete(request: CompletionRequest, secret: object) -> CompletionResult:
+        _ = request, secret
+        return CompletionResult(text=remaining.pop(0), usage=TokenUsage(tokens=3))
+
+    return complete
+
+
+async def _assign_orchestrator(http: AsyncClient, headers: dict[str, str]) -> None:
+    provider = await http.post(
+        "/models/providers",
+        headers=headers,
+        json={
+            "kind": "openai_compatible",
+            "display_name": "Local",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "billed": False,
+            "api_key": "sk-chat",
+        },
+    )
+    assert provider.status_code == 200
+    profiles = {item["role"]: item["id"] for item in provider.json()["profiles"]}
+    assigned = await http.put("/models/assignments", headers=headers, json=profiles)
+    assert assigned.status_code == 200
+
+
+async def _read_all_sse(response: object) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = []
+    aiter_lines = getattr(response, "aiter_lines")
+    async for line in aiter_lines():
+        if not line.startswith("data:"):
+            continue
+        raw = line[5:].strip()
+        if not raw or raw == "[DONE]":
+            continue
+        parsed: object = json.loads(raw)
+        if isinstance(parsed, dict):
+            events.append(parsed)
+    return events
+
+
+@pytest.mark.asyncio
+async def test_sse_tool_running_then_ok_then_deltas_then_done(tmp_path: Path) -> None:
+    database = Database(tmp_path / "data" / "kronos.sqlite3")
+    app = create_app(
+        _settings(tmp_path),
+        database,
+        secret_store=InMemorySecretStore(),
+        chat_complete=_scripted(
+            [
+                '```tool\n{"name": "list_goals"}\n```',
+                "No goals yet.",
+            ]
+        ),
+    )
+    http = AsyncClient(
+        transport=ASGITransport(app=app, client=("127.0.0.1", 50000)),
+        base_url="http://127.0.0.1",
+    )
+    headers = {"Authorization": "Bearer install-token"}
+    try:
+        created = await http.post("/conversations", json={"repository_id": None}, headers=headers)
+        assert created.status_code == 200
+        cid = created.json()["id"]
+        assert created.json()["repository_id"] is None
+        await _assign_orchestrator(http, headers)
+        async with http.stream(
+            "POST",
+            f"/conversations/{cid}/messages",
+            json={"content": "list them"},
+            headers=headers,
+        ) as response:
+            assert response.status_code == 200
+            events = await _read_all_sse(response)
+        kinds = []
+        for item in events:
+            if "tool" in item:
+                tool = item["tool"]
+                assert isinstance(tool, dict)
+                kinds.append(("tool", str(tool.get("status"))))
+            elif "delta" in item:
+                kinds.append(("delta",))
+            elif item.get("done") is True:
+                kinds.append(("done",))
+            elif "goal" in item:
+                kinds.append(("goal",))
+            elif "error" in item:
+                kinds.append(("error",))
+        assert kinds[0] == ("tool", "running")
+        assert kinds[1] == ("tool", "ok")
+        assert ("delta",) in kinds
+        assert kinds[-1] == ("done",)
+        assert kinds.index(("tool", "running")) < kinds.index(("tool", "ok"))
+        assert kinds.index(("tool", "ok")) < kinds.index(("delta",))
+        assert kinds.index(("delta",)) < kinds.index(("done",))
+        detail = await http.get(f"/conversations/{cid}", headers=headers)
+        assert detail.status_code == 200
+        roles = [item["role"] for item in detail.json()["messages"]]
+        assert "tool" in roles
+        tool = next(item for item in detail.json()["messages"] if item["role"] == "tool")
+        assert tool["tool_name"] == "list_goals"
+        assert tool["tool_status"] == "ok"
+        assert tool["tool_json"]
+    finally:
+        await http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_cancel_route_and_unauth(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    http, headers, tmp_path = client
+    root = init_git_repo(tmp_path / "alpha", files={"README.md": "alpha\n"})
+    repo_id = await _enrol(http, headers, root)
+    created = await http.post(f"/repositories/{repo_id}/conversations", json={}, headers=headers)
+    cid = created.json()["id"]
+    unauth = await http.post(f"/conversations/{cid}/cancel")
+    assert unauth.status_code == 401
+    cancelled = await http.post(f"/conversations/{cid}/cancel", headers=headers)
+    assert cancelled.status_code == 200
+    assert cancelled.json()["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_null_repository_conversation_and_auth(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    http, headers, _tmp_path = client
+    unauth = await http.get("/conversations")
+    assert unauth.status_code == 401
+    created = await http.post(
+        "/conversations", json={"repository_id": None, "title": "Loose"}, headers=headers
+    )
+    assert created.status_code == 200
+    assert created.json()["repository_id"] is None
+    listed = await http.get("/conversations", headers=headers)
+    assert listed.status_code == 200
+    assert any(item["id"] == created.json()["id"] for item in listed.json()["conversations"])
+    missing = await http.get("/conversations/conv_missing/images/img_x", headers=headers)
+    assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_chat_images_route_round_trip(tmp_path: Path) -> None:
+    database = Database(tmp_path / "data" / "kronos.sqlite3")
+    app = create_app(
+        _settings(tmp_path),
+        database,
+        secret_store=InMemorySecretStore(),
+        chat_complete=_scripted(["That is a screenshot."]),
+    )
+    http = AsyncClient(
+        transport=ASGITransport(app=app, client=("127.0.0.1", 50000)),
+        base_url="http://127.0.0.1",
+    )
+    headers = {"Authorization": "Bearer install-token"}
+    try:
+        created = await http.post("/conversations", json={}, headers=headers)
+        cid = created.json()["id"]
+        unauth = await http.get(f"/conversations/{cid}/images/img_missing")
+        assert unauth.status_code == 401
+        empty = await http.post(
+            f"/conversations/{cid}/messages",
+            json={"content": "  "},
+            headers=headers,
+        )
+        assert empty.status_code == 400
+        await _assign_orchestrator(http, headers)
+        async with http.stream(
+            "POST",
+            f"/conversations/{cid}/messages",
+            json={
+                "content": "What is this?",
+                "images": [{"mime": "image/png", "data": TINY_PNG_B64}],
+            },
+            headers=headers,
+        ) as response:
+            assert response.status_code == 200
+            await _read_sse(response)
+        detail = await http.get(f"/conversations/{cid}", headers=headers)
+        user = next(item for item in detail.json()["messages"] if item["role"] == "user")
+        assert "kronos-image:" in user["content"]
+        image_id = user["content"].split("kronos-image:")[1].rstrip(")")
+        loaded = await http.get(f"/conversations/{cid}/images/{image_id}", headers=headers)
+        assert loaded.status_code == 200
+        assert loaded.json()["mime"] == "image/png"
+        assert loaded.json()["data"] == TINY_PNG_B64
+    finally:
+        await http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_goal_readiness_route(
+    client: tuple[AsyncClient, dict[str, str], Path],
+) -> None:
+    http, headers, tmp_path = client
+    unauth_missing = await http.get("/repositories/repo_x/goal-readiness")
+    assert unauth_missing.status_code == 401
+    root = init_git_repo(tmp_path / "alpha", files={"README.md": "alpha\n"})
+    repo_id = await _enrol(http, headers, root)
+    missing = await http.get("/repositories/repo_missing/goal-readiness", headers=headers)
+    assert missing.status_code == 404
+    ready = await http.get(f"/repositories/{repo_id}/goal-readiness", headers=headers)
+    assert ready.status_code == 200
+    body = ready.json()
+    assert "can_execute" in body
+    ids = [item["id"] for item in body["checks"]]
+    assert ids[0] == "workspace_active"
+    assert "models_assigned" in ids
+    assert "budget" in ids

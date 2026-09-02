@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import threading
@@ -27,6 +28,7 @@ from kronos_engine.api.models import (
     AssignmentsResponse,
     AutonomyRequest,
     BackupRequest,
+    ChatImageResponse,
     ChatMessageRequest,
     CommitRequest,
     ConversationCreateRequest,
@@ -51,6 +53,8 @@ from kronos_engine.api.models import (
     GoalIngestRequest,
     GoalListResponse,
     GoalModel,
+    GoalReadinessCheckModel,
+    GoalReadinessResponse,
     GoalTickResponse,
     HealthResponse,
     IndexMapResponse,
@@ -94,7 +98,10 @@ from kronos_engine.api.models import (
 from kronos_engine.application.chat import (
     ChatService,
     ConversationDetail,
+    GoalEvent,
     OrchestratorNotConfigured,
+    ToolEvent,
+    request_cancel,
 )
 from kronos_engine.application.composition import (
     build_goal_engine,
@@ -225,6 +232,8 @@ def create_app(
     skill_source: SkillSourcePort | None = None,
     telegram_transport: TelegramTransport | None = None,
     telegram_auto_poll: bool = False,
+    chat_complete: object | None = None,
+    chat_stream: object | None = None,
 ) -> FastAPI:
     embedding_startup: list[Callable[[], None]] = []
 
@@ -629,7 +638,12 @@ def create_app(
                 SqliteModelRegistry(conn),
                 store,
                 SqliteEventStore(conn),
+                complete=chat_complete,  # type: ignore[arg-type]
+                stream=chat_stream,  # type: ignore[arg-type]
                 embeddings=embeddings,
+                image_root=settings.paths.data / "chat_images",
+                skills_root=chosen_skills_root,
+                forge_for=forge_for,
             )
         finally:
             conn.close()
@@ -995,6 +1009,37 @@ def create_app(
                 conversations=[_conversation_model(item) for item in items]
             )
 
+    @app.post("/conversations", response_model=ConversationModel)
+    def create_conversation_any(
+        body: ConversationCreateRequest,
+        _: None = Depends(require_auth),
+    ) -> ConversationModel:
+        with chat_service() as service:
+            try:
+                created = service.create_conversation(body.repository_id, title=body.title)
+            except (LookupError, IdentifierError) as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return _conversation_model(created)
+
+    @app.get("/conversations", response_model=ConversationListResponse)
+    def list_conversations_any(
+        _: None = Depends(require_auth),
+        repository_id: Annotated[str | None, Query()] = None,
+    ) -> ConversationListResponse:
+        with chat_service() as service:
+            try:
+                if repository_id is None:
+                    items = service.list_all_conversations()
+                elif repository_id == "":
+                    items = service.list_conversations(None)
+                else:
+                    items = service.list_conversations(repository_id)
+            except (LookupError, IdentifierError) as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return ConversationListResponse(
+                conversations=[_conversation_model(item) for item in items]
+            )
+
     @app.get("/conversations/{conversation_id}", response_model=ConversationDetailResponse)
     def get_conversation(
         conversation_id: str, _: None = Depends(require_auth)
@@ -1017,18 +1062,81 @@ def create_app(
                 raise HTTPException(status_code=404, detail="not found") from error
             return {"deleted": True}
 
+    @app.post("/conversations/{conversation_id}/cancel")
+    def cancel_conversation(
+        conversation_id: str, _: None = Depends(require_auth)
+    ) -> dict[str, bool]:
+        with chat_service() as service:
+            try:
+                service.get_conversation(conversation_id)
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+        request_cancel(conversation_id)
+        return {"ok": True}
+
+    @app.get(
+        "/conversations/{conversation_id}/images/{image_id}",
+        response_model=ChatImageResponse,
+    )
+    def get_conversation_image(
+        conversation_id: str,
+        image_id: str,
+        _: None = Depends(require_auth),
+    ) -> ChatImageResponse:
+        with chat_service() as service:
+            try:
+                loaded = service.get_chat_image(conversation_id, image_id)
+            except LookupError as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return ChatImageResponse(
+                mime=loaded.mime,
+                data=base64.b64encode(loaded.data).decode("ascii"),
+            )
+
+    @app.get(
+        "/repositories/{repository_id}/goal-readiness",
+        response_model=GoalReadinessResponse,
+    )
+    def repository_goal_readiness(
+        repository_id: str, _: None = Depends(require_auth)
+    ) -> GoalReadinessResponse:
+        with chat_service() as service:
+            try:
+                report = service.goal_readiness(repository_id)
+            except (LookupError, IdentifierError) as error:
+                raise HTTPException(status_code=404, detail="not found") from error
+            return GoalReadinessResponse(
+                can_execute=report.can_execute,
+                checks=[
+                    GoalReadinessCheckModel(
+                        id=item.id,
+                        label=item.label,
+                        ok=item.ok,
+                        detail=item.detail,
+                    )
+                    for item in report.checks
+                ],
+            )
+
     @app.post("/conversations/{conversation_id}/messages")
     def post_conversation_message(
         conversation_id: str,
         body: ChatMessageRequest,
         _: None = Depends(require_auth),
     ) -> StreamingResponse:
+        images = (
+            [{"mime": item.mime, "data": item.data} for item in body.images]
+            if body.images
+            else None
+        )
         try:
             with chat_service() as service:
                 try:
-                    service.prepare_reply(conversation_id, body.content)
+                    service.prepare_reply(conversation_id, body.content, images=images)
                 except LookupError as error:
                     raise HTTPException(status_code=404, detail="not found") from error
+                except ValueError as error:
+                    raise HTTPException(status_code=400, detail=str(error)) from error
         except (OrchestratorNotConfigured, SecretStoreError, CostCeilingExceeded) as error:
             raise HTTPException(
                 status_code=409, detail=_orchestrator_conflict_detail(error)
@@ -1036,22 +1144,57 @@ def create_app(
 
         def generate() -> Iterator[str]:
             with chat_service() as service:
-                for item in service.stream_message(conversation_id, body.content):
-                    if isinstance(item, str):
-                        yield f"data: {json.dumps({'delta': item})}\n\n"
-                        continue
-                    yield (
-                        "data: "
-                        + json.dumps(
-                            {
-                                "content": item.content,
-                                "citations": list(item.citations),
-                                "goal_refs": list(item.goal_refs),
-                                "done": True,
+                try:
+                    for item in service.stream_message(
+                        conversation_id, body.content, images=images
+                    ):
+                        if isinstance(item, str):
+                            yield f"data: {json.dumps({'delta': item})}\n\n"
+                            continue
+                        if isinstance(item, ToolEvent):
+                            payload: dict[str, object] = {
+                                "id": item.id,
+                                "name": item.name,
+                                "status": item.status,
                             }
+                            if item.status == "running":
+                                payload["args"] = item.args or {}
+                            else:
+                                payload["summary"] = item.summary
+                                payload["output"] = item.output
+                            yield f"data: {json.dumps({'tool': payload})}\n\n"
+                            continue
+                        if isinstance(item, GoalEvent):
+                            yield (
+                                "data: "
+                                + json.dumps(
+                                    {
+                                        "goal": {
+                                            "id": item.id,
+                                            "state": item.state,
+                                            "can_execute": item.can_execute,
+                                            "readiness": [dict(row) for row in item.readiness],
+                                        }
+                                    }
+                                )
+                                + "\n\n"
+                            )
+                            continue
+                        yield (
+                            "data: "
+                            + json.dumps(
+                                {
+                                    "content": item.content,
+                                    "citations": list(item.citations),
+                                    "goal_refs": list(item.goal_refs),
+                                    "done": True,
+                                }
+                            )
+                            + "\n\n"
                         )
-                        + "\n\n"
-                    )
+                except Exception as error:  # noqa: BLE001 — stream ends with an error event
+                    sentence = str(error) or "The model could not finish this turn."
+                    yield f"data: {json.dumps({'error': sentence})}\n\n"
 
         return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -2066,6 +2209,9 @@ def _conversation_detail(detail: ConversationDetail) -> ConversationDetailRespon
                 model=item.model,
                 token_count=item.token_count,
                 created_at=item.created_at,
+                tool_name=item.tool_name,
+                tool_status=item.tool_status,
+                tool_json=item.tool_json,
             )
             for item in detail.messages
         ],

@@ -1,47 +1,114 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Orchestrator chat: cheap answers with citations, draft goals for real work."""
+"""Orchestrator chat: agent loop with tools, citations, and draft goals."""
 
 from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable, Generator, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
+from datetime import UTC, date, datetime
+from pathlib import Path, PurePosixPath
+from threading import Event, Lock
 from typing import Protocol
+from uuid import uuid4
 
-from kronos_engine.adapters.models.openai_compatible import HttpTransport, OpenAICompatibleProvider
+from kronos_engine.adapters.models.openai_compatible import (
+    CompletionCancelled,
+    HttpTransport,
+    OpenAICompatibleProvider,
+)
 from kronos_engine.adapters.secrets.os_store import SecretStoreError
+from kronos_engine.application.chat_images import (
+    ChatImageInput,
+    ChatImagePart,
+    append_image_markers,
+    decode_chat_images,
+    load_chat_image,
+    save_chat_image,
+    split_user_text_and_image_ids,
+    user_message_content_parts,
+)
+from kronos_engine.application.chat_mentions import mentioned_workspace_paths
+from kronos_engine.application.chat_tools import ToolCall, ToolParseError, parse_tool_call
+from kronos_engine.application.chat_workspace_instructions import workspace_instruction_text
+from kronos_engine.application.goal_readiness import GoalReadiness, evaluate_goal_readiness
 from kronos_engine.application.goals import GoalService
 from kronos_engine.application.planning import PlanningService
-from kronos_engine.application.repositories import RepositoryService
-from kronos_engine.domain.entities import RepositoryId
-from kronos_engine.domain.goals import GoalSource, GoalSpec
+from kronos_engine.application.repositories import RepositoryNotFound, RepositoryService
+from kronos_engine.application.safety import evaluate_repository_safety
+from kronos_engine.application.workspace_files import (
+    list_workspace_files,
+    read_workspace_file,
+)
+from kronos_engine.application.workspace_terminal import run_workspace_command
+from kronos_engine.application.workspace_writes import (
+    WorkspaceWriteTooLarge,
+    write_workspace_file,
+)
+from kronos_engine.domain.entities import EnrolledRepository, EventId, RepositoryId
+from kronos_engine.domain.goals import GoalRecord, GoalSource, GoalSpec
 from kronos_engine.domain.models import CostCeilingExceeded, ModelProfile, assert_cost_allowed
 from kronos_engine.indexing.context import ContextPack, assemble_context, estimate_tokens
 from kronos_engine.memory.procedural import retrieve_records
 from kronos_engine.memory.records import MemoryRecord
 from kronos_engine.ports.embedding import EmbeddingPort
 from kronos_engine.ports.event_store import EventStore
+from kronos_engine.ports.forge import GithubAppStatus, GithubConnectionStatus
 from kronos_engine.ports.index_store import IndexedChunk
 from kronos_engine.ports.model_provider import CompletionRequest, CompletionResult
 from kronos_engine.ports.model_registry import ModelRegistry, ProviderConfig
 from kronos_engine.ports.secrets import ScopedSecret, SecretStore
+from kronos_engine.skills.router import route_skills
 from kronos_engine.state.conversations import (
     ConversationMessage,
     ConversationRecord,
     SqliteConversationStore,
 )
+from kronos_engine.state.github_apps import SqliteGithubAppStore
+from kronos_engine.state.goals import SqliteGoalStore
 
-ANSWER_TOKEN_CAP = 1024
-CONTEXT_BUDGET_TOKENS = 2000
+MAX_TOOL_ROUNDS = 10
+MAX_WRITE_CHARS = 200_000
+MAX_RUN_COMMANDS_PER_TURN = 5
+COMMAND_TIMEOUT_SECONDS = 60
+TOOL_OUTPUT_CLIP = 8_000
+MENTION_CLIP = 8_000
 DEFAULT_NON_GOALS = "Do not change unrelated files or skip tests."
 _SECRET_TTL_SECONDS = 60
-_SYSTEM_PROMPT = (
-    "You are the Kronos orchestrator. Answer questions about this repository using the "
-    "packed context. If the user is requesting implementation or other real work, return "
-    'ONLY JSON {"intent":"goal","title":"...","success_criteria":"..."}. Otherwise answer '
-    "in plain language. Never edit files, never call GitHub, and never invent tools."
-)
+STOP_MESSAGE = "Stopped. Ask again when you want to continue."
+NO_WORKSPACE = "No workspace is open. Open a git folder first."
+FENCE_START = "```tool"
+SYSTEM_PROMPT = """You are Kronos, a locally installed coding agent. Answer in plain language.
+When you need a tool, emit only a fenced JSON block:
+
+```tool
+{"name": "search_index", "query": "onboarding"}
+```
+
+Tools: search_index (query), list_files (glob), read_file (path), write_file (path, content),
+run_command (command), search_memory (query), create_goal (title, success_criteria),
+list_goals.
+Stay inside the current workspace. Do not claim you edited files unless write_file succeeded.
+When you show a file in a fenced block, put the path on the fence line, like ts src/app.ts.
+run_command runs in the workspace folder. Prefer tests and local tools. Do not push.
+Follow workspace instructions when they are provided.
+The user may paste screenshots. Use them when they are present.
+If you do not need a tool, reply without a tool fence.
+/goal hands unattended work to the deterministic system.
+You may be shown relevant skill summaries."""
+
+_CANCEL: dict[str, Event] = {}
+_CANCEL_LOCK = Lock()
+
+
+def _cancel_event(conversation_id: str) -> Event:
+    with _CANCEL_LOCK:
+        return _CANCEL.setdefault(conversation_id, Event())
+
+
+def request_cancel(conversation_id: str) -> None:
+    _cancel_event(conversation_id).set()
 
 
 class OrchestratorNotConfigured(RuntimeError):
@@ -60,6 +127,24 @@ class ChatTurn:
     goal_refs: tuple[str, ...]
     model: str | None = None
     token_count: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ToolEvent:
+    id: str
+    name: str
+    status: str
+    args: dict[str, str] | None = None
+    summary: str | None = None
+    output: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class GoalEvent:
+    id: str
+    state: str
+    can_execute: bool
+    readiness: tuple[dict[str, object], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +167,7 @@ class SearchIndexer(Protocol):
 
 CompleteFn = Callable[[CompletionRequest, ScopedSecret | None], CompletionResult]
 StreamFn = Callable[[CompletionRequest, ScopedSecret | None], Iterator[str]]
+ForgeFor = Callable[[EnrolledRepository], object]
 
 
 class ChatService:
@@ -100,6 +186,9 @@ class ChatService:
         stream: StreamFn | None = None,
         transport: HttpTransport | None = None,
         embeddings: EmbeddingPort | None = None,
+        image_root: Path | None = None,
+        skills_root: Path | None = None,
+        forge_for: ForgeFor | None = None,
     ) -> None:
         self._conn = conn
         self._repos = repos
@@ -113,18 +202,29 @@ class ChatService:
         self._stream = stream
         self._transport = transport
         self._embeddings = embeddings
+        self._image_root = image_root
+        self._skills_root = skills_root
+        self._forge_for = forge_for
         self._store = SqliteConversationStore(conn)
+        self._run_commands_this_turn = 0
+        self._tool_seq = 0
+        self._last_pack = ContextPack(items=())
 
     def create_conversation(
-        self, repository_id: str, title: str = "New conversation"
+        self, repository_id: str | None, title: str = "New conversation"
     ) -> ConversationRecord:
-        self._repos.get(RepositoryId(repository_id))
+        if repository_id is not None:
+            self._repos.get(RepositoryId(repository_id))
         label = title.strip() or "New conversation"
         return self._store.create(repository_id, label)
 
-    def list_conversations(self, repository_id: str) -> Sequence[ConversationRecord]:
-        self._repos.get(RepositoryId(repository_id))
+    def list_conversations(self, repository_id: str | None) -> Sequence[ConversationRecord]:
+        if repository_id is not None:
+            self._repos.get(RepositoryId(repository_id))
         return self._store.list_for_repository(repository_id)
+
+    def list_all_conversations(self) -> Sequence[ConversationRecord]:
+        return self._store.list_all()
 
     def get_conversation(self, conversation_id: str) -> ConversationDetail:
         conversation = self._store.get(conversation_id)
@@ -137,100 +237,236 @@ class ChatService:
     def delete_conversation(self, conversation_id: str) -> None:
         self._store.delete(conversation_id)
 
-    def prepare_reply(self, conversation_id: str, content: str) -> None:
+    def goal_readiness(self, repository_id: str) -> GoalReadiness:
+        record = self._repos.get(RepositoryId(repository_id))
+        return self._readiness(record)
+
+    def get_chat_image(self, conversation_id: str, image_id: str) -> ChatImageInput:
+        self._store.get(conversation_id)
+        if self._image_root is None:
+            raise LookupError("chat image not found")
+        return load_chat_image(self._image_root, conversation_id, image_id)
+
+    def prepare_reply(
+        self,
+        conversation_id: str,
+        content: str,
+        *,
+        images: Sequence[Mapping[str, str]] | None = None,
+    ) -> None:
         self._store.get(conversation_id)
         if _slash_goal_body(content) is not None:
             return
+        payloads = tuple(images or ())
+        decoded = decode_chat_images(payloads) if payloads else ()
+        if content.strip() == "" and not decoded:
+            raise ValueError("message is required")
         self._require_orchestrator(cap_tokens=True)
 
-    def handle_message(self, conversation_id: str, content: str) -> ChatTurn:
+    def handle_message(
+        self,
+        conversation_id: str,
+        content: str,
+        *,
+        images: Sequence[Mapping[str, str]] | None = None,
+    ) -> ChatTurn:
         final: ChatTurn | None = None
-        for item in self.stream_message(conversation_id, content):
+        for item in self.stream_message(conversation_id, content, images=images):
             if isinstance(item, ChatTurn):
                 final = item
         if final is None:
             raise RuntimeError("chat turn did not complete")
         return final
 
-    def stream_message(self, conversation_id: str, content: str) -> Iterator[str | ChatTurn]:
+    def stream_message(
+        self,
+        conversation_id: str,
+        content: str,
+        *,
+        images: Sequence[Mapping[str, str]] | None = None,
+    ) -> Iterator[str | ToolEvent | GoalEvent | ChatTurn]:
         conversation = self._store.get(conversation_id)
         self._sync_progress(conversation_id)
-        history = [
-            item
-            for item in self._store.list_messages(conversation_id)
-            if item.role in {"user", "assistant", "system"}
-        ]
-        self._store.add_message(conversation_id, role="user", content=content)
+        payloads = tuple(images or ())
+        decoded = decode_chat_images(payloads) if payloads else ()
+        text = content.strip()
+        if text == "" and not decoded:
+            raise ValueError("message is required")
+        if decoded and self._image_root is None:
+            raise ValueError("image storage is not configured")
+        refs = (
+            tuple(save_chat_image(self._image_root, conversation_id, item) for item in decoded)
+            if self._image_root is not None and decoded
+            else ()
+        )
+        stored = append_image_markers(text, refs)
+        self._store.add_message(conversation_id, role="user", content=stored)
         slash_body = _slash_goal_body(content)
         if slash_body is not None:
-            turn = self._create_goal_turn(conversation, *_title_and_criteria(slash_body))
-            if turn.content:
-                yield turn.content
-            self._persist_assistant(conversation_id, turn)
-            yield turn
+            yield from self._yield_goal_handoff(conversation, *_title_and_criteria(slash_body))
             return
         provider, profile, secret = self._require_orchestrator(cap_tokens=True)
-        pack = self._indexer.search(
-            _repository_id(conversation),
-            content,
-            mode="hybrid",
-            budget_tokens=CONTEXT_BUDGET_TOKENS,
-        )
-        memories = retrieve_records(self._conn, content, self._embeddings)
-        packed = _merge_memory(pack, memories)
-        request = CompletionRequest(
-            profile=profile,
-            prompt=content,
-            messages=_completion_messages(history, content, packed),
-        )
-        usage: int | None = None
-        streamed = False
-        if self._complete is not None:
-            result = self._complete(request, secret)
-            usage = result.usage.tokens
-            raw = result.text
-        else:
-            raw, streamed = yield from _emit_plain_deltas(
-                self._iter_model_tokens(provider, request, secret)
+        cancel = _cancel_event(conversation_id)
+        cancel.clear()
+        self._run_commands_this_turn = 0
+        self._tool_seq = 0
+        yield from self._run_agent(conversation, profile, provider, secret, cancel)
+
+    def _run_agent(
+        self,
+        conversation: ConversationRecord,
+        profile: ModelProfile,
+        provider: ProviderConfig,
+        secret: ScopedSecret | None,
+        cancel: Event,
+    ) -> Iterator[str | ToolEvent | GoalEvent | ChatTurn]:
+        window = profile.limits.context_window or 32_000
+        budget = min(8000, window // 5)
+        for _ in range(MAX_TOOL_ROUNDS):
+            if cancel.is_set():
+                yield from self._finish_stop(conversation.id, "", None)
+                return
+            query = _latest_user_text(self._store.list_messages(conversation.id))
+            pack = self._context_pack(conversation, query, budget)
+            self._last_pack = pack
+            system = self._system_prompt(conversation, query, pack)
+            history = _trim_history(
+                self._store.list_messages(conversation.id),
+                window=window,
+                budget=budget,
+                max_tokens=profile.limits.max_tokens,
+                system=system,
             )
-        envelope = _parse_envelope(raw)
-        if envelope is not None and envelope.get("intent") == "goal":
-            title = _string_field(envelope, "title") or _title_and_criteria(content)[0]
-            criteria = _string_field(envelope, "success_criteria") or content
-            turn = self._create_goal_turn(conversation, title, criteria)
-            turn = replace(turn, model=profile.model_id, token_count=usage)
-            if turn.content:
+            request = CompletionRequest(
+                profile=profile,
+                prompt=query,
+                messages=_completion_messages(history, system, self._image_root),
+            )
+            try:
+                raw, streamed, streaming_id = yield from self._complete_round(
+                    conversation.id, provider, request, secret, cancel
+                )
+            except CompletionCancelled as cancelled:
+                yield from self._finish_stop(conversation.id, cancelled.partial, None)
+                return
+            if cancel.is_set():
+                shown = _stop_partial(raw)
+                yield from self._finish_stop(conversation.id, shown, streaming_id)
+                return
+            try:
+                call = parse_tool_call(raw)
+            except ToolParseError as error:
+                turn = self._final_answer(
+                    conversation.id,
+                    str(error),
+                    profile,
+                    usage=None,
+                    streamed=streamed,
+                    streaming_id=streaming_id,
+                )
+                if turn.content and not streamed:
+                    yield turn.content
+                yield turn
+                return
+            if call is not None:
+                if streaming_id is not None:
+                    self._store.delete_message(streaming_id)
+                self._tool_seq += 1
+                tool_id = f"t{self._tool_seq}"
+                yield ToolEvent(
+                    id=tool_id,
+                    name=call.name,
+                    status="running",
+                    args=dict(call.arguments),
+                )
+                result, summary, ok = self._execute_tool(call, conversation, cancel)
+                clipped = _clip(result, TOOL_OUTPUT_CLIP)
+                self._store.add_message(
+                    conversation.id,
+                    role="tool",
+                    content=result,
+                    tool_name=call.name,
+                    tool_status="ok" if ok else "error",
+                    tool_json=json.dumps(
+                        {
+                            "args": call.arguments,
+                            "summary": summary,
+                            "output": clipped,
+                        }
+                    ),
+                )
+                yield ToolEvent(
+                    id=tool_id,
+                    name=call.name,
+                    status="ok" if ok else "error",
+                    summary=summary,
+                    output=clipped,
+                )
+                continue
+            envelope = _parse_envelope(raw)
+            if envelope is not None and envelope.get("intent") == "goal":
+                if streaming_id is not None:
+                    self._store.delete_message(streaming_id)
+                title = _string_field(envelope, "title") or _title_and_criteria(query)[0]
+                criteria = _string_field(envelope, "success_criteria") or query
+                yield from self._yield_goal_handoff(
+                    conversation, title, criteria, model=profile.model_id
+                )
+                return
+            answer = raw.strip() or "I had nothing to add."
+            if envelope is not None and envelope.get("intent") == "answer":
+                extracted = _string_field(envelope, "text") or _string_field(envelope, "content")
+                if extracted:
+                    answer = extracted
+            turn = self._final_answer(
+                conversation.id,
+                answer,
+                profile,
+                usage=None,
+                streamed=streamed,
+                streaming_id=streaming_id,
+            )
+            if turn.content and not streamed:
                 yield turn.content
-            self._persist_assistant(conversation_id, turn)
             yield turn
             return
-        answer = raw
-        if envelope is not None and envelope.get("intent") == "answer":
-            extracted = _string_field(envelope, "text") or _string_field(envelope, "content")
-            if extracted:
-                answer = extracted
-        citations = tuple(
-            {"path": item.path, "start_line": item.start_line, "end_line": item.end_line}
-            for item in packed.items
-            if not item.path.startswith("memory/")
-        )
         turn = ChatTurn(
-            content=answer,
-            citations=citations,
+            content="Stopped after too many tool steps. Ask again with a smaller request.",
+            citations=(),
             goal_refs=(),
             model=profile.model_id,
-            token_count=usage,
         )
-        if answer and not streamed:
-            yield answer
-        self._persist_assistant(conversation_id, turn)
+        self._persist_assistant(conversation.id, turn)
+        yield turn.content
         yield turn
+
+    def _complete_round(
+        self,
+        conversation_id: str,
+        provider: ProviderConfig,
+        request: CompletionRequest,
+        secret: ScopedSecret | None,
+        cancel: Event,
+    ) -> Generator[str, None, tuple[str, bool, str | None]]:
+        if self._complete is not None:
+            result = self._complete(request, secret)
+            return result.text, False, None
+        streaming_id: str | None = None
+
+        def on_flush(text: str) -> None:
+            nonlocal streaming_id
+            streaming_id = self._upsert_stream(conversation_id, streaming_id, text)
+
+        pieces = self._iter_model_tokens(provider, request, secret, cancel)
+        raw, streamed = yield from _emit_visible_deltas(pieces, cancel, on_flush=on_flush)
+        return raw, streamed, streaming_id
 
     def _iter_model_tokens(
         self,
         provider: ProviderConfig,
         request: CompletionRequest,
         secret: ScopedSecret | None,
+        cancel: Event,
     ) -> Iterator[str]:
         if self._stream is not None:
             yield from self._stream(request, secret)
@@ -240,12 +476,97 @@ class ChatService:
             billed=provider.billed,
             transport=self._transport,
         )
-        yield from adapter.stream(request, secret)
+        yield from adapter.complete_stream(request, secret, cancel=cancel)
+
+    def _upsert_stream(
+        self, conversation_id: str, message_id: str | None, content: str
+    ) -> str:
+        if message_id is None:
+            row = self._store.add_message(
+                conversation_id,
+                role="assistant",
+                content=content,
+                tool_status="streaming",
+            )
+            return row.id
+        self._store.update_message(message_id, content=content, tool_status="streaming")
+        return message_id
+
+    def _final_answer(
+        self,
+        conversation_id: str,
+        answer: str,
+        profile: ModelProfile,
+        *,
+        usage: int | None,
+        streamed: bool,
+        streaming_id: str | None,
+    ) -> ChatTurn:
+        citations = tuple(
+            {"path": item.path, "start_line": item.start_line, "end_line": item.end_line}
+            for item in self._last_pack.items
+            if not item.path.startswith("memory/")
+        )
+        turn = ChatTurn(
+            content=answer,
+            citations=citations,
+            goal_refs=(),
+            model=profile.model_id,
+            token_count=usage,
+        )
+        if streaming_id is not None:
+            self._store.update_message(
+                streaming_id,
+                content=turn.content,
+                tool_status=None,
+                citations=turn.citations,
+                goal_refs=turn.goal_refs,
+                model=turn.model,
+                token_count=turn.token_count,
+            )
+        else:
+            self._persist_assistant(conversation_id, turn)
+        _ = streamed
+        return turn
+
+    def _finish_stop(
+        self, conversation_id: str, partial: str, message_id: str | None
+    ) -> Iterator[str | ChatTurn]:
+        body = STOP_MESSAGE if partial.strip() == "" else f"{partial.rstrip()}\n\n{STOP_MESSAGE}"
+        turn = ChatTurn(content=body, citations=(), goal_refs=())
+        if message_id is not None:
+            self._store.update_message(message_id, content=body, tool_status=None)
+        else:
+            self._persist_assistant(conversation_id, turn)
+        yield turn
+
+    def _yield_goal_handoff(
+        self,
+        conversation: ConversationRecord,
+        title: str,
+        success_criteria: str,
+        *,
+        model: str | None = None,
+    ) -> Iterator[str | GoalEvent | ChatTurn]:
+        if conversation.repository_id is None:
+            turn = ChatTurn(content=NO_WORKSPACE, citations=(), goal_refs=(), model=model)
+            if turn.content:
+                yield turn.content
+            self._persist_assistant(conversation.id, turn)
+            yield turn
+            return
+        turn, event = self._create_goal_turn(conversation, title, success_criteria)
+        turn = replace(turn, model=model)
+        yield event
+        if turn.content:
+            yield turn.content
+        self._persist_assistant(conversation.id, turn)
+        yield turn
 
     def _create_goal_turn(
         self, conversation: ConversationRecord, title: str, success_criteria: str
-    ) -> ChatTurn:
-        repo = self._repos.get(RepositoryId(_repository_id(conversation)))
+    ) -> tuple[ChatTurn, GoalEvent]:
+        repo = self._repos.get(RepositoryId(conversation.repository_id or ""))
         goal = self._goals.create(
             GoalSpec(
                 repository_id=repo.id,
@@ -262,12 +583,52 @@ class ChatService:
             self._planning.plan(goal.id)
         except Exception as error:  # noqa: BLE001 — leave draft on any planner failure
             plan_error = str(error)
-        content = f"Created draft goal '{goal.title}' ({goal.id.value})."
-        if plan_error:
-            content += f" Planning failed: {plan_error}. The goal remains in draft."
-        else:
-            content += " Planned successfully."
-        return ChatTurn(content=content, citations=(), goal_refs=(goal.id.value,))
+        goal = self._goals.get(goal.id)
+        readiness = self._readiness(repo)
+        content = _goal_reply_markdown(goal, readiness, plan_error)
+        turn = ChatTurn(content=content, citations=(), goal_refs=(goal.id.value,))
+        event = GoalEvent(
+            id=goal.id.value,
+            state=goal.state.value,
+            can_execute=readiness.can_execute,
+            readiness=tuple(
+                {
+                    "id": item.id,
+                    "label": item.label,
+                    "ok": item.ok,
+                    "detail": item.detail,
+                }
+                for item in readiness.checks
+            ),
+        )
+        return turn, event
+
+    def _readiness(self, repo: EnrolledRepository) -> GoalReadiness:
+        record = repo
+        assignments = self._registry.load_assignments()
+        apps = SqliteGithubAppStore(self._conn)
+        github_status = GithubConnectionStatus(
+            controller=_github_app_status(apps.get("controller")),
+            reviewer=_github_app_status(apps.get("reviewer")),
+            webhook_enabled=False,
+            poll_mode="conditional",
+            github_cli_present=False,
+        )
+        forge: object | None = None
+        if self._forge_for is not None:
+            try:
+                forge = self._forge_for(record)
+            except Exception:  # noqa: BLE001 — fail closed
+                forge = None
+        safety = evaluate_repository_safety(record, forge=forge, reviewer=apps.get("reviewer"))
+        meter = SqliteGoalStore(self._conn).budget_meter(record.id, date.today().isoformat())
+        return evaluate_goal_readiness(
+            record,
+            assignments=assignments,
+            safety=safety,
+            github_status=github_status,
+            meter=meter,
+        )
 
     def _persist_assistant(self, conversation_id: str, turn: ChatTurn) -> None:
         self._store.add_message(
@@ -333,45 +694,389 @@ class ChatService:
             assert_cost_allowed(profile.limits, estimated_cost=0.0, billed=billed)
         except CostCeilingExceeded as error:
             raise OrchestratorNotConfigured() from error
-        if cap_tokens:
-            capped = min(ANSWER_TOKEN_CAP, profile.limits.max_tokens)
-            profile = replace(profile, limits=replace(profile.limits, max_tokens=capped))
+        _ = cap_tokens
         return provider, profile, secret
 
+    def _context_pack(
+        self, conversation: ConversationRecord, query: str, budget: int
+    ) -> ContextPack:
+        if not conversation.repository_id or query.strip() == "":
+            pack = ContextPack(items=())
+        else:
+            pack = self._indexer.search(
+                conversation.repository_id,
+                query,
+                mode="hybrid",
+                budget_tokens=budget,
+            )
+        memories = retrieve_records(self._conn, query, self._embeddings)
+        return _merge_memory(pack, memories, budget)
 
-def _emit_plain_deltas(
+    def _system_prompt(
+        self, conversation: ConversationRecord, query: str, pack: ContextPack
+    ) -> str:
+        context_blocks = [
+            f"{item.path}:{item.start_line}-{item.end_line}\n{item.text}" for item in pack.items
+        ]
+        context = "\n\n".join(context_blocks) if context_blocks else "(no retrieved context)"
+        prompt = f"{SYSTEM_PROMPT}\n\nContext:\n{context}"
+        instructions = self._workspace_instructions(conversation.repository_id)
+        if instructions != "":
+            prompt = f"{prompt}\n\nWorkspace instructions:\n{instructions}"
+        if query != "":
+            records = retrieve_records(self._conn, query, self._embeddings, limit=5)
+            if records:
+                lines = "\n".join(f"- {item.text[:400]}" for item in records)
+                prompt = f"{prompt}\n\nRelevant memories:\n{lines}"
+        mentioned = self._mentioned_file_context(query, conversation.repository_id)
+        if mentioned != "":
+            prompt = f"{prompt}\n\nMentioned files:\n{mentioned}"
+        skills = self._skill_summaries(query)
+        if skills != "":
+            prompt = f"{prompt}\n\n{skills}"
+        return prompt
+
+    def _workspace_instructions(self, repository_id: str | None) -> str:
+        if not repository_id:
+            return ""
+        try:
+            record = self._repos.get(RepositoryId(repository_id))
+        except (RepositoryNotFound, LookupError, ValueError):
+            return ""
+        return workspace_instruction_text(Path(record.realpath))
+
+    def _mentioned_file_context(self, query: str, repository_id: str | None) -> str:
+        if not repository_id or query == "":
+            return ""
+        blocks: list[str] = []
+        for path in mentioned_workspace_paths(query):
+            text = self._workspace_file_text(repository_id, path)
+            if text is None:
+                continue
+            blocks.append(f"{path}\n{text}")
+        return "\n\n".join(blocks)
+
+    def _workspace_file_text(self, repository_id: str, rel_path: str) -> str | None:
+        try:
+            record = self._repos.get(RepositoryId(repository_id))
+        except (RepositoryNotFound, LookupError, ValueError):
+            return None
+        try:
+            payload = read_workspace_file(Path(record.realpath), rel_path)
+        except ValueError:
+            return None
+        if payload["binary"]:
+            return None
+        return payload["content"][:MENTION_CLIP]
+
+    def _skill_summaries(self, query: str) -> str:
+        if self._skills_root is None or query.strip() == "":
+            return ""
+        try:
+            from kronos_engine.skills.catalog import SkillCatalog
+
+            catalog = SkillCatalog(
+                self._conn,
+                skills_root=self._skills_root,
+                store_dir=self._skills_root / "_installed",
+            )
+            routed = route_skills(query, catalog.list(), budget_tokens=400)
+        except Exception:  # noqa: BLE001 — skills are optional in chat
+            return ""
+        summaries = routed.summaries[:3]
+        if not summaries:
+            return ""
+        lines = "\n".join(f"- {item.name}: {item.description}" for item in summaries)
+        return f"Relevant skill summaries:\n{lines}"
+
+    def _execute_tool(
+        self, call: ToolCall, conversation: ConversationRecord, cancel: Event
+    ) -> tuple[str, str, bool]:
+        try:
+            result = self._run_tool(call, conversation, cancel)
+            summary = _tool_summary(call.name, result)
+            return result, summary, True
+        except Exception as error:  # noqa: BLE001 — tool errors stay in the thread
+            text = str(error)
+            return text, text, False
+
+    def _run_tool(
+        self, call: ToolCall, conversation: ConversationRecord, cancel: Event
+    ) -> str:
+        if call.name == "list_goals":
+            return self._list_goals()
+        if call.name == "search_memory":
+            return self._search_memory(call.arguments.get("query", ""))
+        repo_id = conversation.repository_id
+        if repo_id is None or repo_id == "":
+            return NO_WORKSPACE
+        if call.name == "search_index":
+            return self._search_index(repo_id, call.arguments.get("query", ""))
+        if call.name == "list_files":
+            return self._list_files(repo_id, call.arguments.get("glob", ""))
+        if call.name == "read_file":
+            return self._read_file(repo_id, call.arguments.get("path", ""))
+        if call.name == "write_file":
+            return self._write_file(
+                repo_id,
+                call.arguments.get("path", ""),
+                call.arguments.get("content", ""),
+            )
+        if call.name == "run_command":
+            return self._run_command(repo_id, call.arguments.get("command", ""), cancel)
+        if call.name == "create_goal":
+            return self._create_goal(repo_id, call.arguments)
+        return "unknown tool"
+
+    def _search_index(self, repository_id: str, query: str) -> str:
+        pack = self._indexer.search(repository_id, query)
+        if not pack.items:
+            return "No index hits. Rebuild the index after opening a workspace."
+        lines = [
+            f"{item.path}:{item.start_line}-{item.end_line} {item.text[:240]}"
+            for item in pack.items[:8]
+        ]
+        return _clip("\n".join(lines), TOOL_OUTPUT_CLIP)
+
+    def _list_files(self, repository_id: str, glob: str) -> str:
+        try:
+            record = self._repos.get(RepositoryId(repository_id))
+        except (RepositoryNotFound, LookupError, ValueError):
+            return "Workspace was not found."
+        pattern = glob.strip()
+        paths: list[str] = []
+        for entry in list_workspace_files(Path(record.realpath)):
+            path = entry["path"]
+            if pattern and not _glob_matches(path, pattern):
+                continue
+            paths.append(path)
+        if not paths:
+            return "No matching files."
+        return _clip("\n".join(paths), TOOL_OUTPUT_CLIP)
+
+    def _read_file(self, repository_id: str, rel_path: str) -> str:
+        try:
+            record = self._repos.get(RepositoryId(repository_id))
+        except (RepositoryNotFound, LookupError, ValueError):
+            return "Workspace was not found."
+        try:
+            payload = read_workspace_file(Path(record.realpath), rel_path)
+        except ValueError as error:
+            return str(error)
+        if payload["binary"]:
+            return "That file is binary."
+        return _clip(payload["content"], TOOL_OUTPUT_CLIP)
+
+    def _write_file(self, repository_id: str, rel_path: str, content: str) -> str:
+        try:
+            record = self._repos.get(RepositoryId(repository_id))
+        except (RepositoryNotFound, LookupError, ValueError):
+            return "Workspace was not found."
+        if len(content) > MAX_WRITE_CHARS:
+            return (
+                f"File is too large to write here. Keep it under {MAX_WRITE_CHARS} characters."
+            )
+        try:
+            written = write_workspace_file(
+                Path(record.realpath),
+                repository_id,
+                rel_path,
+                content,
+                backups=self._store,
+                locked_prefixes=record.policy.paths.locked_prefixes,
+                now=datetime.now(tz=UTC).isoformat(),
+            )
+        except WorkspaceWriteTooLarge as error:
+            return str(error)
+        except ValueError as error:
+            return str(error)
+        try:
+            self._events.append(
+                EventId(f"evt_{uuid4().hex[:16]}"),
+                "git.wrote",
+                {
+                    "repository_id": repository_id,
+                    "path": written.path,
+                    "summary": written.summary,
+                    "patch": written.patch,
+                },
+            )
+            self._conn.commit()
+        except Exception:
+            pass
+        return f"Wrote {written.path} ({len(content)} characters)."
+
+    def _run_command(self, repository_id: str, command: str, cancel: Event) -> str:
+        if self._run_commands_this_turn >= MAX_RUN_COMMANDS_PER_TURN:
+            return (
+                f"This turn already ran {MAX_RUN_COMMANDS_PER_TURN} commands. "
+                "Ask again if you need another."
+            )
+        stripped = command.strip()
+        if stripped == "":
+            return "A command is required."
+        try:
+            record = self._repos.get(RepositoryId(repository_id))
+        except (RepositoryNotFound, LookupError, ValueError):
+            return "Workspace was not found."
+        self._run_commands_this_turn += 1
+        result = run_workspace_command(
+            Path(record.realpath),
+            stripped,
+            timeout_seconds=COMMAND_TIMEOUT_SECONDS,
+            should_stop=cancel.is_set,
+        )
+        if result["cancelled"]:
+            header = "Stopped."
+        elif result["timed_out"]:
+            header = "The command timed out."
+        elif result["exit_code"] is None:
+            header = "Finished."
+        else:
+            header = f"Exit {result['exit_code']}"
+        output = result["output"].strip()
+        if output == "":
+            return header
+        return _clip(f"{header}\n\n{output}", TOOL_OUTPUT_CLIP)
+
+    def _search_memory(self, query: str) -> str:
+        records = retrieve_records(self._conn, query, self._embeddings, limit=5)
+        if not records:
+            return "No matching memories."
+        return "\n".join(item.text[:400] for item in records)
+
+    def _create_goal(self, repository_id: str, arguments: dict[str, str]) -> str:
+        title = arguments.get("title", "").strip()
+        criteria = arguments.get("success_criteria", "").strip() or title
+        if title == "" or criteria == "":
+            return "create_goal needs title and success_criteria."
+        try:
+            repo = self._repos.get(RepositoryId(repository_id))
+        except (RepositoryNotFound, LookupError, ValueError):
+            return "Workspace was not found."
+        goal = self._goals.create(
+            GoalSpec(
+                repository_id=repo.id,
+                title=title,
+                success_criteria=criteria,
+                non_goals=arguments.get("non_goals", "").strip() or DEFAULT_NON_GOALS,
+                risk_ceiling=arguments.get("risk_ceiling", "low") or "low",
+                source=GoalSource.CHAT,
+                max_attempts=repo.policy.budgets.max_attempts_per_issue,
+            )
+        )
+        return f"Created goal {goal.id.value}: {goal.title}"
+
+    def _list_goals(self) -> str:
+        items = self._goals.list()
+        if not items:
+            return "No goals yet."
+        return "\n".join(f"{item.id.value} {item.state.value} {item.title}" for item in items[:20])
+
+
+def _emit_visible_deltas(
     pieces: Iterator[str],
+    cancel: Event,
+    *,
+    on_flush: Callable[[str], None],
 ) -> Generator[str, None, tuple[str, bool]]:
     parts: list[str] = []
-    json_mode: bool | None = None
+    emitted = 0
     streamed = False
     for piece in pieces:
+        if cancel.is_set():
+            break
         parts.append(piece)
-        if json_mode is True:
-            continue
-        if json_mode is False:
-            if piece:
-                yield piece
-                streamed = True
-            continue
-        stripped = "".join(parts).lstrip()
-        if not stripped:
-            continue
-        if stripped.startswith("{"):
-            json_mode = True
-            continue
-        json_mode = False
-        for part in parts:
-            if part:
-                yield part
+        raw = "".join(parts)
+        flushable = _flushable_prefix(raw)
+        if len(flushable) > emitted:
+            chunk = flushable[emitted:]
+            emitted = len(flushable)
+            on_flush(flushable)
+            if chunk:
+                yield chunk
                 streamed = True
     return "".join(parts), streamed
 
 
-def _repository_id(conversation: ConversationRecord) -> str:
-    if conversation.repository_id is None:
-        raise LookupError(f"conversation has no workspace: {conversation.id}")
-    return conversation.repository_id
+def _flushable_prefix(buffer: str) -> str:
+    stripped = buffer.lstrip()
+    if not stripped:
+        return ""
+    if stripped.startswith("{"):
+        return ""
+    if FENCE_START.startswith(stripped):
+        return ""
+    from kronos_engine.application.chat_tools import TOOL_FENCE
+
+    match = TOOL_FENCE.search(buffer)
+    if match is not None:
+        return buffer[: match.start()]
+    for n in range(len(FENCE_START), 0, -1):
+        if buffer.endswith(FENCE_START[:n]):
+            return buffer[:-n]
+    return buffer
+
+
+def _trim_history(
+    messages: Sequence[ConversationMessage],
+    *,
+    window: int,
+    budget: int,
+    max_tokens: int,
+    system: str,
+) -> tuple[ConversationMessage, ...]:
+    room = window - budget - max_tokens - _char_tokens(system)
+    selected: list[ConversationMessage] = []
+    used = 0
+    for item in reversed(messages):
+        cost = _char_tokens(item.content)
+        if selected and used + cost > max(0, room):
+            break
+        selected.append(item)
+        used += cost
+    selected.reverse()
+    return tuple(selected)
+
+
+def _char_tokens(text: str) -> int:
+    return (len(text) + 3) // 4
+
+
+def _completion_messages(
+    history: Sequence[ConversationMessage],
+    system: str,
+    image_root: Path | None,
+) -> tuple[dict[str, object], ...]:
+    messages: list[dict[str, object]] = [{"role": "system", "content": system}]
+    for item in history:
+        if item.role == "user":
+            messages.append(_user_message(item, image_root))
+        elif item.role == "tool":
+            name = item.tool_name or "tool"
+            messages.append(
+                {"role": "user", "content": f"Tool {name} result:\n{item.content}"}
+            )
+        else:
+            messages.append({"role": item.role, "content": item.content})
+    return tuple(messages)
+
+
+def _user_message(item: ConversationMessage, image_root: Path | None) -> dict[str, object]:
+    text, image_ids = split_user_text_and_image_ids(item.content)
+    if not image_ids:
+        return {"role": "user", "content": item.content}
+    parts: list[ChatImagePart] = []
+    if image_root is not None:
+        for image_id in image_ids:
+            try:
+                loaded = load_chat_image(image_root, item.conversation_id, image_id)
+            except LookupError:
+                continue
+            parts.append(ChatImagePart(mime=loaded.mime, data=loaded.data))
+    if not parts:
+        return {"role": "user", "content": text or item.content}
+    return {"role": "user", "content": user_message_content_parts(text, parts)}
 
 
 def _slash_goal_body(text: str) -> str | None:
@@ -414,9 +1119,11 @@ def _string_field(payload: dict[str, object], key: str) -> str | None:
     return None
 
 
-def _merge_memory(pack: ContextPack, memories: Sequence[MemoryRecord]) -> ContextPack:
+def _merge_memory(
+    pack: ContextPack, memories: Sequence[MemoryRecord], budget: int
+) -> ContextPack:
     used = sum(estimate_tokens(item.text) for item in pack.items) if pack.items else 0
-    remaining = CONTEXT_BUDGET_TOKENS - used
+    remaining = budget - used
     if remaining <= 0 or not memories:
         return pack
     chunks: list[tuple[IndexedChunk, tuple[str, ...]]] = []
@@ -443,19 +1150,70 @@ def _merge_memory(pack: ContextPack, memories: Sequence[MemoryRecord]) -> Contex
     return ContextPack(items=pack.items + extra.items)
 
 
-def _completion_messages(
-    history: Sequence[ConversationMessage],
-    user_text: str,
-    pack: ContextPack,
-) -> tuple[dict[str, object], ...]:
-    context_blocks = [
-        f"{item.path}:{item.start_line}-{item.end_line}\n{item.text}" for item in pack.items
-    ]
-    context = "\n\n".join(context_blocks) if context_blocks else "(no retrieved context)"
-    messages: list[dict[str, object]] = [
-        {"role": "system", "content": f"{_SYSTEM_PROMPT}\n\nContext:\n{context}"}
-    ]
-    for item in history:
-        messages.append({"role": item.role, "content": item.content})
-    messages.append({"role": "user", "content": user_text})
-    return tuple(messages)
+def _latest_user_text(messages: Sequence[ConversationMessage]) -> str:
+    for item in reversed(messages):
+        if item.role == "user":
+            text, _ids = split_user_text_and_image_ids(item.content)
+            return text
+    return ""
+
+
+def _stop_partial(reply: str) -> str:
+    try:
+        if parse_tool_call(reply) is not None:
+            return ""
+    except ToolParseError:
+        return reply
+    return _flushable_prefix(reply) or reply
+
+
+def _clip(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit]
+
+
+def _tool_summary(name: str, result: str) -> str:
+    first = result.strip().splitlines()[0] if result.strip() else name
+    return first[:240]
+
+
+def _glob_matches(path: str, pattern: str) -> bool:
+    from fnmatch import fnmatch
+
+    posix = PurePosixPath(path)
+    try:
+        if posix.match(pattern):
+            return True
+    except ValueError:
+        pass
+    return fnmatch(path, pattern) or fnmatch(posix.name, pattern)
+
+
+def _github_app_status(record: object) -> GithubAppStatus:
+    if record is None:
+        return GithubAppStatus(registered=False, installed=False, verified=False)
+    installation_id = getattr(record, "installation_id", None)
+    verified_at = getattr(record, "verified_at", None)
+    return GithubAppStatus(
+        registered=True,
+        installed=installation_id is not None,
+        verified=verified_at is not None,
+        app_id=getattr(record, "app_id", None),
+        slug=getattr(record, "slug", None),
+    )
+
+
+def _goal_reply_markdown(
+    goal: GoalRecord, readiness: GoalReadiness, plan_error: str | None
+) -> str:
+    lines = [f"Draft goal `{goal.id.value}` created."]
+    if plan_error:
+        lines.append(f"Planning failed: {plan_error}. The goal remains in draft.")
+    for check in readiness.checks:
+        lines.append(f"{check.label}: {check.detail}")
+    if readiness.can_execute:
+        lines.append("This goal can execute now.")
+    else:
+        lines.append("This goal cannot execute unattended yet.")
+    return "\n".join(lines)

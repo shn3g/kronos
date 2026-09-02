@@ -173,11 +173,12 @@ def test_chat_streams_orchestrator_tokens_from_local_provider(tmp_path: Path) ->
         assert final is not None
         assert final.content == "Hello"
         assert final.goal_refs == ()
+        assert final.citations == ()
         assert captured
         body = captured[0]["json"]
         assert isinstance(body, dict)
         assert body.get("stream") is True
-        assert int(body["max_tokens"]) <= 1024
+        assert int(body["max_tokens"]) == 4096
         headers = captured[0]["headers"]
         assert isinstance(headers, dict)
         assert headers.get("Authorization") == "Bearer sk-stream"
