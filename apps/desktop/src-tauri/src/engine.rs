@@ -556,10 +556,12 @@ fn emit_stream(app: &AppHandle, event: EngineStreamEvent) {
     let _ = app.emit(ENGINE_STREAM_EVENT, event);
 }
 
+type EngineHttpHead = (u16, Vec<(String, String)>, Vec<u8>);
+
 fn read_http_head(
     stream: &mut TcpStream,
     cancelled: &impl Fn() -> bool,
-) -> Result<(u16, Vec<(String, String)>, Vec<u8>), String> {
+) -> Result<EngineHttpHead, String> {
     let mut acc = Vec::new();
     let mut buf = [0u8; 2048];
     let started = Instant::now();
@@ -779,10 +781,7 @@ impl ChunkDecoder {
         }
         self.buf.extend_from_slice(data);
         let mut out = Vec::new();
-        loop {
-            let Some(pos) = self.buf.windows(2).position(|window| window == b"\r\n") else {
-                break;
-            };
+        while let Some(pos) = self.buf.windows(2).position(|window| window == b"\r\n") {
             let size_line = std::str::from_utf8(&self.buf[..pos]).map_err(|error| error.to_string())?;
             let size = usize::from_str_radix(size_line.trim(), 16)
                 .map_err(|_| "invalid chunk size".to_string())?;
@@ -1113,7 +1112,6 @@ fn spawn_engine(app: &AppHandle) -> Result<(Child, EngineConnection), String> {
     let log_file = OpenOptions::new()
         .create(true)
         .append(true)
-        .write(true)
         .open(&log_path)
         .map_err(|error| error.to_string())?;
 
@@ -1804,6 +1802,13 @@ mod tests {
             .push(b"5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n")
             .unwrap();
         assert_eq!(decoded, b"hello world");
+    }
+
+    #[test]
+    fn chunk_decoder_waits_for_incomplete_chunk() {
+        let mut decoder = super::ChunkDecoder::default();
+        assert_eq!(decoder.push(b"5\r\nhel").unwrap(), b"");
+        assert_eq!(decoder.push(b"lo\r\n0\r\n\r\n").unwrap(), b"hello");
     }
 
     #[test]

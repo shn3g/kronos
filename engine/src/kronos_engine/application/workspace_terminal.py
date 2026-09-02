@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -223,7 +224,8 @@ def _spawn_shell(command: str, *, cwd: Path) -> subprocess.Popen[str]:
 def _kill_process_tree(process: subprocess.Popen[str] | subprocess.Popen[bytes]) -> None:
     if process.poll() is not None:
         return
-    if os.name == "nt":
+    # typeshed only exposes os.killpg and signal.SIGKILL when sys.platform != "win32".
+    if sys.platform == "win32":
         subprocess.run(  # noqa: S603
             ["taskkill", "/F", "/T", "/PID", str(process.pid)],
             capture_output=True,

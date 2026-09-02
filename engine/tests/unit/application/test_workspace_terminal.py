@@ -168,3 +168,27 @@ def test_peek_returns_none_when_nothing_is_running() -> None:
     from kronos_engine.application.workspace_terminal import peek_workspace_command
 
     assert peek_workspace_command("terminal:missing") is None
+
+
+def test_kill_process_tree_uses_taskkill_when_sys_platform_is_win32(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """mypy on Windows only hides os.killpg / SIGKILL behind sys.platform, not os.name."""
+    import subprocess
+    from types import SimpleNamespace
+
+    from kronos_engine.application import workspace_terminal as wt
+
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(args))
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(wt.subprocess, "run", fake_run)
+    process = SimpleNamespace(pid=4242, poll=lambda: None, kill=lambda: None)
+
+    wt._kill_process_tree(process)  # type: ignore[arg-type]
+
+    assert calls == [["taskkill", "/F", "/T", "/PID", "4242"]]
