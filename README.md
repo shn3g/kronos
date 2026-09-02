@@ -6,11 +6,11 @@ Windows, macOS, and Linux. Licensed under the [GNU Affero General Public License
 
 ## Install
 
-Download a Windows NSIS installer, Linux `.deb`, or macOS `.app` from a [GitHub Release](https://github.com/shn3g/kronos/releases) (`v0.4.0` is the current preview). Or build with `pnpm tauri build`.
+Download a Windows NSIS installer, Linux `.deb` or AppImage, or macOS `.app` from a [GitHub Release](https://github.com/shn3g/kronos/releases) (`v0.5.0` is the current preview). Or build with `pnpm tauri build`.
 
 Signing is not present. Windows SmartScreen and macOS Gatekeeper will warn. That is the OS. Use "Run anyway" or right-click Open for the unsigned path.
 
-Installers bundle the local engine. You do not need Python on PATH to run them.
+Installers bundle the local engine. You do not need Python on PATH to run them. Download, run Kronos, and connect a model (presets or any OpenAI-compatible URL; API key optional for local endpoints).
 
 Hosted GitHub Actions may not always produce Release artifacts. If the Release has no installer, builders use the one-line build below.
 
@@ -29,14 +29,15 @@ Contributor tests belong in [CONTRIBUTING.md](CONTRIBUTING.md). Walkthrough: [do
 
 ## Inside the app
 
-1. Open Kronos. If the local engine is down, the window says "The local engine is not running" and does not open chrome. Installers start a bundled `kronos-engine` sidecar; development builds may use `python -m kronos_engine` on PATH instead. Until 0.5.0 the engine **must match the desktop version**.
-2. Connect a model if no orchestrator is assigned. Keys go into the operating system secret store. Chat is then the main stage (menu bar, activity bar, inspector). A workspace folder is optional.
+1. Open Kronos. Installers start a bundled `kronos-engine` sidecar within seconds. Development builds may use `python -m kronos_engine` on PATH instead; that engine should match the desktop version.
+2. Connect a model if no orchestrator is assigned. Presets or any OpenAI-compatible URL work; keys are optional for local endpoints. Keys go into the operating system secret store. Chat is then the main stage (menu bar, activity bar, inspector). A workspace folder is optional.
 3. Browser preview (same UI, no native window): start the engine, then `pnpm --filter @kronos/desktop dev` and open `http://localhost:1420`. The Vite `/kronos-engine` proxy adds the bearer on the server. `vite preview` stays engine-unavailable.
 4. Open a git folder from File or Workspaces when you want indexing and file tools. Chat can search, read, write, and run capped commands inside that folder. `/goal` creates a draft and reports readiness. Chat does not call GitHub. **Files** edits in the activity bar; **Changes** in the inspector can revert or locally commit; **Terminal** (View menu) is a real shell in the workspace; **Goals** is a workbench with Plan/Tick and readiness links.
 5. Enable Kronos shows a **preview** of `.kronos/config.yaml`, workflow, and CODEOWNERS. You commit those on **your** repo.
 6. Connections: two GitHub Apps (controller + isolated reviewer) and optional Telegram. Models: each role (orchestrator, planner, coder, reviewer, embedding) can be online or local.
-7. Index: per-repo hybrid search under app cache. A watcher can reindex dirty working-tree files; unchanged chunk hashes skip re-embedding. FTS5 always; optional local ONNX (install from Settings → Models) or remote embeddings. Isolation by repository id. Local weights download only when you click Install, from pinned URLs verified by SHA-256.
-8. On enrol: empty lesson store. Modes `write_draft_prs` and above also need the safety gate (branch protection, Kronos PR workflow, CODEOWNERS, verified reviewer app). Leave `freeze: true` and `mode: observe` or `shadow` until you want autonomous writes.
+7. Index: per-repo hybrid search under app cache. A watcher can reindex dirty working-tree files; unchanged chunk hashes skip re-embedding. FTS5 always; optional local ONNX (install from Settings → Models on click, SHA-256 pinned catalog) or remote embeddings. Isolation by repository id.
+8. Updates: Settings → Updates can check GitHub Releases when the owner configures signing. Until a publisher pubkey is set, the check stays disabled (fail closed).
+9. On enrol: empty lesson store. Modes `write_draft_prs` and above also need the safety gate (branch protection, Kronos PR workflow, CODEOWNERS, verified reviewer app). Leave `freeze: true` and `mode: observe` or `shadow` until you want autonomous writes.
 
 **Skills:** global library under `skills/core/` shipped with Kronos. **Lessons:** per enrolled repo, empty at first, propose is not activate.
 

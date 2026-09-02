@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-02
+
+One-click install, agent chat, local embeddings, and signed in-app updates (fail-closed until the owner installs a publisher pubkey).
+
+### Added
+
+- **Bundled engine:** installers ship a PyInstaller `kronos-engine` sidecar so Python is not required on PATH. Development builds may still use `python -m kronos_engine` when the sidecar is absent.
+- **Local embeddings install:** Settings → Models can download MiniLM or bge-small from a pinned catalog on click. Each file is verified with SHA-256 before it is activated.
+- **Signed updater:** Settings → Updates checks GitHub Releases `latest.json` through Rust IPC. NSIS uses per-user (`currentUser`) install mode. Linux updater bundles use the signed AppImage. Check for updates stays disabled until `plugins.updater.pubkey` in `tauri.conf.json`, `UPDATER_PUBKEY`, and GitHub secrets `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` are set by the owner. Users never generate keys.
+- **First-run polish:** bundled engine gate clears quickly, Connect a model presets (key optional for local endpoints), keyboard map in Help, streaming accessibility, and notification badge on Settings.
+
+### Changed
+
+- README and quickstart Install sections describe download, run, and connect a model. Dev PATH engines should still match the desktop version.
+- Threat model documents embedding downloads and the in-app updater (pinned URLs, SHA-256, minisign pubkey, fail-closed empty pubkey). Unsigned SmartScreen/Gatekeeper warnings remain.
+
 ## [0.4.0] - 2026-09-02
 
 Workbench: Files editor, Changes revert/commit, Health, Terminal, Goals workbench, and full-stack Playwright on Linux CI. Not one-click yet (no bundled engine, embeddings installer, or updater - those are 0.5.0).
@@ -78,7 +94,8 @@ Developed as 0.1.1–0.1.6 on this branch; tagged together as 0.2.0.
 
 First public desktop preview (`v0.1.0`). Enrol a git folder, leave freeze and observe/shadow until you want writes, unsigned Windows/Linux/macOS installers.
 
-[unreleased]: https://github.com/shn3g/kronos/compare/v0.4.0...HEAD
+[unreleased]: https://github.com/shn3g/kronos/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/shn3g/kronos/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/shn3g/kronos/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/shn3g/kronos/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/shn3g/kronos/compare/v0.1.0...v0.2.0

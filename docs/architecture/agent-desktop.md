@@ -1,10 +1,10 @@
 # Agent desktop
 
-Kronos is a locally installed desktop app (Tauri WebView, also previewable in a browser). It is not an operating system. This note describes **0.4.0** (workbench). A bundled engine, embeddings installer, and in-app updater arrive in 0.5.0.
+Kronos is a locally installed desktop app (Tauri WebView, also previewable in a browser). It is not an operating system. This note describes **0.5.0** (one-click install): bundled engine, agent chat, local embeddings install, and signed in-app updates.
 
 ## Shell
 
-![Files editor with tree and tabs](../images/0.4.0/files.png)
+![Files editor with tree and tabs](../images/0.5.0/files.png)
 
 - Application menu: File, Edit, View, Help. File holds New chat, Open workspace, Go to file, Models, and Settings. Go to file opens the Go to file palette in the Files activity. Edit is Cut, Copy, Paste, Select all, Find, Replace, and Go to line (those last three target the Files editor).
 - Collapsible icon activity bar on the left: Chat, Files, Goals, Workspaces, Settings. View can also hide the Changes inspector and open the Terminal panel.
@@ -14,14 +14,15 @@ Kronos is a locally installed desktop app (Tauri WebView, also previewable in a 
 - Files is a real editor: tree, tabs, save through the workspace files API, Find/Replace/Go to line, Ask in chat on a selection, and a Go to file palette.
 - Terminal (View menu) runs a real PTY in the enrolled workspace folder.
 
-![Terminal panel](../images/0.4.0/terminal.png)
+![Terminal panel](../images/0.5.0/terminal.png)
 
 ## First run
 
-1. If the local engine is not connected, show that fact. Do not open the old 12-page dashboard. The gate heading is "The local engine is not running".
-2. If the engine is ready and no **orchestrator** is assigned, block on Connect a model. API keys go to the OS secret store through the existing provider API.
-3. A workspace folder is not required to pass the gate. Chat can explain Kronos. Opening a git folder starts indexing. The same UI can run in a browser preview while the local engine is running (`pnpm --filter @kronos/desktop dev`). The page talks through a same-origin `/kronos-engine` proxy, so it never holds the engine token. `vite preview` stays engine-unavailable.
-4. Until 0.5.0 the engine on PATH must match the desktop version.
+1. Open Kronos. Installers start a bundled `kronos-engine` sidecar within seconds. If the engine is still starting, the gate shows "Starting Kronos". Development builds may use `python -m kronos_engine` on PATH instead; that engine should match the desktop version.
+2. Connect a model if no **orchestrator** is assigned. Presets include OpenCode Zen, OpenRouter, Ollama, and LM Studio, or any OpenAI-compatible URL. API keys are optional for local endpoints. Keys go to the OS secret store through the existing provider API.
+3. A workspace folder is not required to pass the gate. Chat can explain Kronos. Open a git folder from File or Workspaces when you want indexing, Files, Terminal, and inspector Changes. The same UI can run in a browser preview while the local engine is running (`pnpm --filter @kronos/desktop dev`). The page talks through a same-origin `/kronos-engine` proxy, so it never holds the engine token. `vite preview` stays engine-unavailable.
+
+![Chat empty state](../images/0.5.0/chat.png)
 
 ## Chat
 
@@ -40,15 +41,23 @@ This is how we design in Cursor, not a Kronos product. Sources: Cursor Agents Wi
 
 ## Goals workbench
 
-![Goals workbench](../images/0.4.0/goals-workbench.png)
+![Goals workbench](../images/0.5.0/goals-workbench.png)
 
 The Goals activity lists goals, shows planned steps, and exposes Plan and Tick. Autonomy mode is read-only in the UI. Readiness comes from `GET /repositories/{id}/goal-readiness`; failed checks link to Settings or Workspaces through `readinessFixHref` (workspace, models, GitHub connections). Runs for the selected goal appear in the inspector Goals tab.
 
-## Health
+## Health, embeddings, and updates
 
-![Inspector Changes with revert and commit](../images/0.4.0/changes.png)
+![Inspector Changes with revert and commit](../images/0.5.0/changes.png)
 
 The Health tab and Settings doctor share engine checks from `GET /ops/doctor` when available, with local fallbacks for engine, model, workspace, index, secrets, and embeddings. Each check has a label, ok flag, and a short sentence. Status is never color-only.
+
+Settings → Models includes a **Local embeddings** card. Kronos downloads model weights only when you click Install, from pinned URLs verified by SHA-256.
+
+![Local embeddings install card](../images/0.5.0/embeddings.png)
+
+Settings → Updates shows checksums, SBOM, and provenance. **Check for updates** stays disabled until the owner configures a minisign pubkey and GitHub signing secrets. When enabled, the updater fetches `latest.json` from GitHub Releases and can install and restart.
+
+![Updates page](../images/0.5.0/updates.png)
 
 ## Copy
 

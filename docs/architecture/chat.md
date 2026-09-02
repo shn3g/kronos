@@ -1,6 +1,6 @@
 # Chat
 
-Chat is the main stage of the 0.4.0 desktop. `ChatService` runs an agent loop against the assigned **orchestrator** profile. It streams tokens, may call tools inside the enrolled folder, and can create a draft goal with `/goal`. Executors still run unattended work under sandbox, modes, freeze, and budgets.
+Chat is the main stage of the 0.5.0 desktop. `ChatService` runs an agent loop against the assigned **orchestrator** profile. It streams tokens, may call tools inside the enrolled folder, and can create a draft goal with `/goal`. Executors still run unattended work under sandbox, modes, freeze, and budgets.
 
 ## What chat does
 
@@ -30,4 +30,4 @@ Rust holds the token, reads SSE, and emits `engine-stream` events (`delta`, `too
 
 ## Configuration
 
-Assign an orchestrator profile (Connect a model on first run, or the composer switcher). A billed provider with no key, or a cost ceiling of zero, fails closed (HTTP 409) instead of calling the network. Until 0.5.0 the engine on PATH must match the desktop version.
+Assign an orchestrator profile (Connect a model on first run, or the composer switcher). Presets and any OpenAI-compatible URL work; keys are optional for local endpoints. A billed provider with no key, or a cost ceiling of zero, fails closed (HTTP 409) instead of calling the network. Development PATH engines should match the desktop version; installers bundle a matching sidecar.

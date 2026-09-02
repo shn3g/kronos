@@ -6,11 +6,11 @@ Windows, macOS, and Linux. Licensed under GNU AGPL v3.0.
 
 ## Install
 
-Download a Windows NSIS installer, Linux `.deb`, or macOS `.app` from a [GitHub Release](https://github.com/shn3g/kronos/releases) (`v0.4.0` is the current preview).
+Download a Windows NSIS installer, Linux `.deb` or AppImage, or macOS `.app` from a [GitHub Release](https://github.com/shn3g/kronos/releases) (`v0.5.0` is the current preview).
 
 Signing is not present. Windows SmartScreen and macOS Gatekeeper will warn. That is the OS. Use "Run anyway" or right-click Open for the unsigned path.
 
-Installers bundle the local engine. You do not need Python on PATH to run them.
+Installers bundle the local engine. You do not need Python on PATH to run them. Download, run Kronos, and connect a model (presets or any OpenAI-compatible URL; API key optional for local endpoints).
 
 Hosted GitHub Actions may not always produce Release artifacts. If the Release has no installer, install Node 22, pnpm 9.15, Python 3.11+, Rust, and the platform WebView. Python is required to build the engine and for `python -m kronos_engine` during development. Then:
 
@@ -23,8 +23,8 @@ pnpm tauri build
 
 ## First run
 
-1. Open Kronos. If the local engine is down, the window says "The local engine is not running". Installers start a bundled `kronos-engine` sidecar; development builds may use `python -m kronos_engine` on PATH instead. Until 0.5.0 the engine **must match the desktop version**.
-2. Connect a model if no orchestrator is assigned. Keys go into the operating system secret store.
+1. Open Kronos. Installers start a bundled `kronos-engine` sidecar within seconds. Development builds may use `python -m kronos_engine` on PATH instead; that engine should match the desktop version.
+2. Connect a model if no orchestrator is assigned. Presets or any OpenAI-compatible URL work; keys are optional for local endpoints. Keys go into the operating system secret store.
 3. Chat is the main stage without a folder. Open a git folder from File or Workspaces when you want indexing, the Files editor, Terminal (View menu), and inspector Changes (revert or local commit). Chat can search, read, write, and run capped commands inside that folder. `/goal` creates a draft and reports readiness. Goals workbench lists plans, Plan/Tick, and readiness with Settings fix links. Paste a screenshot into chat to ask about the UI.
 4. Browser preview: start the engine, then `pnpm --filter @kronos/desktop dev` and open `http://localhost:1420`. The page never sees the engine token. `vite preview` stays engine-unavailable.
 5. Kronos registers enrolled folders in local SQLite. It does not write `.kronos/` into the tree at enrol.

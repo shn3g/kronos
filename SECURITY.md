@@ -23,6 +23,7 @@ In scope:
 
 - Desktop client, local engine, reviewer process, and packaging scripts in this repository
 - Credential handling, sandbox escapes, and policy bypasses
+- In-app updater (`latest.json`, minisign verification, fail-closed empty pubkey) and local embeddings downloads (pinned URLs, SHA-256)
 - GitHub Apps Kronos uses for repository automation and isolated review
 - Telegram authorization (allowlists, bot-token handling, unauthorized chats)
 - Local indexing of enrolled repositories

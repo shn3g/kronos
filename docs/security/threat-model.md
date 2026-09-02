@@ -35,6 +35,11 @@ Observe and shadow modes must not create GitHub issues, pull requests, or merges
 
 Bearer tokens stay in the Rust sidecar. Engine HTTP does not expose `/ops/token` or `/ops/pem`. Recorder and backup redaction strip PEMs, GitHub tokens, bot tokens, and high-entropy secrets. Attestations cannot carry `GH_TOKEN` or hidden chain-of-thought.
 
+## Downloads and updates (0.5.0 desktop)
+
+- **Local embeddings:** Kronos downloads model weights only when the operator clicks Install in Settings → Models. URLs come from a pinned catalog in the engine. Each file is verified with SHA-256 before activation. No background download of weights.
+- **In-app updater:** The desktop checks GitHub Releases `latest.json` through Rust IPC (not from the WebView). Bundle signatures are verified with a minisign public key in `plugins.updater.pubkey`. An empty pubkey keeps **Check for updates** disabled (fail closed). The owner installs the publisher keypair and GitHub Actions secrets; end users never generate keys. Unsigned installer warnings from SmartScreen and Gatekeeper remain until the owner signs releases.
+
 ## Reporting
 
 See [SECURITY.md](../../SECURITY.md). Do not file public issues for unpatched exploits.
