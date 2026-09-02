@@ -372,7 +372,7 @@ class _PosixPtySession:
     def open(cls, cwd: Path) -> _PosixPtySession:
         import pty
 
-        master_fd, slave_fd = pty.openpty()
+        master_fd, slave_fd = pty.openpty()  # type: ignore[attr-defined]
         _set_posix_winsize(slave_fd, DEFAULT_SHELL_COLS, DEFAULT_SHELL_ROWS)
         process = subprocess.Popen(  # noqa: S603
             ["/bin/sh"],
@@ -416,7 +416,7 @@ class _PosixPtySession:
         if not _set_posix_winsize(self._master_fd, cols, rows):
             return False
         try:
-            os.kill(self._process.pid, signal.SIGWINCH)
+            os.kill(self._process.pid, signal.SIGWINCH)  # type: ignore[attr-defined]
         except (ProcessLookupError, PermissionError, OSError):
             return False
         return True
@@ -429,7 +429,7 @@ def _set_posix_winsize(fd: int, cols: int, rows: int) -> bool:
 
     packed = struct.pack("HHHH", rows, cols, 0, 0)
     try:
-        fcntl.ioctl(fd, termios.TIOCSWINSZ, packed)
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, packed)  # type: ignore[attr-defined]
     except OSError:
         return False
     return True

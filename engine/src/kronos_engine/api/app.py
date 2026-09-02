@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -397,8 +397,8 @@ def create_app(
             active_key=installer.active_key(),
             status=EmbeddingInstallStatusModel(
                 state=status["state"],  # type: ignore[arg-type]
-                bytes_done=int(status["bytes_done"]),
-                bytes_total=int(status["bytes_total"]),
+                bytes_done=cast(int, status["bytes_done"]),
+                bytes_total=cast(int, status["bytes_total"]),
                 model_key=status["model_key"] if isinstance(status["model_key"], str) else None,
                 error=status["error"] if isinstance(status["error"], str) else None,
             ),

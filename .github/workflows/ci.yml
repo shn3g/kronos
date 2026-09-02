@@ -143,7 +143,7 @@ jobs:
 
       - name: Build desktop artifact
         working-directory: apps/desktop
-        run: pnpm tauri build --bundles ${{ matrix.bundle }}
+        run: pnpm tauri build --bundles ${{ matrix.bundle }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       - name: Smoke bundled engine
         if: runner.os == 'Linux'
