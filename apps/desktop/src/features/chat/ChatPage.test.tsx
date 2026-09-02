@@ -261,6 +261,9 @@ describe("ChatPage", () => {
     expect(
       await screen.findByText(/no orchestrator model is configured/i),
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /models/i })).toHaveAttribute("href", "#/models");
+    expect(screen.getByRole("link", { name: /models/i })).toHaveAttribute(
+      "href",
+      "#/settings/models",
+    );
   });
 });

@@ -31,6 +31,7 @@ function repos(listImpl?: RepositoriesClient["list"]): RepositoriesClient {
     resume: async () => {
       throw new Error("resume should not run");
     },
+    listChanges: async () => [],
   };
 }
 
@@ -87,6 +88,7 @@ describe("WorkspacesPage", () => {
       pause: async () => ({ ...enrolled, status: "paused" }),
       disable: async () => ({ ...enrolled, status: "disabled" }),
       resume: async () => ({ ...enrolled, status: "active" }),
+      listChanges: async () => [],
     };
 
     render(
@@ -175,6 +177,7 @@ describe("WorkspacesPage", () => {
       resume: async () => {
         throw new Error("resume should not run");
       },
+      listChanges: async () => [],
     };
 
     render(<WorkspacesPage engineClient={engine("ready")} repositoriesClient={client} />);

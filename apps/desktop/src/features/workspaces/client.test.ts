@@ -61,4 +61,35 @@ describe("createProductionRepositoriesClient", () => {
       status: "active",
     });
   });
+
+  it("lists working-tree changes from the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path) => {
+      expect(method).toBe("GET");
+      expect(path).toBe("/repositories/repo_alpha/changes");
+      return {
+        status: 200,
+        body: JSON.stringify({
+          changes: [
+            {
+              path: "src/App.tsx",
+              summary: "Modified src/App.tsx",
+              patch: "-old\n+new\n",
+              status: "M",
+              from_chat: true,
+            },
+          ],
+        }),
+      };
+    });
+
+    await expect(client.listChanges("repo_alpha")).resolves.toEqual([
+      {
+        path: "src/App.tsx",
+        summary: "Modified src/App.tsx",
+        patch: "-old\n+new\n",
+        status: "M",
+        fromChat: true,
+      },
+    ]);
+  });
 });

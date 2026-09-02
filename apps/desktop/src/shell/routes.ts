@@ -1,92 +1,91 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-export const ROUTES = [
-  {
-    path: "/",
-    name: "Home",
-    heading: "Home",
-    summary:
-      "Kronos is a local software-engineering operating system. Goals, runs, and repository work appear here once an engine is connected.",
-  },
-  {
-    path: "/workspaces",
-    name: "Workspaces",
-    heading: "Workspaces",
-    summary: "Enrolled repositories will list here with isolated indexes and policy.",
-  },
-  {
-    path: "/goals",
-    name: "Goals",
-    heading: "Goals",
-    summary: "Bounded goals are planned and tracked from this screen.",
-  },
-  {
-    path: "/chat",
-    name: "Chat",
-    heading: "Chat",
-    summary: "Ask the orchestrator, stream replies, and hand work to goals.",
-  },
-  {
-    path: "/runs",
-    name: "Runs",
-    heading: "Runs",
-    summary: "Task runs, tests, and review evidence stream here.",
-  },
-  {
-    path: "/skills",
-    name: "Skills",
-    heading: "Skills",
-    summary: "Browse curated skills, quarantine imports, and approve activation.",
-  },
-  {
-    path: "/memory",
-    name: "Memory",
-    heading: "Memory",
-    summary: "Inspect episodic and procedural records. Imported lessons stay disabled.",
-  },
-  {
-    path: "/models",
-    name: "Models",
-    heading: "Models",
-    summary: "Assign orchestrator, planner, coder, reviewer, and embedding profiles. Fail closed without an engine.",
-  },
-  {
-    path: "/index",
-    name: "Index",
-    heading: "Index",
-    summary: "Per-repository hybrid index status and fail-closed search.",
-  },
-  {
-    path: "/connections",
-    name: "Connections",
-    heading: "Connections",
-    summary: "Create and install GitHub Apps and connect Telegram. Fail closed without an engine.",
-  },
-  {
-    path: "/settings",
-    name: "Settings",
-    heading: "Settings",
-    summary: "Doctor, backup, and export toggles. Secrets never pass through the WebView.",
-  },
-  {
-    path: "/updates",
-    name: "Updates",
-    heading: "Updates",
-    summary: "Version, checksums, SBOM, and rollback. Unsigned when signing keys are absent.",
-  },
-  {
-    path: "/notifications",
-    name: "Notifications",
-    heading: "Notifications",
-    summary: "Paused work and degraded indexes. Fail closed without an engine.",
-  },
-] as const;
+export type SettingsSection =
+  | "general"
+  | "models"
+  | "index"
+  | "connections"
+  | "skills"
+  | "memory"
+  | "updates"
+  | "notifications";
 
-export type RoutePath = (typeof ROUTES)[number]["path"];
+export type ShellActivity = "chat" | "files" | "goals" | "workspaces" | "settings";
 
-export function pathFromHash(hash: string): string {
+export interface ShellRoute {
+  activity: ShellActivity;
+  settingsSection: SettingsSection;
+}
+
+export const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
+  { id: "general", label: "General" },
+  { id: "models", label: "Models" },
+  { id: "index", label: "Index" },
+  { id: "connections", label: "Connections" },
+  { id: "skills", label: "Skills" },
+  { id: "memory", label: "Memory" },
+  { id: "updates", label: "Updates" },
+  { id: "notifications", label: "Notifications" },
+];
+
+const SETTINGS_IDS = new Set<string>(SETTINGS_SECTIONS.map((item) => item.id));
+
+const ACTIVITIES = new Set<ShellActivity>(["chat", "files", "goals", "workspaces", "settings"]);
+
+const LEGACY_PATHS: Record<string, ShellRoute> = {
+  "/": { activity: "chat", settingsSection: "general" },
+  "/models": { activity: "settings", settingsSection: "models" },
+  "/index": { activity: "settings", settingsSection: "index" },
+  "/connections": { activity: "settings", settingsSection: "connections" },
+  "/skills": { activity: "settings", settingsSection: "skills" },
+  "/memory": { activity: "settings", settingsSection: "memory" },
+  "/updates": { activity: "settings", settingsSection: "updates" },
+  "/notifications": { activity: "settings", settingsSection: "notifications" },
+  "/runs": { activity: "goals", settingsSection: "general" },
+};
+
+function normalizeHash(hash: string): string {
   const raw = hash.replace(/^#/, "");
   const path = raw.startsWith("/") ? raw : `/${raw}`;
-  const normalized = path === "/" ? "/" : path.replace(/\/+$/, "");
-  return ROUTES.some((route) => route.path === normalized) ? normalized : "/";
+  if (path === "/" || path === "") {
+    return "/";
+  }
+  return path.replace(/\/+$/, "");
 }
+
+function isSettingsSection(value: string): value is SettingsSection {
+  return SETTINGS_IDS.has(value);
+}
+
+function isActivity(value: string): value is ShellActivity {
+  return ACTIVITIES.has(value as ShellActivity);
+}
+
+export function routeFromHash(hash: string): ShellRoute {
+  const path = normalizeHash(hash);
+  if (path === "/settings") {
+    return { activity: "settings", settingsSection: "general" };
+  }
+  const settingsMatch = /^\/settings\/([^/]+)$/.exec(path);
+  if (settingsMatch && isSettingsSection(settingsMatch[1] ?? "")) {
+    return { activity: "settings", settingsSection: settingsMatch[1] as SettingsSection };
+  }
+  if (path.length > 1) {
+    const activity = path.slice(1);
+    if (isActivity(activity) && activity !== "settings") {
+      return { activity, settingsSection: "general" };
+    }
+  }
+  return LEGACY_PATHS[path] ?? { activity: "chat", settingsSection: "general" };
+}
+
+export function hashFromRoute(route: ShellRoute): string {
+  if (route.activity === "settings") {
+    if (route.settingsSection === "general") {
+      return "#/settings";
+    }
+    return `#/settings/${route.settingsSection}`;
+  }
+  return `#/${route.activity}`;
+}
+

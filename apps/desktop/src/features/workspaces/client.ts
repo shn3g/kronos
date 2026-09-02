@@ -33,6 +33,14 @@ export interface InspectResult {
   pushed: boolean;
 }
 
+export interface WorkspaceFileChange {
+  path: string;
+  summary: string;
+  patch: string;
+  status: string;
+  fromChat: boolean;
+}
+
 export interface RepositoriesClient {
   list(): Promise<EnrolledRepository[]>;
   inspect(path: string): Promise<InspectResult>;
@@ -40,6 +48,7 @@ export interface RepositoriesClient {
   pause(id: string): Promise<EnrolledRepository>;
   disable(id: string): Promise<EnrolledRepository>;
   resume(id: string): Promise<EnrolledRepository>;
+  listChanges(id: string): Promise<WorkspaceFileChange[]>;
 }
 
 export async function pickRepositoryFolder(): Promise<string | null> {
@@ -85,6 +94,22 @@ export function createProductionRepositoriesClient(
       const payload = await jsonRequest(request, "POST", `/repositories/${id}/resume`);
       return mapRepository(payload.repository);
     },
+    async listChanges(id: string) {
+      const payload = await jsonRequest(request, "GET", `/repositories/${id}/changes`);
+      const changes = Array.isArray(payload.changes) ? payload.changes : [];
+      return changes.map(mapChange);
+    },
+  };
+}
+
+function mapChange(raw: unknown): WorkspaceFileChange {
+  const item = asRecord(raw);
+  return {
+    path: stringField(item, "path"),
+    summary: stringField(item, "summary"),
+    patch: stringField(item, "patch"),
+    status: stringField(item, "status"),
+    fromChat: item.from_chat === true,
   };
 }
 

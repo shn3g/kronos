@@ -394,7 +394,7 @@ export function ChatPage({ engineClient, chatClient }: ChatPageProps) {
                 {selectedConversation
                   ? "Send a message to start this thread."
                   : "Create a conversation or send a message."}{" "}
-                Need a model? <a href="#/models">Models</a>
+                Need a model? <a href="#/settings/models">Models</a>
               </p>
             ) : (
               messages.map((message) => (
@@ -440,7 +440,7 @@ export function ChatPage({ engineClient, chatClient }: ChatPageProps) {
           {error ? (
             <p className="wizard__error">
               {error}{" "}
-              <a href="#/models">Models</a>
+              <a href="#/settings/models">Models</a>
             </p>
           ) : null}
           <form
