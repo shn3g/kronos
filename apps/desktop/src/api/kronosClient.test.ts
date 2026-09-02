@@ -31,6 +31,37 @@ async function serve(
 }
 
 describe("probeEngineState", () => {
+  it("does not send Authorization when token is empty", async () => {
+    const baseUrl = await serve((req, res) => {
+      if (req.url === "/health") {
+        expect(req.headers.authorization).toBeUndefined();
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ status: "ok" }));
+        return;
+      }
+      if (req.url === "/version") {
+        expect(req.headers.authorization).toBeUndefined();
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            engine_version: "0.2.0",
+            min_client_version: "0.1.0",
+            compatible: true,
+          }),
+        );
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+
+    const state = await probeEngineState({
+      baseUrl,
+      token: "",
+    });
+    expect(state).toEqual({ status: "ready", version: "0.2.0" });
+  });
+
   it("reports ready only when health is ok and versions are compatible", async () => {
     const baseUrl = await serve((req, res) => {
       if (req.url === "/health") {

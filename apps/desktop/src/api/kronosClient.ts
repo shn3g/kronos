@@ -17,10 +17,12 @@ export async function probeEngineState(options: {
 }): Promise<EngineConnectionState> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const clientVersion = options.clientVersion ?? DESKTOP_CLIENT_VERSION;
-  const headers = {
-    Authorization: `Bearer ${options.token}`,
+  const headers: Record<string, string> = {
     "X-Kronos-Client-Version": clientVersion,
   };
+  if (options.token.trim().length > 0) {
+    headers.Authorization = `Bearer ${options.token}`;
+  }
   try {
     const health = await fetchImpl(`${trimSlash(options.baseUrl)}/health`, { headers });
     if (!health.ok) {
