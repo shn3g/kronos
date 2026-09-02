@@ -142,8 +142,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build desktop artifact
-        working-directory: apps/desktop
-        run: pnpm tauri build --bundles ${{ matrix.bundle }}
+        shell: bash
+        run: bash scripts/tauri-ci-build.sh ${{ matrix.bundle }}
 
       - name: Smoke bundled engine
         if: runner.os == 'Linux'

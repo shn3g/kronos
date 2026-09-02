@@ -20,6 +20,7 @@ def test_ci_runs_on_ready_pull_requests_not_on_main_push() -> None:
     assert "on:\n  push:\n    branches: [main]" not in ci.replace("\r\n", "\n")
     assert "cargo test" in ci
     assert "clippy" in ci
+    assert "scripts/tauri-ci-build.sh" in ci
 
     assert "branches: [main]" not in security
     assert "pull_request:" in security
@@ -46,9 +47,16 @@ def test_platform_unit_files_and_release_workflow_exist() -> None:
     assert "sbom" in text.lower()
     assert "provenance" in text.lower()
     assert "TAURI_SIGNING_PRIVATE_KEY" in text
+    assert "scripts/tauri-ci-build.sh" in text
+    assert "allow-missing-signatures" in text
     assert "fail" in text.lower()
     assert "if-no-files-found: error" in text
     assert "--claim-signed" in text
+    build = ROOT / "scripts" / "tauri-ci-build.sh"
+    assert build.is_file()
+    script = build.read_text(encoding="utf-8")
+    assert "createUpdaterArtifacts" in script
+    assert "TAURI_SIGNING_PRIVATE_KEY" in script
     unit = systemd.read_text(encoding="utf-8")
     assert "StateDirectory=" in unit or "ReadWritePaths=" in unit
     assert "ProtectHome=read-only" not in unit
