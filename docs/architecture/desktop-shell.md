@@ -16,7 +16,7 @@ Settings hub sections: General, Models, Index, Connections (GitHub + Telegram), 
 
 **Files** is a full editor with tree, tabs, Go to file palette, Find/Replace/Go to line, Ask in chat, and save via the workspace files API. **Terminal** (View menu) is a real PTY in the enrolled folder. Inspector **Changes** can revert paths and record a local git commit (Kronos does not push).
 
-Settings → Models includes local embeddings install (MiniLM or bge-small, SHA-256 pinned catalog). Settings → Updates checks GitHub Releases `latest.json` when a publisher pubkey is configured; until then the check stays disabled (fail closed).
+Settings → Models includes local embeddings install (MiniLM or bge-small, SHA-256 pinned catalog). Settings → Updates checks GitHub Releases `latest.json` and verifies bundle signatures with the publisher minisign public key.
 
 Vite `pnpm --filter @kronos/desktop dev` can use the same UI in a browser while the engine is running: the dev server proxies `/kronos-engine` using `engine_ready.json` plus `install.json`, so the page never holds the bearer token. `vite preview` and Playwright smoke do not enable that proxy, so they stay engine-unavailable. See [Agent desktop](agent-desktop.md).
 

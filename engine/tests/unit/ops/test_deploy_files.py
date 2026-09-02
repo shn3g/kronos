@@ -46,6 +46,7 @@ def test_platform_unit_files_and_release_workflow_exist() -> None:
     assert "sbom" in text.lower()
     assert "provenance" in text.lower()
     assert "TAURI_SIGNING_PRIVATE_KEY" in text
+    assert "gh release delete" in text
     assert "fail" in text.lower()
     assert "if-no-files-found: error" in text
     assert "--claim-signed" in text
