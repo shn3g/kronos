@@ -17,6 +17,7 @@ from kronos_engine.adapters.git.repository import FilesystemGitInspector
 from kronos_engine.adapters.git.worktrees import CacheRuntimeLayout
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import RepositoryService
+from kronos_engine.application.embeddings import EmbeddingBackend
 from kronos_engine.config.settings import Settings
 from kronos_engine.domain.entities import IdentifierError, Lease, TaskId
 from kronos_engine.domain.version import client_is_compatible
@@ -37,6 +38,14 @@ class Finding:
 
 
 @dataclass(frozen=True, slots=True)
+class HealthCheck:
+    id: str
+    label: str
+    ok: bool
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
 class DoctorReport:
     ready: bool
     health: str
@@ -44,6 +53,7 @@ class DoctorReport:
     model_degraded: bool
     index_degraded: bool
     findings: tuple[Finding, ...] = ()
+    checks: tuple[HealthCheck, ...] = ()
 
     def __str__(self) -> str:
         return (
@@ -109,6 +119,7 @@ class DoctorService:
         *,
         repos: RepositoryService | None = None,
         indexer: IndexingService | None = None,
+        embedder_backend: EmbeddingBackend | None = None,
     ) -> None:
         self._conn = conn
         self._settings = settings
@@ -125,6 +136,9 @@ class DoctorService:
             indexer=indexer or IndexingService(settings.paths),
         )
         self._indexer = indexer or IndexingService(settings.paths)
+        self._embedder_backend = embedder_backend or EmbeddingBackend(
+            kind="none", model_id="", display_name="Sparse only"
+        )
         self._goals = SqliteGoalStore(conn)
         self._leases = SqliteLeases(conn)
         self._ensure_ops_tables()
@@ -154,6 +168,11 @@ class DoctorService:
             model_degraded=model_degraded,
             index_degraded=index_degraded,
             findings=tuple(findings),
+            checks=self._health_checks(
+                compatible=compatible,
+                model_degraded=model_degraded,
+                index_degraded=index_degraded,
+            ),
         )
 
     def backup(self, dest: Path) -> BackupArchive:
@@ -456,6 +475,95 @@ class DoctorService:
             "SELECT 1 FROM ops_degradation WHERE kind = ? LIMIT 1", (kind,)
         ).fetchone()
         return row is not None
+
+    def _health_checks(
+        self,
+        *,
+        compatible: bool,
+        model_degraded: bool,
+        index_degraded: bool,
+    ) -> tuple[HealthCheck, ...]:
+        orchestrator = self._conn.execute(
+            "SELECT profile_id FROM model_assignments WHERE role = 'orchestrator'"
+        ).fetchone()
+        repo_row = self._conn.execute("SELECT COUNT(*) FROM repositories").fetchone()
+        repo_count = int(repo_row[0]) if repo_row is not None else 0
+        model_ok = orchestrator is not None and not model_degraded
+        secrets_ok, secrets_detail = self._secrets_health()
+        chunk_total = 0
+        for repo in self._repos.list():
+            try:
+                status = self._indexer.status(repo.id.value)
+                chunk_total += status.chunk_count
+            except Exception:
+                continue
+        backend = self._embedder_backend
+        dense_ok = backend.kind in {"onnx", "openai_compatible"}
+        if not index_degraded:
+            index_detail = f"{backend.display_name} backend, {chunk_total} chunks indexed."
+        else:
+            index_detail = "The search index needs a rebuild."
+        if dense_ok:
+            embeddings_detail = f"Dense embeddings use {backend.display_name}."
+        else:
+            embeddings_detail = "Dense embeddings are not configured. Sparse search only."
+        return (
+            HealthCheck(
+                id="engine",
+                label="Engine",
+                ok=compatible,
+                detail=(
+                    "The local engine is running."
+                    if compatible
+                    else "This desktop cannot use the connected engine version."
+                ),
+            ),
+            HealthCheck(
+                id="model",
+                label="Model",
+                ok=model_ok,
+                detail=(
+                    "An orchestrator model is assigned."
+                    if model_ok
+                    else "Connect an orchestrator model before chatting."
+                ),
+            ),
+            HealthCheck(
+                id="workspace",
+                label="Workspace",
+                ok=repo_count > 0,
+                detail=(
+                    f"{repo_count} folder{'s' if repo_count != 1 else ''} enrolled."
+                    if repo_count > 0
+                    else "Open a git folder to index and edit code."
+                ),
+            ),
+            HealthCheck(
+                id="index",
+                label="Index",
+                ok=not index_degraded,
+                detail=index_detail,
+            ),
+            HealthCheck(
+                id="secrets",
+                label="Secrets",
+                ok=secrets_ok,
+                detail=secrets_detail,
+            ),
+            HealthCheck(
+                id="embeddings",
+                label="Embeddings",
+                ok=dense_ok,
+                detail=embeddings_detail,
+            ),
+        )
+
+    def _secrets_health(self) -> tuple[bool, str]:
+        try:
+            self._secrets.get("kronos:health-probe")
+        except Exception:
+            return False, "The operating system secret store is not available."
+        return True, "The operating system secret store is reachable. API keys stay there."
 
     def _degradation_findings(self) -> list[Finding]:
         rows = self._conn.execute("SELECT kind, target, detail FROM ops_degradation").fetchall()

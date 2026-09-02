@@ -62,6 +62,30 @@ describe("createProductionRepositoriesClient", () => {
     });
   });
 
+  it("reverts a chat write through the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path, body) => {
+      expect(method).toBe("POST");
+      expect(path).toBe("/repositories/repo_alpha/writes/revert");
+      expect(body).toEqual({ path: "src/App.tsx" });
+      return { status: 200, body: JSON.stringify({ ok: true, path: "src/App.tsx" }) };
+    });
+
+    await expect(client.revertWrite("repo_alpha", "src/App.tsx")).resolves.toBeUndefined();
+  });
+
+  it("commits working-tree files through the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path, body) => {
+      expect(method).toBe("POST");
+      expect(path).toBe("/repositories/repo_alpha/commits");
+      expect(body).toEqual({ message: "Fix App", paths: ["src/App.tsx"] });
+      return { status: 200, body: JSON.stringify({ ok: true }) };
+    });
+
+    await expect(
+      client.commitFiles("repo_alpha", "Fix App", ["src/App.tsx"]),
+    ).resolves.toBeUndefined();
+  });
+
   it("lists working-tree changes from the engine JSON proxy", async () => {
     const client = createProductionRepositoriesClient(async (method, path) => {
       expect(method).toBe("GET");

@@ -17,6 +17,7 @@ describe("checksFromLocal", () => {
       "workspace",
       "index",
       "secrets",
+      "embeddings",
     ]);
     expect(checks[0]?.ok).toBe(true);
     expect(checks[1]?.ok).toBe(false);

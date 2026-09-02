@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { GoalRecord, GoalsClient } from "../features/goals/client";
 import { checksFromLocal, type HealthCheck } from "../features/health/checks";
 import type { HomeClient, HomeDashboard } from "../features/home/client";
+import type { SettingsPageClients } from "../features/settings/client";
 import type { EnrolledRepository, RepositoriesClient } from "../features/workspaces/client";
 import type { InspectorChange } from "./InspectorDrawer";
 import { inspectWorkspaceChanges } from "./inspectWorkspaceChanges";
@@ -19,6 +20,7 @@ interface SessionContextInput {
   repositoriesClient: RepositoriesClient;
   homeClient: HomeClient;
   goalsClient: GoalsClient;
+  settingsClient: SettingsPageClients;
 }
 
 function changesForWorkspace(dashboard: HomeDashboard, workspaceId: string | null): InspectorChange[] {
@@ -47,6 +49,7 @@ export function useSessionContext({
   repositoriesClient,
   homeClient,
   goalsClient,
+  settingsClient,
 }: SessionContextInput): {
   repositories: EnrolledRepository[];
   workspaceId: string | null;
@@ -60,6 +63,7 @@ export function useSessionContext({
   const [workspaceId, setWorkspaceIdState] = useState<string | null>(null);
   const [changes, setChanges] = useState<InspectorChange[]>([]);
   const [goals, setGoals] = useState<{ id: string; title: string; state: string }[]>([]);
+  const [doctorChecks, setDoctorChecks] = useState<HealthCheck[] | null>(null);
   const [indexReady, setIndexReady] = useState(false);
   const dashboardRef = useRef<HomeDashboard | null>(null);
   const goalsRef = useRef<GoalRecord[]>([]);
@@ -123,11 +127,21 @@ export function useSessionContext({
           setGoals([]);
         }
       }
+      try {
+        const doctor = await settingsClient.doctor();
+        if (!cancelled && doctor.checks.length > 0) {
+          setDoctorChecks(doctor.checks);
+        }
+      } catch {
+        if (!cancelled) {
+          setDoctorChecks(null);
+        }
+      }
       if (cancelled) {
         return;
       }
+      applyWorkspace(resolveActiveWorkspaceId(listedRepos, readStoredWorkspaceId()));
       const nextId = resolveActiveWorkspaceId(listedRepos, readStoredWorkspaceId());
-      applyWorkspace(nextId);
       if (!nextId) {
         return;
       }
@@ -156,7 +170,7 @@ export function useSessionContext({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [engineReady, repositoriesClient, homeClient, goalsClient]);
+  }, [engineReady, repositoriesClient, homeClient, goalsClient, settingsClient]);
 
   const localChecks = checksFromLocal({
     engineReady,
@@ -171,7 +185,7 @@ export function useSessionContext({
     setWorkspaceId,
     changes,
     goals,
-    checks: localChecks,
+    checks: doctorChecks ?? localChecks,
     refresh: () => refreshRef.current(),
   };
 }
