@@ -135,8 +135,11 @@ export function GoalsWorkbench({
       return;
     }
     let cancelled = false;
+    setTasks([]);
+    setReadiness(null);
+    setAutonomyMode(null);
+    setError(null);
     const load = async () => {
-      setError(null);
       try {
         const detail = await client.get(selectedId);
         if (cancelled) {
@@ -155,13 +158,13 @@ export function GoalsWorkbench({
             const frozen = repoDetail.policy.autonomy.freeze;
             setAutonomyMode(frozen ? `${mode} (frozen)` : mode);
           }
-        } else {
-          setReadiness(null);
-          setAutonomyMode(null);
         }
       } catch {
         if (!cancelled) {
           setError("Could not load goal details.");
+          setTasks([]);
+          setReadiness(null);
+          setAutonomyMode(null);
         }
       }
     };
