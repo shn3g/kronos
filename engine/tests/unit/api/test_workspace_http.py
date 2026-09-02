@@ -205,7 +205,8 @@ async def test_workspace_terminal_cancel_stops_a_running_command(
     assert enrolled.status_code == 200
     repo_id = enrolled.json()["repository"]["id"]
     (repo / "sleep.py").write_text(
-        "from pathlib import Path\nimport time\nPath('started.txt').write_text('1')\ntime.sleep(8)\n",
+        "from pathlib import Path\nimport time\n"
+        "Path('started.txt').write_text('1')\ntime.sleep(8)\n",
         encoding="utf-8",
     )
 
@@ -256,7 +257,8 @@ async def test_workspace_terminal_peek_streams_output_and_fail_closed(
     enrolled = await http.post("/repositories", headers=headers, json={"path": str(repo)})
     repo_id = enrolled.json()["repository"]["id"]
     (repo / "stream.py").write_text(
-        "import time\nprint('hello-live', flush=True)\ntime.sleep(4)\nprint('done-live', flush=True)\n",
+        "import time\nprint('hello-live', flush=True)\n"
+        "time.sleep(4)\nprint('done-live', flush=True)\n",
         encoding="utf-8",
     )
 
@@ -347,7 +349,11 @@ async def test_workspace_terminal_shell_session_fail_closed(
         for _ in range(80):
             peeked = await http.get(f"/repositories/{repo_id}/terminal/runs", headers=headers)
             output = peeked.json().get("output", "")
-            if "hello-shell" in output and "second-line" in output and peeked.json()["running"] is True:
+            if (
+                "hello-shell" in output
+                and "second-line" in output
+                and peeked.json()["running"] is True
+            ):
                 seen_second = True
                 break
             await asyncio.sleep(0.05)

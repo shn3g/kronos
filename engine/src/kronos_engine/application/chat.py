@@ -41,7 +41,7 @@ from kronos_engine.application.workspace_files import (
     list_workspace_files,
     read_workspace_file,
 )
-from kronos_engine.application.workspace_terminal import run_workspace_command
+from kronos_engine.application.workspace_terminal import run_workspace_command, terminal_run_key
 from kronos_engine.application.workspace_writes import (
     WorkspaceWriteTooLarge,
     write_workspace_file,
@@ -924,6 +924,7 @@ class ChatService:
             Path(record.realpath),
             stripped,
             timeout_seconds=COMMAND_TIMEOUT_SECONDS,
+            run_key=terminal_run_key(repository_id),
             should_stop=cancel.is_set,
         )
         if result["cancelled"]:

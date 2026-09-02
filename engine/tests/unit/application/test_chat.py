@@ -900,6 +900,58 @@ def test_run_command_uses_workspace_cwd(tmp_path: Path) -> None:
     assert "Exit 0" in (tool.content + (tool.tool_json or ""))
 
 
+def test_run_command_shares_the_terminal_run_key(tmp_path: Path) -> None:
+    import time
+
+    from kronos_engine.application.workspace_terminal import (
+        peek_workspace_command,
+        terminal_run_key,
+    )
+
+    fence_holder: list[str] = []
+
+    def complete(request: CompletionRequest, secret: object) -> CompletionResult:
+        _ = request, secret
+        if getattr(complete, "first", True):
+            complete.first = False  # type: ignore[attr-defined]
+            return CompletionResult(text=fence_holder[0], usage=TokenUsage(tokens=1))
+        return CompletionResult(text="Done.", usage=TokenUsage(tokens=1))
+
+    complete.first = True  # type: ignore[attr-defined]
+    chat, _goals, enrolled, conversation, _indexer, _conn = _harness(
+        tmp_path, complete=complete
+    )
+    root = Path(enrolled.realpath)
+    command = _python_script(
+        root,
+        "stream.py",
+        "import time\nprint('hello-live', flush=True)\n"
+        "time.sleep(3)\nprint('done-live', flush=True)\n",
+    )
+    fence_holder.append(
+        "```tool\n" + json.dumps({"name": "run_command", "command": command}) + "\n```"
+    )
+    run_key = terminal_run_key(enrolled.id.value)
+    seen_box = {"seen": False}
+
+    def watch() -> None:
+        deadline = time.monotonic() + 4
+        while time.monotonic() < deadline:
+            snapshot = peek_workspace_command(run_key)
+            if snapshot is not None and "hello-live" in snapshot["output"]:
+                assert snapshot["running"] is True
+                seen_box["seen"] = True
+                return
+            time.sleep(0.05)
+
+    watcher = threading.Thread(target=watch)
+    watcher.start()
+    chat.handle_message(conversation.id, "Run stream")
+    watcher.join(timeout=8)
+    assert seen_box["seen"] is True
+    assert peek_workspace_command(run_key) is None
+
+
 def test_run_command_needs_an_open_workspace(tmp_path: Path) -> None:
     chat, _goals, _enrolled, _conversation, _indexer, _conn = _harness(
         tmp_path,

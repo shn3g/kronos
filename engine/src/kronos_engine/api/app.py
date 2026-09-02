@@ -1437,7 +1437,10 @@ def create_app(
     ) -> TerminalRunResponse:
         with repository_service() as repos:
             record = _load(repos, repository_id)
-        result = start_workspace_shell(Path(record.realpath), run_key=terminal_run_key(repository_id))
+        result = start_workspace_shell(
+            Path(record.realpath),
+            run_key=terminal_run_key(repository_id),
+        )
         return TerminalRunResponse(
             command=result["command"],
             exit_code=result["exit_code"],
@@ -1460,7 +1463,10 @@ def create_app(
             _load(repos, repository_id)
         ok = write_workspace_shell(terminal_run_key(repository_id), body.line)
         if not ok:
-            raise HTTPException(status_code=409, detail="No live terminal session. Start the shell first.")
+            raise HTTPException(
+                status_code=409,
+                detail="No live terminal session. Start the shell first.",
+            )
         return TerminalCancelResponse(ok=True)
 
     @app.post(
@@ -1480,7 +1486,10 @@ def create_app(
             rows=body.rows,
         )
         if not ok:
-            raise HTTPException(status_code=409, detail="No live terminal session. Start the shell first.")
+            raise HTTPException(
+                status_code=409,
+                detail="No live terminal session. Start the shell first.",
+            )
         return TerminalCancelResponse(ok=True)
 
     GITHUB_APP_CREATE_URL = "https://github.com/settings/apps/new"

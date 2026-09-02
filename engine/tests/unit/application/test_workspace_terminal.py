@@ -171,8 +171,6 @@ def test_peek_returns_none_when_nothing_is_running() -> None:
 
 
 def test_workspace_shell_stays_open_and_accepts_another_line(tmp_path: Path) -> None:
-    import time
-
     from kronos_engine.application.workspace_terminal import (
         cancel_workspace_command,
         peek_workspace_command,
@@ -256,8 +254,9 @@ def test_start_workspace_shell_reuses_a_live_session(tmp_path: Path) -> None:
 
     repo = init_git_repo(tmp_path / "alpha", files={"README.md": "hello\n"})
     run_key = "terminal:repo_reuse"
-    first = start_workspace_shell(repo, run_key=run_key)
+    started = start_workspace_shell(repo, run_key=run_key)
     try:
+        assert started["running"] is True
         assert write_workspace_shell(run_key, "echo keep-me\n") is True
         _wait_for_output(run_key, "keep-me", timeout_seconds=4)
         again = start_workspace_shell(repo, run_key=run_key)
