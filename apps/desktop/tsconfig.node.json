@@ -15,5 +15,5 @@
     "noFallthroughCasesInSwitch": true,
     "types": ["node"]
   },
-  "include": ["vite.config.ts", "playwright.config.ts"]
+  "include": ["vite.config.ts", "playwright.config.ts", "tests/e2e/support/mockOpenAi.ts", "tests/e2e/support/startWithEngine.ts"]
 }
