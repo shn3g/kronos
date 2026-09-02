@@ -785,4 +785,30 @@ describe("FilesPage", () => {
     await user.type(await screen.findByRole("searchbox", { name: /find in file/i }), "[[");
     expect(screen.getByText(/that regular expression is not valid/i)).toBeInTheDocument();
   });
+
+  it("indents nested file-tree rows with --tree-depth, matching the CSS variable", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { dirname, join } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const css = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../../styles/shell.css"),
+      "utf8",
+    );
+    const itemRule = css.match(/\.files-page__item \{[^}]+\}/)?.[0] ?? "";
+
+    render(
+      <FilesPage
+        engineClient={engine("ready")}
+        repositoryId="repo_alpha"
+        repositoriesClient={repos()}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+    await userEvent.setup().click(await screen.findByRole("treeitem", { name: "src" }));
+    const nested = screen.getByRole("treeitem", { name: "app.py" });
+
+    expect(nested.style.getPropertyValue("--tree-depth")).toBe("1");
+    expect(itemRule).toContain("var(--tree-depth");
+    expect(itemRule).not.toContain("var(--depth");
+  });
 });
