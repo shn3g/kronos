@@ -193,7 +193,9 @@ def test_write_release_notes_uses_changelog_then_download_warnings(
     assert "Kronos_0.2.0_amd64.deb" in text
     assert "Kronos_0.2.0_macos.app.zip" in text
     assert "Unsigned" in text
-    assert "Python 3.11+" in text
+    assert "bundled kronos-engine sidecar" in text
+    assert "Python, Node, and Rust are not required to run the app" in text
+    assert "Python 3.11+ must be on PATH" not in text
 
 
 def test_script_cli_subprocess_reports_mismatch(tmp_path: Path) -> None:

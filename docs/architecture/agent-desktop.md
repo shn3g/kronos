@@ -19,7 +19,7 @@ Kronos is a locally installed desktop app (Tauri WebView, also previewable in a 
 ## First run
 
 1. Open Kronos. Installers start a bundled `kronos-engine` sidecar within seconds. If the engine is still starting, the gate shows "Starting Kronos". Development builds may use `python -m kronos_engine` on PATH instead; that engine should match the desktop version.
-2. Connect a model if no **orchestrator** is assigned. Presets include OpenCode Zen, OpenRouter, Ollama, and LM Studio, or any OpenAI-compatible URL. API keys are optional for local endpoints. Keys go to the OS secret store through the existing provider API.
+2. Connect a model if no **orchestrator** is assigned. Presets include OpenAI, OpenRouter, OpenCode Zen, Ollama, and LM Studio, or any OpenAI-compatible URL. API keys are optional for local endpoints. Keys go to the OS secret store through the existing provider API.
 3. A workspace folder is not required to pass the gate. Chat can explain Kronos. Open a git folder from File or Workspaces when you want indexing, Files, Terminal, and inspector Changes. The same UI can run in a browser preview while the local engine is running (`pnpm --filter @kronos/desktop dev`). The page talks through a same-origin `/kronos-engine` proxy, so it never holds the engine token. `vite preview` stays engine-unavailable.
 
 ![Chat empty state](../images/0.5.0/chat.png)

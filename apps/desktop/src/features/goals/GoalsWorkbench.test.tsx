@@ -403,4 +403,20 @@ describe("GoalsWorkbench", () => {
     expect(await screen.findByRole("heading", { level: 2, name: "New goal" })).toBeInTheDocument();
     expect(tick).toHaveBeenCalled();
   });
+
+  it("shows the workbench immediately when the shell already reports the engine ready", () => {
+    render(
+      <GoalsWorkbench
+        engineClient={{ getState: () => new Promise(() => undefined) }}
+        engineReady
+        goalsClient={clients()}
+        repositoriesClient={repos()}
+        runsClient={runs()}
+      />,
+    );
+
+    expect(screen.queryByText("Waiting for the engine.")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Goals" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create goal/i })).toBeInTheDocument();
+  });
 });

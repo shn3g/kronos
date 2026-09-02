@@ -24,6 +24,29 @@ describe("RunsPage", () => {
     expect(list).not.toHaveBeenCalled();
   });
 
+  it("shows runs immediately when the parent already reports the engine ready", async () => {
+    const list = vi.fn(async () => [
+      {
+        id: "run_1",
+        goalId: "goal_1",
+        taskId: "task_add",
+        status: "succeeded",
+        evidence: "tests/test_repro.py",
+        prUrl: null,
+      },
+    ]);
+    render(
+      <RunsPage
+        engineClient={{ getState: () => new Promise(() => undefined) }}
+        engineReady
+        runsClient={{ list, pollEvents: async () => ({ events: [], headSeq: 0 }) }}
+      />,
+    );
+
+    expect(screen.queryByText(/waiting for the engine/i)).not.toBeInTheDocument();
+    expect(await screen.findByText(/task_add/)).toBeInTheDocument();
+  });
+
   it("shows run evidence when the engine is ready", async () => {
     const list: RunsClient["list"] = async () => [
       {

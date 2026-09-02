@@ -28,6 +28,8 @@ export interface GoalsWorkbenchClients extends GoalsClient {
 
 interface GoalsWorkbenchProps {
   engineClient: EngineClient;
+  /** When the shell already knows the engine is ready, skip the waiting flash on mount. */
+  engineReady?: boolean;
   goalsClient?: GoalsWorkbenchClients;
   repositoriesClient?: RepositoriesClient;
   runsClient?: RunsClient;
@@ -44,6 +46,7 @@ const productionWorkbenchClient: GoalsWorkbenchClients = {
 
 export function GoalsWorkbench({
   engineClient,
+  engineReady = false,
   goalsClient,
   repositoriesClient,
   runsClient,
@@ -52,7 +55,7 @@ export function GoalsWorkbench({
   const client = goalsClient ?? productionWorkbenchClient;
   const repos = repositoriesClient ?? productionRepos;
   const runs = runsClient ?? productionRuns;
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(engineReady);
   const [goals, setGoals] = useState<GoalRecord[]>([]);
   const [repositories, setRepositories] = useState<EnrolledRepository[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -71,6 +74,9 @@ export function GoalsWorkbench({
   });
 
   useEffect(() => {
+    if (engineReady) {
+      setReady(true);
+    }
     let cancelled = false;
     const apply = () => {
       void engineClient.getState().then((state) => {
@@ -85,7 +91,7 @@ export function GoalsWorkbench({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [engineClient]);
+  }, [engineClient, engineReady]);
 
   useEffect(() => {
     if (!ready) {
@@ -315,6 +321,7 @@ export function GoalsWorkbench({
       </div>
       <RunsPage
         engineClient={engineClient}
+        engineReady={ready}
         runsClient={runs}
         {...(selected ? { goalId: selected.id } : {})}
       />

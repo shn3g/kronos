@@ -174,7 +174,8 @@ def build_release_notes(changelog: str, version: str) -> str:
         "Unsigned. Windows SmartScreen and macOS Gatekeeper will warn. Use Run anyway or "
         "right-click Open.\n"
         "\n"
-        "Python 3.11+ must be on PATH. Node and Rust are not required to run the installer.\n"
+        "Installers include a bundled kronos-engine sidecar. Python, Node, and Rust are not "
+        "required to run the app.\n"
         "\n"
         "SHA256SUMS is optional verification. Source zip/tar.gz is the tree, not the app.\n"
     )

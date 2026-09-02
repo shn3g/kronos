@@ -580,6 +580,7 @@ export function App({
                 <div className="app-main__panel">
                   <GoalsWorkbench
                     engineClient={engine}
+                    engineReady={engineReady}
                     goalsClient={goalsPageClient}
                     repositoriesClient={repos}
                     runsClient={productionRuns}
