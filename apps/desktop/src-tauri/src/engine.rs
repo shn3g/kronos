@@ -20,6 +20,9 @@ use tauri_plugin_dialog::DialogExt;
 const CLIENT_VERSION: &str = "0.2.0";
 const READY_TIMEOUT: Duration = Duration::from_secs(20);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+const ENGINE_JSON_TIMEOUT: Duration = Duration::from_secs(30);
+const ENGINE_JSON_GET_TIMEOUT: Duration = Duration::from_secs(8);
+const INDEX_JOB_TIMEOUT: Duration = Duration::from_secs(180);
 const STREAM_READ_POLL: Duration = Duration::from_millis(200);
 const STREAM_MAX_IDLE: Duration = Duration::from_secs(300);
 const ENGINE_STREAM_EVENT: &str = "engine-stream";
@@ -154,7 +157,13 @@ pub fn engine_json(
         }
     });
     let headers = [("Authorization", auth.as_str())];
-    match loopback_request(&method, &url, &headers, payload.as_deref()) {
+    match loopback_request(
+        &method,
+        &url,
+        &headers,
+        payload.as_deref(),
+        engine_json_timeout(&method, &path),
+    ) {
         Ok((status, response_body)) => EngineJsonResponse {
             status,
             body: response_body,
@@ -207,6 +216,10 @@ struct EngineStreamEvent {
     citations: Option<Vec<StreamCitation>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     goal_refs: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    goal: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -218,9 +231,12 @@ struct StreamCitation {
     end_line: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum SseDataEvent {
     Delta(String),
+    Tool(serde_json::Value),
+    Goal(serde_json::Value),
+    Error(String),
     Done {
         content: String,
         citations: Vec<StreamCitation>,
@@ -283,6 +299,8 @@ fn run_engine_stream(
                 content: None,
                 citations: None,
                 goal_refs: None,
+                tool: None,
+                goal: None,
             },
         );
     };
@@ -318,6 +336,8 @@ fn run_engine_stream(
                     content: None,
                     citations: None,
                     goal_refs: None,
+                    tool: None,
+                    goal: None,
                 },
             );
         }
@@ -401,7 +421,7 @@ fn stream_loopback(
             }
             sse_buf.push_str(&String::from_utf8_lossy(&decoded));
             for event in drain_sse_events(&mut sse_buf) {
-                if matches!(event, SseDataEvent::Done { .. }) {
+                if matches!(event, SseDataEvent::Done { .. } | SseDataEvent::Error(_)) {
                     completed = true;
                 }
                 emit_sse(app, request_id, event);
@@ -445,6 +465,8 @@ fn stream_loopback(
                 content: None,
                 citations: None,
                 goal_refs: None,
+                tool: None,
+                goal: None,
             },
         );
     }
@@ -463,6 +485,50 @@ fn emit_sse(app: &AppHandle, request_id: &str, event: SseDataEvent) {
                 content: None,
                 citations: None,
                 goal_refs: None,
+                tool: None,
+                goal: None,
+            },
+        ),
+        SseDataEvent::Tool(tool) => emit_stream(
+            app,
+            EngineStreamEvent {
+                request_id: request_id.to_string(),
+                delta: None,
+                done: false,
+                error: None,
+                content: None,
+                citations: None,
+                goal_refs: None,
+                tool: Some(tool),
+                goal: None,
+            },
+        ),
+        SseDataEvent::Goal(goal) => emit_stream(
+            app,
+            EngineStreamEvent {
+                request_id: request_id.to_string(),
+                delta: None,
+                done: false,
+                error: None,
+                content: None,
+                citations: None,
+                goal_refs: None,
+                tool: None,
+                goal: Some(goal),
+            },
+        ),
+        SseDataEvent::Error(message) => emit_stream(
+            app,
+            EngineStreamEvent {
+                request_id: request_id.to_string(),
+                delta: None,
+                done: true,
+                error: Some(message),
+                content: None,
+                citations: None,
+                goal_refs: None,
+                tool: None,
+                goal: None,
             },
         ),
         SseDataEvent::Done {
@@ -479,6 +545,8 @@ fn emit_sse(app: &AppHandle, request_id: &str, event: SseDataEvent) {
                 content: Some(content),
                 citations: Some(citations),
                 goal_refs: Some(goal_refs),
+                tool: None,
+                goal: None,
             },
         ),
     }
@@ -617,6 +685,20 @@ fn parse_sse_data_line(line: &str) -> Option<SseDataEvent> {
         return None;
     }
     let value: serde_json::Value = serde_json::from_str(data).ok()?;
+    if let Some(tool) = value.get("tool") {
+        return Some(SseDataEvent::Tool(tool.clone()));
+    }
+    if let Some(goal) = value.get("goal") {
+        return Some(SseDataEvent::Goal(goal.clone()));
+    }
+    if let Some(error) = value.get("error") {
+        return Some(SseDataEvent::Error(
+            error
+                .as_str()
+                .unwrap_or("engine stream error")
+                .to_string(),
+        ));
+    }
     let done = value.get("done").and_then(|item| item.as_bool()) == Some(true);
     if done || (value.get("content").is_some() && value.get("citations").is_some()) {
         return Some(SseDataEvent::Done {
@@ -773,7 +855,7 @@ pub fn import_telegram_bot_token(
     let url = format!("{base}/telegram/token");
     let payload = serde_json::json!({ "token": token }).to_string();
     let headers = [("Authorization", auth.as_str())];
-    match loopback_request("POST", &url, &headers, Some(payload.as_str())) {
+    match loopback_request("POST", &url, &headers, Some(payload.as_str()), ENGINE_JSON_TIMEOUT) {
         Ok((status, response_body)) => EngineJsonResponse {
             status,
             body: response_body,
@@ -912,10 +994,25 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
     {
         return method == "POST";
     }
+    if path == "/conversations" || path == "/conversations/" {
+        return method == "GET" || method == "POST";
+    }
     if let Some(rest) = path.strip_prefix("/conversations/") {
         let rest = rest.trim_end_matches('/');
-        if let Some(id) = rest.strip_suffix("/messages") {
-            return method == "POST" && skill_memory_id_ok(id.trim_end_matches('/'));
+        if rest.is_empty() {
+            return false;
+        }
+        if let Some((id, action)) = rest.split_once('/') {
+            let action = action.trim_end_matches('/');
+            if method == "GET" {
+                return match action.strip_prefix("images/") {
+                    Some(image_id) => skill_memory_id_ok(id) && skill_memory_id_ok(image_id),
+                    None => false,
+                };
+            }
+            return method == "POST"
+                && skill_memory_id_ok(id)
+                && matches!(action, "messages" | "cancel");
         }
         return (method == "GET" || method == "DELETE") && skill_memory_id_ok(rest);
     }
@@ -948,11 +1045,18 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
                     | ("GET", Some("index/map"))
                     | ("GET", Some("conversations"))
                     | ("GET", Some("safety"))
+                    | ("GET", Some("files"))
+                    | ("GET", Some("files/contents"))
+                    | ("PUT", Some("files/contents"))
+                    | ("GET", Some("changes"))
+                    | ("GET", Some("goal-readiness"))
                     | ("POST", Some("conversations"))
                     | ("POST", Some("autonomy"))
                     | ("POST", Some("index/rebuild"))
                     | ("POST", Some("index/refresh"))
                     | ("POST", Some("index/watch"))
+                    | ("POST", Some("commits"))
+                    | ("POST", Some("writes/revert"))
                     | ("POST", Some("pause" | "disable" | "remove" | "re-enrol" | "resume"))
             )
         }
@@ -1292,7 +1396,20 @@ fn parse_loopback_http_url(url: &str) -> Result<LoopbackUrl, String> {
 }
 
 fn loopback_get(url: &str, extra_headers: &[(&str, &str)]) -> Result<(u16, String), String> {
-    loopback_request("GET", url, extra_headers, None)
+    loopback_request("GET", url, extra_headers, None, PROBE_TIMEOUT)
+}
+
+fn engine_json_timeout(method: &str, path: &str) -> Duration {
+    let normalized = path.split('?').next().unwrap_or(path).trim_end_matches('/');
+    if method == "POST"
+        && (normalized.ends_with("/index/rebuild") || normalized.ends_with("/index/refresh"))
+    {
+        return INDEX_JOB_TIMEOUT;
+    }
+    if method == "POST" || method == "PUT" {
+        return ENGINE_JSON_TIMEOUT;
+    }
+    ENGINE_JSON_GET_TIMEOUT
 }
 
 fn loopback_request(
@@ -1300,15 +1417,16 @@ fn loopback_request(
     url: &str,
     extra_headers: &[(&str, &str)],
     body: Option<&str>,
+    timeout: Duration,
 ) -> Result<(u16, String), String> {
     let parsed = parse_loopback_http_url(url)?;
     let mut stream = TcpStream::connect((parsed.host.as_str(), parsed.port))
         .map_err(|error| error.to_string())?;
     stream
-        .set_read_timeout(Some(PROBE_TIMEOUT))
+        .set_read_timeout(Some(timeout))
         .map_err(|error| error.to_string())?;
     stream
-        .set_write_timeout(Some(PROBE_TIMEOUT))
+        .set_write_timeout(Some(timeout))
         .map_err(|error| error.to_string())?;
     let payload = body.unwrap_or("");
     let mut request = format!(
@@ -1521,6 +1639,43 @@ mod tests {
     }
 
     #[test]
+    fn allowlist_includes_conversation_collection_and_workspace_routes() {
+        assert!(engine_path_allowed("GET", "/conversations"));
+        assert!(engine_path_allowed("POST", "/conversations"));
+        assert!(engine_path_allowed("GET", "/conversations/"));
+        assert!(engine_path_allowed("POST", "/conversations/"));
+        assert!(engine_path_allowed("POST", "/conversations/conv_abc/cancel"));
+        assert!(engine_path_allowed("GET", "/conversations/conv_abc/images/img_abc"));
+        assert!(engine_path_allowed("GET", "/repositories/repo_alpha/files"));
+        assert!(engine_path_allowed("GET", "/repositories/repo_alpha/files/contents"));
+        assert!(engine_path_allowed(
+            "GET",
+            "/repositories/repo_alpha/files/contents?path=src%2Fapp.py"
+        ));
+        assert!(engine_path_allowed("PUT", "/repositories/repo_alpha/files/contents"));
+        assert!(engine_path_allowed("GET", "/repositories/repo_alpha/changes"));
+        assert!(engine_path_allowed("POST", "/repositories/repo_alpha/commits"));
+        assert!(engine_path_allowed("POST", "/repositories/repo_alpha/writes/revert"));
+        assert!(engine_path_allowed("GET", "/repositories/repo_alpha/goal-readiness"));
+        assert!(!engine_path_allowed("GET", "/chat/sessions"));
+        assert!(!engine_path_allowed("POST", "/chat/sessions"));
+        assert!(!engine_path_allowed("POST", "/chat/sessions/chat_1/messages"));
+        assert!(!engine_path_allowed("POST", "/repositories/repo_alpha/terminal/runs"));
+        assert!(!engine_path_allowed(
+            "GET",
+            "/conversations/conv_abc/images/../secret"
+        ));
+        assert!(!engine_path_allowed(
+            "GET",
+            "/conversations/conv_abc/images/img_abc/extra"
+        ));
+        assert!(!engine_path_allowed(
+            "POST",
+            "/conversations/conv_abc/images/img_abc"
+        ));
+    }
+
+    #[test]
     fn engine_stream_command_returns_result_for_tauri_state_refs() {
         let src = include_str!("engine.rs");
         let start = src
@@ -1581,6 +1736,40 @@ mod tests {
     }
 
     #[test]
+    fn parse_sse_forwards_tool_goal_and_error() {
+        assert_eq!(
+            super::parse_sse_data_line(
+                r#"data: {"tool": {"id": "t1", "name": "read_file", "status": "running", "args": {"path": "a.py"}}}"#
+            ),
+            Some(super::SseDataEvent::Tool(serde_json::json!({
+                "id": "t1",
+                "name": "read_file",
+                "status": "running",
+                "args": {"path": "a.py"}
+            })))
+        );
+        assert_eq!(
+            super::parse_sse_data_line(
+                r#"data: {"goal": {"id": "goal_x", "state": "draft", "can_execute": false, "readiness": []}}"#
+            ),
+            Some(super::SseDataEvent::Goal(serde_json::json!({
+                "id": "goal_x",
+                "state": "draft",
+                "can_execute": false,
+                "readiness": []
+            })))
+        );
+        assert_eq!(
+            super::parse_sse_data_line(r#"data: {"error": "the model did not answer"}"#),
+            Some(super::SseDataEvent::Error("the model did not answer".into()))
+        );
+        assert_eq!(
+            super::parse_sse_data_line(r#"data: {"error": "failed", "done": true}"#),
+            Some(super::SseDataEvent::Error("failed".into()))
+        );
+    }
+
+    #[test]
     fn drain_sse_keeps_incomplete_line() {
         let mut buf = String::from("data: {\"delta\": \"a\"}\n\ndata: {\"delta\": \"b");
         let events = super::drain_sse_events(&mut buf);
@@ -1598,6 +1787,8 @@ mod tests {
             content: None,
             citations: None,
             goal_refs: None,
+            tool: None,
+            goal: None,
         };
         let json = serde_json::to_string(&payload).unwrap();
         assert!(json.contains("requestId"));
@@ -1613,5 +1804,46 @@ mod tests {
             .push(b"5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n")
             .unwrap();
         assert_eq!(decoded, b"hello world");
+    }
+
+    #[test]
+    fn engine_json_timeout_table() {
+        use super::{engine_json_timeout, PROBE_TIMEOUT};
+        use std::time::Duration;
+
+        assert_eq!(PROBE_TIMEOUT, Duration::from_secs(2));
+        assert_eq!(
+            engine_json_timeout("POST", "/repositories/repo_alpha/index/rebuild"),
+            Duration::from_secs(180)
+        );
+        assert_eq!(
+            engine_json_timeout("POST", "/repositories/repo_alpha/index/refresh"),
+            Duration::from_secs(180)
+        );
+        assert_eq!(
+            engine_json_timeout("POST", "/conversations"),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            engine_json_timeout("PUT", "/repositories/repo_alpha/files/contents"),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            engine_json_timeout("GET", "/ops/doctor"),
+            Duration::from_secs(8)
+        );
+        assert_eq!(
+            engine_json_timeout("GET", "/repositories/repo_alpha/files"),
+            Duration::from_secs(8)
+        );
+        assert_eq!(
+            engine_json_timeout("POST", "/conversations/conv_abc/messages"),
+            Duration::from_secs(30)
+        );
+        let src = include_str!("engine.rs");
+        assert!(
+            src.contains("loopback_request(\"GET\", url, extra_headers, None, PROBE_TIMEOUT)"),
+            "loopback_get / ready-check must keep the 2s probe timeout"
+        );
     }
 }
