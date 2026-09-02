@@ -8,6 +8,7 @@ import {
   type UpdateStatusView,
   type UpdatesPageClients,
 } from "./client";
+import type { UpdateCheckResult } from "./appUpdater";
 
 export type { UpdatesPageClients } from "./client";
 
@@ -25,6 +26,11 @@ export function UpdatesPage({ engineClient, updatesClient }: UpdatesPageProps) {
   );
   const [status, setStatus] = useState<UpdateStatusView | null>(null);
   const [rolled, setRolled] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | null>(null);
+  const [installError, setInstallError] = useState<string | null>(null);
+  const signingConfigured = client.updaterSigningConfigured();
 
   useEffect(() => {
     let cancelled = false;
@@ -88,13 +94,85 @@ export function UpdatesPage({ engineClient, updatesClient }: UpdatesPageProps) {
       <p className="page-kicker">Updates</p>
       <h1 className="page-title">Updates</h1>
       <p className="page-body">
-        Engine {status?.engineVersion ?? DESKTOP_CLIENT_VERSION}. Desktop {status?.clientVersion ?? DESKTOP_CLIENT_VERSION}.
+        Engine {status?.engineVersion ?? DESKTOP_CLIENT_VERSION}. Desktop{" "}
+        {status?.clientVersion ?? DESKTOP_CLIENT_VERSION}.
       </p>
       <p className="workspace-card__meta">
-        {status?.signed ? "Signed" : "Not signed"}. Checksums{" "}
+        Release artifacts {status?.signed ? "signed" : "not signed"}. Checksums{" "}
         {status?.checksumsPresent ? "present" : "missing"}. SBOM{" "}
-        {status?.sbomPresent ? "present" : "missing"}.
+        {status?.sbomPresent ? "present" : "missing"}. Provenance{" "}
+        {status?.provenancePresent ? "present" : "missing"}.
       </p>
+      <p className="workspace-card__meta">
+        Installers are not code-signed for SmartScreen or Gatekeeper. Windows may show SmartScreen
+        and macOS may show Gatekeeper until a publisher certificate is added.
+      </p>
+      {!signingConfigured ? (
+        <p className="page-body" role="status">
+          Updates are not signed yet.
+        </p>
+      ) : null}
+      <button
+        type="button"
+        className="btn-quiet"
+        disabled={!signingConfigured || checking}
+        onClick={() => {
+          setInstallError(null);
+          setChecking(true);
+          void client
+            .checkForUpdates()
+            .then((result) => {
+              setUpdateCheck(result);
+            })
+            .catch((error: unknown) => {
+              const message = error instanceof Error ? error.message : "Update check failed.";
+              setInstallError(message);
+            })
+            .finally(() => {
+              setChecking(false);
+            });
+        }}
+      >
+        {checking ? "Checking for updates…" : "Check for updates"}
+      </button>
+      {updateCheck?.status === "up-to-date" ? (
+        <p className="workspace-card__meta" role="status">
+          You are on the latest version ({updateCheck.currentVersion}).
+        </p>
+      ) : null}
+      {updateCheck?.status === "available" ? (
+        <div className="updates-available">
+          <p className="page-body" role="status">
+            {updateCheck.version} is available.
+          </p>
+          <p className="workspace-card__meta">{updateCheck.notes}</p>
+          <button
+            type="button"
+            className="btn-quiet"
+            disabled={installing}
+            onClick={() => {
+              setInstallError(null);
+              setInstalling(true);
+              void client
+                .installAndRestart()
+                .catch((error: unknown) => {
+                  const message = error instanceof Error ? error.message : "Install failed.";
+                  setInstallError(message);
+                })
+                .finally(() => {
+                  setInstalling(false);
+                });
+            }}
+          >
+            {installing ? "Installing…" : "Install and restart"}
+          </button>
+        </div>
+      ) : null}
+      {installError ? (
+        <p className="workspace-card__meta" role="alert">
+          {installError}
+        </p>
+      ) : null}
       <button
         type="button"
         className="btn-quiet"

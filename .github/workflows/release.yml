@@ -22,7 +22,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            bundle: deb
+            bundle: deb,appimage
           - os: windows-latest
             bundle: nsis
           - os: macos-latest
@@ -149,11 +149,20 @@ jobs:
             case "$file" in
               *.exe) cp "$file" "upload/Kronos_${TAG#v}_x64-setup.exe" ;;
               *.deb) cp "$file" "upload/Kronos_${TAG#v}_amd64.deb" ;;
+              *.AppImage) cp "$file" "upload/$(basename "$file")" ;;
+              *.app.tar.gz) cp "$file" "upload/$(basename "$file")" ;;
             esac
-          done < <(find dist -type f \( -name '*.exe' -o -name '*.deb' \) -print0)
+          done < <(find dist -type f \( -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.app.tar.gz' \) -print0)
           if [ -d upload ]; then
             (cd upload && sha256sum -- * > SHA256SUMS)
           fi
+          python3 scripts/release-latest-json.py \
+            --artifacts dist \
+            --version "${TAG#v}" \
+            --changelog CHANGELOG.md \
+            --release-base-url "https://github.com/${{ github.repository }}/releases/download/${TAG}" \
+            --output upload/latest.json \
+            --darwin-arch aarch64
           mapfile -t assets < <(find upload -type f)
           if [ "${#assets[@]}" -eq 0 ]; then
             echo "no installer assets to publish"

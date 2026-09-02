@@ -37,6 +37,8 @@ Do not mass-delete those fallbacks in the same change that enables Kronos policy
 
 See `docs/architecture/engine.md` and `deploy/`. Doctor backup excludes the OS secret store. Restore fails closed on missing or corrupt archives. Unsigned releases still ship checksums, SBOM, and provenance. Claiming a signed release without `release.sig` fails closed.
 
+Windows NSIS installers use per-user (`currentUser`) install mode so in-app updates can upgrade the existing install without elevation. Linux updater bundles use the signed AppImage artifact; the `.deb` remains the manual download for package-manager installs.
+
 The desktop **Health** tab and Settings **Run doctor** call `GET /ops/doctor` on the local engine. Checks cover engine readiness, assigned models, enrolled workspace, index health, secrets storage, and embeddings configuration. Failed goal-readiness items in the Goals workbench link to the Settings section that fixes them (models, connections, workspaces). Inspector Changes can revert or locally commit working-tree files; Kronos does not push to GitHub from those actions.
 
 ## HTTP allowlist

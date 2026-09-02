@@ -23,12 +23,13 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost http://127.0.0.1:*"
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost http://127.0.0.1:* https://github.com"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -38,6 +39,19 @@
     ],
     "resources": {
       "engine/kronos-engine/": "engine/kronos-engine/"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZCQkE2MjVEQjlGNDFDNEMKUldSTUhQUzVYV0s2KzNaSGlJSDVnakVTM3RJVml3K2dFSjZHQ1dYSFlMSUdwQ21SNUE2eVFDR3MK",
+      "endpoints": [
+        "https://github.com/shn3g/kronos/releases/latest/download/latest.json"
+      ]
     }
   }
 }
