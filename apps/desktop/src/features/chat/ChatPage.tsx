@@ -112,6 +112,7 @@ export function ChatPage({
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const skipSelectRef = useRef(false);
   const streamIdleTimerRef = useRef<number | null>(null);
+  const turnEpochRef = useRef(0);
 
   function clearStreamIdleTimer(): void {
     if (streamIdleTimerRef.current !== null) {
@@ -134,6 +135,18 @@ export function ChatPage({
       streamIdleTimerRef.current = null;
       setStreamPhase("idle");
     }, STREAM_STATUS_SETTLE_MS);
+  }
+
+  function abandonInflightTurn(): void {
+    turnEpochRef.current += 1;
+    const abandoned = inflightRef.current;
+    inflightRef.current = null;
+    setBusy(false);
+    resetStreamStatus();
+    if (!abandoned) {
+      return;
+    }
+    void chatClient.cancelStream(abandoned.conversationId, abandoned.requestId).catch(() => undefined);
   }
 
   function closeMentionPicker(): void {
@@ -293,12 +306,12 @@ export function ChatPage({
   }
 
   async function startNewChat(): Promise<void> {
+    abandonInflightTurn();
     setActiveId(null);
     setMessages([]);
     setDraft("");
     setComposerImages([]);
     setError(null);
-    resetStreamStatus();
     closeMentionPicker();
   }
 
@@ -351,15 +364,23 @@ export function ChatPage({
     }
     closeMentionPicker();
     setMessages((current) => [...current, pending, assistant]);
+    const epoch = turnEpochRef.current;
     try {
       const id = await ensureSession();
+      if (turnEpochRef.current !== epoch) {
+        return;
+      }
       inflightRef.current = { conversationId: id, requestId };
       setBusy(true);
       let failed = false;
+      const stillThisTurn = () => turnEpochRef.current === epoch;
       await chatClient.streamMessage(id, text, {
         requestId,
         images: options.images.map((image) => ({ mime: image.mime, data: image.data })),
         onDelta: (delta) => {
+          if (!stillThisTurn()) {
+            return;
+          }
           setMessages((current) =>
             current.map((item) =>
               item.id === assistantId ? { ...item, content: item.content + delta } : item,
@@ -367,6 +388,9 @@ export function ChatPage({
           );
         },
         onTool: (tool) => {
+          if (!stillThisTurn()) {
+            return;
+          }
           if (tool.status === "running") {
             setStreamPhase("tool");
             setActiveToolLabel(toolDisplayName(tool.name));
@@ -377,9 +401,15 @@ export function ChatPage({
           setMessages((current) => upsertToolMessage(current, tool, assistantId));
         },
         onGoal: (goal) => {
+          if (!stillThisTurn()) {
+            return;
+          }
           setMessages((current) => upsertGoalMessage(current, goal, assistantId));
         },
         onDone: (result) => {
+          if (!stillThisTurn()) {
+            return;
+          }
           settleStreamStatus("done");
           setMessages((current) =>
             current.map((item) =>
@@ -396,10 +426,16 @@ export function ChatPage({
           );
         },
         onError: () => {
+          if (!stillThisTurn()) {
+            return;
+          }
           failed = true;
           settleStreamStatus("error");
         },
       });
+      if (!stillThisTurn()) {
+        return;
+      }
       if (failed) {
         setMessages((current) => current.filter((item) => item.id !== pending.id && item.id !== assistantId));
         if (options.clearDraft) {
@@ -410,6 +446,9 @@ export function ChatPage({
         settleStreamStatus("error");
       }
     } catch {
+      if (turnEpochRef.current !== epoch) {
+        return;
+      }
       setMessages((current) => current.filter((item) => item.id !== pending.id && item.id !== assistantId));
       if (options.clearDraft) {
         setDraft(text);
@@ -418,8 +457,10 @@ export function ChatPage({
       setError("Could not send that message. Check the model connection and try again.");
       settleStreamStatus("error");
     } finally {
-      inflightRef.current = null;
-      setBusy(false);
+      if (turnEpochRef.current === epoch) {
+        inflightRef.current = null;
+        setBusy(false);
+      }
     }
   }
 
@@ -588,8 +629,8 @@ export function ChatPage({
                   className="chat-history__item"
                   aria-current={item.id === activeId ? "true" : undefined}
                   onClick={() => {
+                    abandonInflightTurn();
                     setActiveId(item.id);
-                    resetStreamStatus();
                     void chatClient.getConversation(item.id).then((payload) => {
                       setMessages(payload.messages);
                     });

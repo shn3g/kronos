@@ -308,6 +308,48 @@ describe("ChatPage", () => {
     expect(screen.queryByText(/message failed/i)).not.toBeInTheDocument();
   });
 
+  it("abandons an in-flight turn on New chat so a late onDone cannot stick the composer", async () => {
+    const user = userEvent.setup();
+    let handlers!: ChatStreamHandlers;
+    let finish!: () => void;
+    const cancelStream = vi.fn(async () => undefined);
+    const streamMessage = vi.fn((_id: string, _content: string, next: ChatStreamHandlers) => {
+      handlers = next;
+      return new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    });
+    const props = {
+      chatClient: chatClient({ streamMessage, cancelStream }),
+      repositoryId: null as string | null,
+      historyOpen: false,
+      onOpenWorkspace: () => undefined,
+    };
+    const { rerender } = render(<ChatPage {...props} newChatRequest={0} />);
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "What is broken in onboarding?");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    expect(await screen.findByRole("button", { name: /^stop$/i })).toBeInTheDocument();
+    expect(screen.getByText(/streaming reply/i)).toBeInTheDocument();
+
+    rerender(<ChatPage {...props} newChatRequest={1} />);
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Ask Kronos" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^send$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^stop$/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/working/i)).not.toBeInTheDocument();
+    expect(cancelStream).toHaveBeenCalledWith("chat_1", expect.any(String));
+
+    await act(async () => {
+      handlers.onDone({ content: "Staff is missing.", citations: [], goalRefs: [] });
+      finish();
+    });
+    expect(screen.queryByText(/turn finished/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/staff is missing/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^send$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^stop$/i })).not.toBeInTheDocument();
+  });
+
   it("returns stream status to idle after a finished turn settles", async () => {
     const user = userEvent.setup();
     let handlers!: ChatStreamHandlers;
