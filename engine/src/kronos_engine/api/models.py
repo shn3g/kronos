@@ -309,6 +309,32 @@ class ProfileUpdateRequest(BaseModel):
     limits: ResourceLimitsModel
 
 
+class EmbeddingInstallCatalogItem(BaseModel):
+    key: str
+    dim: int
+    display_name: str
+    installed: bool
+
+
+class EmbeddingInstallStatusModel(BaseModel):
+    state: Literal["idle", "downloading", "verifying", "ready", "failed"]
+    bytes_done: int
+    bytes_total: int
+    model_key: str | None
+    error: str | None = None
+
+
+class EmbeddingInstallStartRequest(BaseModel):
+    key: str
+
+
+class EmbeddingInstallResponse(BaseModel):
+    policy: str
+    catalog: list[EmbeddingInstallCatalogItem]
+    active_key: str | None
+    status: EmbeddingInstallStatusModel
+
+
 class IndexStatusResponse(BaseModel):
     repository_id: str
     commit: str | None

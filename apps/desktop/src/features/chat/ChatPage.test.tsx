@@ -9,6 +9,7 @@ import type {
   ModelsClient,
   RoleAssignments,
 } from "../models/client";
+import { embeddingInstallClientStubs } from "../models/client";
 import { ChatPage } from "./ChatPage";
 import type {
   ChatClient,
@@ -101,6 +102,7 @@ function embeddingBackend(): EmbeddingBackend {
 
 function modelsClient(overrides: Partial<ModelsClient> = {}): ModelsClient {
   return {
+    ...embeddingInstallClientStubs,
     snapshot: async () => ({
       detected: [],
       profiles: [

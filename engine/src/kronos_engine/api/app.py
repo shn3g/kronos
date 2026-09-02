@@ -38,6 +38,10 @@ from kronos_engine.api.models import (
     ConversationModel,
     DetectedToolModel,
     EmbeddingBackendModel,
+    EmbeddingInstallResponse,
+    EmbeddingInstallStartRequest,
+    EmbeddingInstallStatusModel,
+    EmbeddingInstallCatalogItem,
     EventItem,
     EventListResponse,
     GithubAppRecordResponse,
@@ -115,6 +119,10 @@ from kronos_engine.application.composition import (
 )
 from kronos_engine.application.doctor import DoctorService, OpsSettings
 from kronos_engine.application.embeddings import ResolvedEmbedder, resolve_embedder
+from kronos_engine.application.embedding_install import (
+    EMBEDDING_INSTALL_POLICY,
+    EmbeddingInstaller,
+)
 from kronos_engine.application.event_query import EventQuery
 from kronos_engine.application.github_setup import GitHubSetupService
 from kronos_engine.application.goal_engine import GoalEngine
@@ -248,8 +256,11 @@ def create_app(
     telegram_auto_poll: bool = False,
     chat_complete: object | None = None,
     chat_stream: object | None = None,
+    embedding_installer: EmbeddingInstaller | None = None,
 ) -> FastAPI:
     embedding_startup: list[Callable[[], None]] = []
+    models_root = settings.paths.cache / "models"
+    installer = embedding_installer or EmbeddingInstaller(models_root)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -367,6 +378,30 @@ def create_app(
             SqliteModelRegistry(conn),  # type: ignore[arg-type]
             store,
             settings.paths.cache / "models",
+        )
+
+    def _embedding_install_response() -> EmbeddingInstallResponse:
+        catalog = [
+            EmbeddingInstallCatalogItem(
+                key=entry.key,
+                dim=entry.dim,
+                display_name=entry.display_name,
+                installed=installer.is_installed(entry.key),
+            )
+            for entry in installer.catalog()
+        ]
+        status = installer.status()
+        return EmbeddingInstallResponse(
+            policy=EMBEDDING_INSTALL_POLICY,
+            catalog=catalog,
+            active_key=installer.active_key(),
+            status=EmbeddingInstallStatusModel(
+                state=status["state"],  # type: ignore[arg-type]
+                bytes_done=int(status["bytes_done"]),
+                bytes_total=int(status["bytes_total"]),
+                model_key=status["model_key"] if isinstance(status["model_key"], str) else None,
+                error=status["error"] if isinstance(status["error"], str) else None,
+            ),
         )
 
     def _emit_index_event(kind: str, payload: Mapping[str, object]) -> None:
@@ -920,6 +955,34 @@ def create_app(
             except LookupError as error:
                 raise HTTPException(status_code=404, detail="not found") from error
             return _profile_model(updated)
+
+    @app.get("/models/embeddings/install", response_model=EmbeddingInstallResponse)
+    def get_embedding_install(_: None = Depends(require_auth)) -> EmbeddingInstallResponse:
+        return _embedding_install_response()
+
+    @app.post("/models/embeddings/install", response_model=EmbeddingInstallResponse)
+    def start_embedding_install(
+        body: EmbeddingInstallStartRequest, _: None = Depends(require_auth)
+    ) -> EmbeddingInstallResponse:
+        try:
+            installer.start(body.key)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="unknown embedding model") from error
+        except RuntimeError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return _embedding_install_response()
+
+    @app.delete("/models/embeddings/install", response_model=EmbeddingInstallResponse)
+    def remove_embedding_install(
+        key: str = Query(..., min_length=1), _: None = Depends(require_auth)
+    ) -> EmbeddingInstallResponse:
+        try:
+            installer.remove(key)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="unknown embedding model") from error
+        except RuntimeError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return _embedding_install_response()
 
     @app.get("/repositories/{repository_id}/index", response_model=IndexStatusResponse)
     def index_status(repository_id: str, _: None = Depends(require_auth)) -> IndexStatusResponse:

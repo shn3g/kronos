@@ -5,7 +5,14 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineClient } from "../../engine/client";
 import { ModelsPage, type ModelsClient } from "./ModelsPage";
-import type { ModelProfileOption, ModelRole, ProfileUpdate, ResourceLimits } from "./client";
+import {
+  embeddingInstallClientStubs,
+  emptyEmbeddingInstallSnapshot,
+  type ModelProfileOption,
+  type ModelRole,
+  type ProfileUpdate,
+  type ResourceLimits,
+} from "./client";
 
 const DEFAULT_LIMITS: ResourceLimits = {
   maxTokens: 4096,
@@ -41,6 +48,7 @@ function profile(
 
 function modelsClient(overrides: Partial<ModelsClient> = {}): ModelsClient {
   return {
+    ...embeddingInstallClientStubs,
     snapshot: async () => ({
       detected: [
         { kind: "cursor_cli", label: "cursor-agent", present: true },
@@ -383,5 +391,27 @@ describe("ModelsPage", () => {
         limits: expect.objectContaining({ costCeiling: 5, maxTokens: 4096 }),
       }),
     );
+  });
+
+  it("renders install progress with a text percentage", async () => {
+    render(
+      <ModelsPage
+        engineClient={engine("ready")}
+        modelsClient={modelsClient({
+          embeddingInstall: async () => ({
+            ...emptyEmbeddingInstallSnapshot(),
+            status: {
+              state: "downloading",
+              bytesDone: 512,
+              bytesTotal: 1024,
+              modelKey: "minilm-l6-v2",
+              error: null,
+            },
+          }),
+        })}
+      />,
+    );
+    expect(await screen.findByText("50%")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toBeInTheDocument();
   });
 });

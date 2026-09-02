@@ -7,11 +7,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from kronos_engine.adapters.embeddings.local import (
-    CODE_MODEL_ID,
-    DOCUMENT_MODEL_ID,
-    LocalEmbeddingAdapter,
-)
+from kronos_engine.adapters.embeddings.local import CODE_MODEL_ID, DOCUMENT_MODEL_ID
+from kronos_engine.application.embedding_install import local_adapter_for, resolve_local_models_dir
 from kronos_engine.adapters.embeddings.openai_compatible import OpenAICompatibleEmbeddingAdapter
 from kronos_engine.adapters.models.openai_compatible import HttpTransport
 from kronos_engine.ports.embedding import EmbeddingPort
@@ -54,7 +51,8 @@ def resolve_embedder(
     assigned = _from_assignment(registry, secrets, transport=transport)
     if assigned is not None:
         return assigned
-    local = LocalEmbeddingAdapter(models_dir)
+    model_dir, catalog_key = resolve_local_models_dir(models_dir)
+    local = local_adapter_for(catalog_key, model_dir)
     if local.available("document") or local.available("code"):
         model_id = DOCUMENT_MODEL_ID if local.available("document") else CODE_MODEL_ID
         return ResolvedEmbedder(

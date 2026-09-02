@@ -2,6 +2,17 @@
 
 import { requestEngineJson, type EngineJsonResponse } from "../../engine/transport";
 
+import type {
+  EmbeddingCatalogItem,
+  EmbeddingInstallSnapshot,
+  EmbeddingInstallStatus,
+} from "./embeddingInstall";
+
+export type {
+  EmbeddingCatalogItem,
+  EmbeddingInstallSnapshot,
+  EmbeddingInstallStatus,
+} from "./embeddingInstall";
 export type ModelRole = "orchestrator" | "planner" | "coder" | "reviewer" | "embedding";
 export type EmbeddingBackendKind = "openai_compatible" | "onnx" | "none";
 
@@ -72,7 +83,48 @@ export interface ModelsClient {
   ): Promise<RoleAssignments>;
   createProvider(draft: ProviderDraft): Promise<CreatedProvider>;
   updateProfile(id: string, patch: ProfileUpdate): Promise<ModelProfileOption>;
+  embeddingInstall(): Promise<EmbeddingInstallSnapshot>;
+  startEmbeddingInstall(key: string): Promise<EmbeddingInstallSnapshot>;
+  removeEmbeddingInstall(key: string): Promise<EmbeddingInstallSnapshot>;
 }
+
+export function emptyEmbeddingInstallSnapshot(): EmbeddingInstallSnapshot {
+  return {
+    policy:
+      "Kronos downloads model weights only when you click Install, from pinned URLs verified by SHA-256.",
+    catalog: [
+      {
+        key: "minilm-l6-v2",
+        dim: 384,
+        displayName: "MiniLM L6 v2",
+        installed: false,
+      },
+      {
+        key: "bge-small-en-v1.5",
+        dim: 384,
+        displayName: "bge-small-en-v1.5",
+        installed: false,
+      },
+    ],
+    activeKey: null,
+    status: {
+      state: "idle",
+      bytesDone: 0,
+      bytesTotal: 0,
+      modelKey: null,
+      error: null,
+    },
+  };
+}
+
+export const embeddingInstallClientStubs: Pick<
+  ModelsClient,
+  "embeddingInstall" | "startEmbeddingInstall" | "removeEmbeddingInstall"
+> = {
+  embeddingInstall: async () => emptyEmbeddingInstallSnapshot(),
+  startEmbeddingInstall: async () => emptyEmbeddingInstallSnapshot(),
+  removeEmbeddingInstall: async () => emptyEmbeddingInstallSnapshot(),
+};
 
 export function createProductionModelsClient(
   request: (
@@ -117,6 +169,22 @@ export function createProductionModelsClient(
         },
       });
       return mapProfile(payload);
+    },
+    async embeddingInstall() {
+      const payload = await jsonRequest(request, "GET", "/models/embeddings/install");
+      return mapEmbeddingInstall(payload);
+    },
+    async startEmbeddingInstall(key) {
+      const payload = await jsonRequest(request, "POST", "/models/embeddings/install", { key });
+      return mapEmbeddingInstall(payload);
+    },
+    async removeEmbeddingInstall(key) {
+      const payload = await jsonRequest(
+        request,
+        "DELETE",
+        `/models/embeddings/install?key=${encodeURIComponent(key)}`,
+      );
+      return mapEmbeddingInstall(payload);
     },
   };
 }
@@ -190,6 +258,48 @@ function mapCreatedProvider(payload: Record<string, unknown>): CreatedProvider {
       billed: provider.billed === true,
     },
     profiles: profilesRaw.map(mapProfile),
+  };
+}
+
+function mapEmbeddingInstall(payload: Record<string, unknown>): EmbeddingInstallSnapshot {
+  const catalogRaw = Array.isArray(payload.catalog) ? payload.catalog : [];
+  const statusRaw = asRecord(payload.status);
+  const state = statusRaw.state;
+  const installState =
+    state === "idle" ||
+    state === "downloading" ||
+    state === "verifying" ||
+    state === "ready" ||
+    state === "failed"
+      ? state
+      : "idle";
+  return {
+    policy:
+      typeof payload.policy === "string"
+        ? payload.policy
+        : "Kronos downloads model weights only when you click Install, from pinned URLs verified by SHA-256.",
+    catalog: catalogRaw.flatMap((item) => {
+      const row = asRecord(item);
+      if (typeof row.key !== "string") {
+        return [];
+      }
+      return [
+        {
+          key: row.key,
+          dim: numberField(row, "dim"),
+          displayName: stringField(row, "display_name") || row.key,
+          installed: row.installed === true,
+        },
+      ];
+    }),
+    activeKey: stringOrNull(payload.active_key),
+    status: {
+      state: installState,
+      bytesDone: numberField(statusRaw, "bytes_done"),
+      bytesTotal: numberField(statusRaw, "bytes_total"),
+      modelKey: stringOrNull(statusRaw.model_key),
+      error: typeof statusRaw.error === "string" ? statusRaw.error : null,
+    },
   };
 }
 

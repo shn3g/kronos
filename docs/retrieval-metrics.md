@@ -2,7 +2,7 @@
 
 Each enrolled repository has an isolated hybrid index: SQLite FTS5/BM25, local code embeddings, and tree-sitter graph edges. Reciprocal Rank Fusion combines sparse and dense ranks. The index is not the source of truth. It rebuilds from git and human-readable memory records.
 
-A watcher can keep the index current: dirty working-tree files are indexed, and unchanged chunk hashes skip re-embedding. Progress and a watch toggle are on the Index page. Dense vectors use tokenizer-backed local ONNX (MiniLM or a pinned code model already on disk) or a remote OpenAI-compatible embedding endpoint when the embedding role is assigned. Kronos never downloads model weights. When dense embeddings are unavailable, sparse FTS5 remains the fallback.
+A watcher can keep the index current: dirty working-tree files are indexed, and unchanged chunk hashes skip re-embedding. Progress and a watch toggle are on the Index page. Dense vectors use tokenizer-backed local ONNX (MiniLM or bge-small, installed from Settings → Models) or a remote OpenAI-compatible embedding endpoint when the embedding role is assigned. Kronos downloads model weights only when you click Install, from pinned URLs verified by SHA-256. When dense embeddings are unavailable, sparse FTS5 remains the fallback.
 
 ## What to measure
 

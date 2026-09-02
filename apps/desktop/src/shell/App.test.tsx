@@ -5,6 +5,7 @@ import { DESKTOP_CLIENT_VERSION } from "../api/kronosClient";
 import { App } from "../shell/App";
 import type { EngineClient, EngineConnectionState } from "../engine/client";
 import type { EmbeddingBackend, ModelsClient, RoleAssignments } from "../features/models/client";
+import { embeddingInstallClientStubs } from "../features/models/client";
 import type { ChatClient, ChatStreamHandlers } from "../features/chat/client";
 import type { RepositoriesClient } from "../features/workspaces/client";
 import type { HomeClient } from "../features/home/client";
@@ -58,6 +59,7 @@ function profile(id: string, role: string) {
 
 function emptyModels(): ModelsClient {
   return {
+    ...embeddingInstallClientStubs,
     snapshot: async () => ({
       detected: [],
       profiles: [],

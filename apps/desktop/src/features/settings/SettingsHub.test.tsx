@@ -6,6 +6,7 @@ import { DESKTOP_CLIENT_VERSION } from "../../api/kronosClient";
 import type { EngineClient } from "../../engine/client";
 import type { SettingsSection } from "../../shell/routes";
 import type { ModelsClient } from "../models/client";
+import { embeddingInstallClientStubs } from "../models/client";
 import type { SettingsPageClients } from "./client";
 import { SettingsHub } from "./SettingsHub";
 
@@ -19,6 +20,7 @@ function emptyBackend() {
 
 function assignedModels(): ModelsClient {
   return {
+    ...embeddingInstallClientStubs,
     snapshot: async () => ({
       detected: [],
       profiles: [

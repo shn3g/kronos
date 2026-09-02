@@ -335,4 +335,57 @@ describe("createProductionModelsClient", () => {
     const snapshot = await client.snapshot();
     expect(snapshot.profiles[0]?.limits.contextWindow).toBe(32000);
   });
+
+  it("maps embedding install routes", async () => {
+    const client = createProductionModelsClient(async (method, path) => {
+      if (method === "GET" && path === "/models/embeddings/install") {
+        return {
+          status: 200,
+          body: JSON.stringify({
+            policy:
+              "Kronos downloads model weights only when you click Install, from pinned URLs verified by SHA-256.",
+            catalog: [
+              {
+                key: "minilm-l6-v2",
+                dim: 384,
+                display_name: "MiniLM L6 v2",
+                installed: false,
+              },
+            ],
+            active_key: null,
+            status: {
+              state: "idle",
+              bytes_done: 0,
+              bytes_total: 0,
+              model_key: null,
+              error: null,
+            },
+          }),
+        };
+      }
+      if (method === "POST" && path === "/models/embeddings/install") {
+        return {
+          status: 200,
+          body: JSON.stringify({
+            policy: "policy",
+            catalog: [],
+            active_key: "minilm-l6-v2",
+            status: {
+              state: "downloading",
+              bytes_done: 128,
+              bytes_total: 1024,
+              model_key: "minilm-l6-v2",
+              error: null,
+            },
+          }),
+        };
+      }
+      return { status: 404, body: "{}" };
+    });
+    const snapshot = await client.embeddingInstall();
+    expect(snapshot.catalog[0]?.key).toBe("minilm-l6-v2");
+    const started = await client.startEmbeddingInstall("minilm-l6-v2");
+    expect(started.status.state).toBe("downloading");
+    expect(started.status.bytesDone).toBe(128);
+  });
 });

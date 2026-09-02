@@ -12,6 +12,7 @@ import {
   type ModelsSnapshot,
   type ResourceLimits,
 } from "./client";
+import { LocalEmbeddingsCard } from "./LocalEmbeddingsCard";
 
 export type { ModelsClient } from "./client";
 
@@ -250,6 +251,7 @@ export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
           {embeddingBackendLabel(snapshot.embeddingBackend)}
         </p>
       ) : null}
+      <LocalEmbeddingsCard modelsClient={client} />
       {snapshot?.detected.length ? (
         <ul className="models__detected">
           {snapshot.detected.map((tool) => (

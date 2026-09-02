@@ -1972,6 +1972,45 @@ button.chat-composer__model:focus-visible {
   line-height: 1.45;
 }
 
+.models__embeddings {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--hairline);
+}
+
+.models__embeddings-title {
+  margin: 0 0 8px;
+  color: var(--body);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.models__embeddings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.models__embeddings-progress {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.models__embeddings-progress-bar {
+  flex: 1;
+  height: 8px;
+}
+
+.models__embeddings-progress-label {
+  min-width: 3rem;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .models__detected {
   display: flex;
   flex-wrap: wrap;

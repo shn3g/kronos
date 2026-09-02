@@ -12,6 +12,7 @@ import {
   type IndexHit,
   type IndexStatus,
 } from "./client";
+import { createProductionModelsClient } from "../models/client";
 
 export type { IndexClient } from "./client";
 
@@ -26,6 +27,7 @@ interface IndexPageProps {
 
 const productionIndex = createProductionIndexClient();
 const productionRepos = createProductionRepositoriesClient();
+const productionModels = createProductionModelsClient();
 const productionPageClient: IndexPageClients = {
   ...productionIndex,
   listRepositories: () => productionRepos.list(),
@@ -40,6 +42,7 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<IndexHit[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [denseBackend, setDenseBackend] = useState<string | null>(null);
   const selectedRef = useRef(selectedId);
   const requestGen = useRef(0);
   selectedRef.current = selectedId;
@@ -99,6 +102,22 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
       window.clearInterval(interval);
     };
   }, [client, ready, selectedId]);
+
+  useEffect(() => {
+    if (!ready || !status?.denseAvailable) {
+      setDenseBackend(null);
+      return;
+    }
+    let cancelled = false;
+    void productionModels.snapshot().then((snapshot) => {
+      if (!cancelled) {
+        setDenseBackend(snapshot.embeddingBackend.displayName || null);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, status?.denseAvailable]);
 
   if (!ready) {
     return (
@@ -239,7 +258,13 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
           </div>
           <div>
             <dt>Dense</dt>
-            <dd>{status.denseAvailable ? "dense available" : "dense unavailable"}</dd>
+            <dd>
+              {status.denseAvailable
+                ? denseBackend
+                  ? `${denseBackend} (ready)`
+                  : "dense available"
+                : "dense unavailable"}
+            </dd>
           </div>
           <div>
             <dt>Last activity</dt>
