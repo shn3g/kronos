@@ -43,6 +43,8 @@ def test_run_workspace_command_keeps_nonzero_exit_and_strips_engine_secrets(
     repo = init_git_repo(tmp_path / "alpha", files={"README.md": "hello\n"})
     monkeypatch.setenv("KRONOS_ENGINE_TOKEN", "secret-token-value")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-secret-access-key")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "github-app-private-key")
 
     failed = run_workspace_command(
         repo,
@@ -57,12 +59,16 @@ def test_run_workspace_command_keeps_nonzero_exit_and_strips_engine_secrets(
             repo,
             "env.py",
             "import os\nprint(os.environ.get('KRONOS_ENGINE_TOKEN', ''))\n"
-            "print(os.environ.get('OPENAI_API_KEY', ''))\n",
+            "print(os.environ.get('OPENAI_API_KEY', ''))\n"
+            "print(os.environ.get('AWS_SECRET_ACCESS_KEY', ''))\n"
+            "print(os.environ.get('GITHUB_APP_PRIVATE_KEY', ''))\n",
         ),
     )
     assert leaked["exit_code"] == 0
     assert "secret-token-value" not in leaked["output"]
     assert "sk-test-key" not in leaked["output"]
+    assert "aws-secret-access-key" not in leaked["output"]
+    assert "github-app-private-key" not in leaked["output"]
 
 
 def test_run_workspace_command_times_out(tmp_path: Path) -> None:
