@@ -2221,6 +2221,59 @@ button.chat-composer__model:focus-visible {
   margin-top: 8px;
 }
 
+.goals-workbench__layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr);
+  gap: 24px;
+  margin-top: 24px;
+}
+
+.goals-workbench__list .goals-page__list {
+  margin-top: 0;
+}
+
+.goals-workbench__state {
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+.goals-workbench__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.goals-workbench__readiness {
+  margin-top: 24px;
+}
+
+.goals-workbench__fix-link {
+  display: inline-block;
+  margin-top: 4px;
+}
+
+.inspector__goal-link {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+@media (max-width: 860px) {
+  .goals-workbench__layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 860px) {
   .page-title {
     font-size: 20px;

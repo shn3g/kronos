@@ -141,6 +141,17 @@ async function unused(): Promise<never> {
 function quietRepos(): RepositoriesClient {
   return {
     list: async () => [],
+    get: async () => ({
+      repository: {
+        id: "repo_alpha",
+        displayName: "alpha",
+        realpath: "",
+        origin: null,
+        status: "active",
+      },
+      policy: { autonomy: { mode: "write_draft_prs", freeze: false } },
+      runtime: {},
+    }),
     inspect: unused,
     enrol: unused,
     pause: unused,
@@ -206,6 +217,7 @@ function quietGoals(): GoalsClient {
     }),
     get: unused,
     pollEvents: async () => ({ events: [], headSeq: 0 }),
+    goalReadiness: async () => ({ canExecute: true, checks: [] }),
   };
 }
 

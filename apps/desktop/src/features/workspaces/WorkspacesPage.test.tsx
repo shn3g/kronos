@@ -16,6 +16,9 @@ function engine(status: "unavailable" | "starting" | "ready"): EngineClient {
 function repos(listImpl?: RepositoriesClient["list"]): RepositoriesClient {
   return {
     list: listImpl ?? (async () => []),
+    get: async () => {
+      throw new Error("get should not run");
+    },
     inspect: async () => {
       throw new Error("inspect should not run");
     },
@@ -87,6 +90,9 @@ describe("WorkspacesPage", () => {
     };
     const client: RepositoriesClient = {
       list: async () => [enrolled],
+      get: async () => {
+        throw new Error("get should not run");
+      },
       inspect: async (path) => ({
         gitRoot: path,
         origin: "https://github.com/acme/alpha.git",
@@ -191,6 +197,9 @@ describe("WorkspacesPage", () => {
     const user = userEvent.setup();
     const client: RepositoriesClient = {
       list: async () => [],
+      get: async () => {
+        throw new Error("get should not run");
+      },
       inspect: async (path) => ({
         gitRoot: path,
         origin: null,

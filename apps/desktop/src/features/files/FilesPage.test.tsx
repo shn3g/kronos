@@ -47,6 +47,7 @@ function idleIndex(search: IndexClient["search"]): IndexClient {
 function repos(overrides: Partial<RepositoriesClient> = {}): RepositoriesClient {
   return {
     list: async () => [],
+    get: unused,
     inspect: unused,
     enrol: unused,
     pause: unused,

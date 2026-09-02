@@ -20,11 +20,11 @@ import {
 } from "../features/files/fileEditor";
 import { safeWorkspaceRelPath } from "../features/files/workspacePath";
 import { createProductionIndexClient, type IndexClient } from "../features/index/client";
-import { GoalsPage, type GoalsPageClients } from "../features/goals/GoalsPage";
+import { GoalsWorkbench, type GoalsWorkbenchClients } from "../features/goals/GoalsWorkbench";
 import { createProductionGoalsClient, type GoalsClient } from "../features/goals/client";
 import { createProductionHomeClient, type HomeClient } from "../features/home/client";
 import { createProductionModelsClient, type ModelsClient } from "../features/models/client";
-import { RunsPage } from "../features/runs/RunsPage";
+import { createProductionRunsClient } from "../features/runs/client";
 import { TerminalPage } from "../features/terminal/TerminalPage";
 import { SettingsHub } from "../features/settings/SettingsHub";
 import {
@@ -54,6 +54,7 @@ const productionChat = createProductionChatClient();
 const productionRepos = createProductionRepositoriesClient();
 const productionHome = createProductionHomeClient();
 const productionGoals = createProductionGoalsClient();
+const productionRuns = createProductionRunsClient();
 const productionSettings = createProductionSettingsClient();
 const productionIndex = createProductionIndexClient();
 const ACTIVITY_BAR_STORAGE_KEY = "kronos.activityBarCollapsed";
@@ -115,6 +116,7 @@ export function App({
     endLine: 0,
   });
   const [fileReveal, setFileReveal] = useState({ path: "", nonce: 0 });
+  const [goalReveal, setGoalReveal] = useState({ id: "", nonce: 0 });
   const [goToFileOpen, setGoToFileOpen] = useState(false);
   const [orchestratorName, setOrchestratorName] = useState<string | null>(null);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("changes");
@@ -401,7 +403,7 @@ export function App({
   }
 
   const activity: ActivityId = route.activity;
-  const goalsPageClient: GoalsPageClients = {
+  const goalsPageClient: GoalsWorkbenchClients = {
     ...goals,
     listRepositories: () => repos.list(),
   };
@@ -538,8 +540,13 @@ export function App({
               </div>
               {activity === "goals" ? (
                 <div className="app-main__panel">
-                  <GoalsPage engineClient={engine} goalsClient={goalsPageClient} />
-                  <RunsPage engineClient={engine} />
+                  <GoalsWorkbench
+                    engineClient={engine}
+                    goalsClient={goalsPageClient}
+                    repositoriesClient={repos}
+                    runsClient={productionRuns}
+                    selectedGoalReveal={goalReveal}
+                  />
                 </div>
               ) : null}
               {activity === "workspaces" ? (
@@ -583,6 +590,10 @@ export function App({
                 commitError={commitError}
                 committing={committing}
                 onOpenPath={revealWorkspaceFile}
+                onOpenGoal={(goalId) => {
+                  setGoalReveal((current) => ({ id: goalId, nonce: current.nonce + 1 }));
+                  go({ activity: "goals" });
+                }}
               />
             )}
           </div>

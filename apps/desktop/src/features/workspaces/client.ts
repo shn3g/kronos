@@ -60,8 +60,23 @@ export interface WorkspaceTerminalRun {
   output: string;
 }
 
+export interface RepositoryAutonomy {
+  mode: string;
+  freeze: boolean;
+}
+
+export interface RepositoryDetail {
+  repository: EnrolledRepository;
+  policy: {
+    autonomy: RepositoryAutonomy;
+    [key: string]: unknown;
+  };
+  runtime: Record<string, string>;
+}
+
 export interface RepositoriesClient {
   list(): Promise<EnrolledRepository[]>;
+  get(id: string): Promise<RepositoryDetail>;
   inspect(path: string): Promise<InspectResult>;
   enrol(path: string, policy?: Record<string, unknown>): Promise<EnrolledRepository>;
   pause(id: string): Promise<EnrolledRepository>;
@@ -104,6 +119,22 @@ export function createProductionRepositoriesClient(
       const payload = await jsonRequest(request, "GET", "/repositories");
       const repositories = Array.isArray(payload.repositories) ? payload.repositories : [];
       return repositories.map(mapRepository);
+    },
+    async get(id: string) {
+      const payload = await jsonRequest(request, "GET", `/repositories/${id}`);
+      const policy = asRecord(payload.policy);
+      const autonomy = asRecord(policy.autonomy);
+      return {
+        repository: mapRepository(payload.repository),
+        policy: {
+          ...policy,
+          autonomy: {
+            mode: stringField(autonomy, "mode"),
+            freeze: autonomy.freeze === true,
+          },
+        },
+        runtime: mapRuntime(payload.runtime),
+      };
     },
     async inspect(path: string) {
       const payload = await jsonRequest(request, "POST", "/repositories/inspect", { path });
@@ -293,4 +324,15 @@ function asRecord(value: unknown): Record<string, unknown> {
 function stringField(record: Record<string, unknown>, key: string): string {
   const value = record[key];
   return typeof value === "string" ? value : "";
+}
+
+function mapRuntime(value: unknown): Record<string, string> {
+  const record = asRecord(value);
+  const runtime: Record<string, string> = {};
+  for (const [key, item] of Object.entries(record)) {
+    if (typeof item === "string") {
+      runtime[key] = item;
+    }
+  }
+  return runtime;
 }

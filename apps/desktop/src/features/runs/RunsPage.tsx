@@ -9,11 +9,12 @@ export type { RunsClient } from "./client";
 interface RunsPageProps {
   engineClient: EngineClient;
   runsClient?: RunsClient;
+  goalId?: string;
 }
 
 const productionRuns = createProductionRunsClient();
 
-export function RunsPage({ engineClient, runsClient }: RunsPageProps) {
+export function RunsPage({ engineClient, runsClient, goalId }: RunsPageProps) {
   const client = runsClient ?? productionRuns;
   const [ready, setReady] = useState(false);
   const [runs, setRuns] = useState<RunRecord[]>([]);
@@ -77,6 +78,8 @@ export function RunsPage({ engineClient, runsClient }: RunsPageProps) {
     );
   }
 
+  const visibleRuns = goalId ? runs.filter((run) => run.goalId === goalId) : runs;
+
   return (
     <section className="runs-page">
       <p className="page-kicker">Runs</p>
@@ -85,9 +88,9 @@ export function RunsPage({ engineClient, runsClient }: RunsPageProps) {
         Each run records artifacts, budgets, and PR links. Failures stay explainable and never
         merge without a reproduction test.
       </p>
-      {runs.length ? (
+      {visibleRuns.length ? (
         <ul className="runs-page__list">
-          {runs.map((run) => (
+          {visibleRuns.map((run) => (
             <li key={run.id} className="workspace-card">
               <p className="workspace-card__name">
                 {run.taskId} · {run.status}

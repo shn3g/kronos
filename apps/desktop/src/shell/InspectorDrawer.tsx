@@ -31,6 +31,7 @@ interface InspectorDrawerProps {
   commitError?: string | null;
   committing?: boolean;
   onOpenPath?: ((path: string) => void) | undefined;
+  onOpenGoal?: (goalId: string) => void;
 }
 
 export function InspectorDrawer({
@@ -46,6 +47,7 @@ export function InspectorDrawer({
   commitError = null,
   committing = false,
   onOpenPath,
+  onOpenGoal,
 }: InspectorDrawerProps) {
   const [pickedScope, setPickedScope] = useState<ChangeListScope | null>(null);
   const hasTurn = changes.some((item) => item.fromChat === true);
@@ -135,8 +137,23 @@ export function InspectorDrawer({
             <ul className="inspector__list">
               {goals.map((item) => (
                 <li key={item.id}>
-                  <strong>{item.title}</strong>
-                  <span>{item.state}</span>
+                  {onOpenGoal ? (
+                    <button
+                      type="button"
+                      className="inspector__goal-link"
+                      onClick={() => {
+                        onOpenGoal(item.id);
+                      }}
+                    >
+                      <strong>{item.title}</strong>
+                      <span className="goals-workbench__state">{item.state}</span>
+                    </button>
+                  ) : (
+                    <>
+                      <strong>{item.title}</strong>
+                      <span>{item.state}</span>
+                    </>
+                  )}
                 </li>
               ))}
             </ul>

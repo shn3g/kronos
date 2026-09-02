@@ -189,6 +189,24 @@ describe("InspectorDrawer", () => {
     expect(screen.getByText("queued")).toBeInTheDocument();
   });
 
+  it("opens a goal in the Goals workbench when a listed goal is clicked", async () => {
+    const user = userEvent.setup();
+    const onOpenGoal = vi.fn();
+    render(
+      <InspectorDrawer
+        tab="goals"
+        onTab={() => undefined}
+        changes={[]}
+        goals={[{ id: "goal_1", title: "Fix onboarding", state: "queued" }]}
+        checks={[]}
+        onOpenGoal={onOpenGoal}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /fix onboarding/i }));
+    expect(onOpenGoal).toHaveBeenCalledWith("goal_1");
+  });
+
   it("shows revert errors from the Changes list", () => {
     render(
       <InspectorDrawer

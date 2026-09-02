@@ -70,6 +70,7 @@ function clients(overrides: Partial<GoalsPageClients> = {}): GoalsPageClients {
       ],
     }),
     pollEvents: async () => ({ events: [], headSeq: 0 }),
+    goalReadiness: async () => ({ canExecute: true, checks: [] }),
     plan: async () => {
       throw new Error("plan should not run");
     },

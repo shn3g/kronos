@@ -91,6 +91,39 @@ describe("createProductionGoalsClient", () => {
     expect(planned.tasks).toHaveLength(1);
   });
 
+  it("loads goal readiness for a repository", async () => {
+    const client = createProductionGoalsClient(async (method, path) => {
+      expect(method).toBe("GET");
+      expect(path).toBe("/repositories/repo_alpha/goal-readiness");
+      return {
+        status: 200,
+        body: JSON.stringify({
+          can_execute: false,
+          checks: [
+            {
+              id: "models_assigned",
+              label: "Models assigned",
+              ok: false,
+              detail: "Assign planner on the Models page.",
+            },
+          ],
+        }),
+      };
+    });
+
+    await expect(client.goalReadiness("repo_alpha")).resolves.toEqual({
+      canExecute: false,
+      checks: [
+        {
+          id: "models_assigned",
+          label: "Models assigned",
+          ok: false,
+          detail: "Assign planner on the Models page.",
+        },
+      ],
+    });
+  });
+
   it("ticks the goal engine", async () => {
     const client = createProductionGoalsClient(async (method, path) => {
       expect(method).toBe("POST");

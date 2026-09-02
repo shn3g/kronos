@@ -52,6 +52,18 @@ export interface TickResult {
   terminal: boolean;
 }
 
+export interface GoalReadinessCheck {
+  id: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface GoalReadinessResult {
+  canExecute: boolean;
+  checks: GoalReadinessCheck[];
+}
+
 export interface GoalsClient {
   list(): Promise<GoalRecord[]>;
   create(draft: GoalDraft): Promise<GoalRecord>;
@@ -59,6 +71,7 @@ export interface GoalsClient {
   tick(): Promise<TickResult>;
   get(id: string): Promise<{ goal: GoalRecord; tasks: GoalTask[] }>;
   pollEvents(after: number): Promise<{ events: EngineEvent[]; headSeq: number }>;
+  goalReadiness(repositoryId: string): Promise<GoalReadinessResult>;
 }
 
 export function createProductionGoalsClient(
@@ -128,6 +141,18 @@ export function createProductionGoalsClient(
         headSeq: typeof payload.head_seq === "number" ? payload.head_seq : after,
       };
     },
+    async goalReadiness(repositoryId) {
+      const payload = await jsonRequest(
+        request,
+        "GET",
+        `/repositories/${repositoryId}/goal-readiness`,
+      );
+      const checks = Array.isArray(payload.checks) ? payload.checks : [];
+      return {
+        canExecute: payload.can_execute === true,
+        checks: checks.map(mapReadinessCheck),
+      };
+    },
   };
 }
 
@@ -176,6 +201,16 @@ function mapTask(raw: unknown): GoalTask {
     stopReason: typeof item.stop_reason === "string" ? item.stop_reason : null,
     prUrl: typeof item.pr_url === "string" ? item.pr_url : null,
     prBase: typeof item.pr_base === "string" ? item.pr_base : null,
+  };
+}
+
+function mapReadinessCheck(raw: unknown): GoalReadinessCheck {
+  const item = asRecord(raw);
+  return {
+    id: stringField(item, "id"),
+    label: stringField(item, "label"),
+    ok: item.ok === true,
+    detail: stringField(item, "detail"),
   };
 }
 

@@ -21,6 +21,7 @@ function unused(): Promise<never> {
 function repos(overrides: Partial<RepositoriesClient> = {}): RepositoriesClient {
   return {
     list: async () => [],
+    get: unused,
     inspect: unused,
     enrol: unused,
     pause: unused,

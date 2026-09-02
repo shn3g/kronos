@@ -35,6 +35,43 @@ describe("createProductionRepositoriesClient", () => {
     ]);
   });
 
+  it("loads a repository detail with policy through the engine JSON proxy", async () => {
+    const client = createProductionRepositoriesClient(async (method, path) => {
+      expect(method).toBe("GET");
+      expect(path).toBe("/repositories/repo_alpha");
+      return {
+        status: 200,
+        body: JSON.stringify({
+          repository: {
+            id: "repo_alpha",
+            display_name: "alpha",
+            realpath: "C:/tmp/alpha",
+            origin: "https://github.com/acme/alpha.git",
+            status: "active",
+          },
+          policy: {
+            autonomy: { mode: "write_draft_prs", freeze: false },
+          },
+          runtime: { python: "3.12" },
+        }),
+      };
+    });
+
+    await expect(client.get("repo_alpha")).resolves.toEqual({
+      repository: {
+        id: "repo_alpha",
+        displayName: "alpha",
+        realpath: "C:/tmp/alpha",
+        origin: "https://github.com/acme/alpha.git",
+        status: "active",
+      },
+      policy: {
+        autonomy: { mode: "write_draft_prs", freeze: false },
+      },
+      runtime: { python: "3.12" },
+    });
+  });
+
   it("resumes a paused repository through the engine JSON proxy", async () => {
     const client = createProductionRepositoriesClient(async (method, path) => {
       expect(method).toBe("POST");
