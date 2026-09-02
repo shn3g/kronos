@@ -37,7 +37,7 @@ Do not mass-delete those fallbacks in the same change that enables Kronos policy
 
 See `docs/architecture/engine.md` and `deploy/`. Doctor backup excludes the OS secret store. Restore fails closed on missing or corrupt archives. Unsigned releases still ship checksums, SBOM, and provenance. Claiming a signed release without `release.sig` fails closed.
 
-Windows NSIS installers use per-user (`currentUser`) install mode so in-app updates can upgrade the existing install without elevation. Linux updater bundles use the signed AppImage artifact; the `.deb` remains the manual download for package-manager installs.
+Windows NSIS installers use per-user (`currentUser`) install mode so in-app updates can upgrade the existing install without elevation. Linux updater bundles use the signed AppImage artifact; the `.deb` remains the manual download for package-manager installs. In-app updates stay fail-closed until `plugins.updater.pubkey` in `tauri.conf.json` (and the matching `UPDATER_PUBKEY` constant) is replaced with the publisher public key and GitHub Actions secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` are set. Do not leave a public key whose private half is missing: `pnpm tauri build` then fails on every CI desktop job.
 
 The desktop **Health** tab and Settings **Run doctor** call `GET /ops/doctor` on the local engine. Checks cover engine readiness, assigned models, enrolled workspace, index health, secrets storage, and embeddings configuration. Failed goal-readiness items in the Goals workbench link to the Settings section that fixes them (models, connections, workspaces). Inspector Changes can revert or locally commit working-tree files; Kronos does not push to GitHub from those actions.
 

@@ -94,6 +94,17 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build --bundles ${{ matrix.bundle }}
 
+      - name: Record Darwin updater architecture
+        if: runner.os == 'macOS'
+        run: |
+          bundle="apps/desktop/src-tauri/target/release/bundle"
+          mkdir -p "$bundle"
+          case "$(uname -m)" in
+            arm64|aarch64) echo aarch64 ;;
+            x86_64|amd64) echo x86_64 ;;
+            *) echo "unsupported Darwin arch: $(uname -m)" >&2; exit 1 ;;
+          esac > "$bundle/darwin-arch.txt"
+
       - name: Checksums SBOM and provenance
         working-directory: engine
         shell: bash
@@ -161,8 +172,7 @@ jobs:
             --version "${TAG#v}" \
             --changelog CHANGELOG.md \
             --release-base-url "https://github.com/${{ github.repository }}/releases/download/${TAG}" \
-            --output upload/latest.json \
-            --darwin-arch aarch64
+            --output upload/latest.json
           mapfile -t assets < <(find upload -type f)
           if [ "${#assets[@]}" -eq 0 ]; then
             echo "no installer assets to publish"

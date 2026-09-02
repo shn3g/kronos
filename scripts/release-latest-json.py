@@ -46,12 +46,28 @@ def platform_key_for_artifact(name: str, *, darwin_arch: str) -> str | None:
     return None
 
 
+DARWIN_ARCH_MARKER = "darwin-arch.txt"
+
+
+def resolve_darwin_arch(artifacts_dir: Path, fallback: str) -> str:
+    marker = next(
+        (path for path in artifacts_dir.rglob(DARWIN_ARCH_MARKER) if path.is_file()),
+        None,
+    )
+    if marker is not None:
+        value = marker.read_text(encoding="utf-8").strip()
+        if value in {"x86_64", "aarch64"}:
+            return value
+    return fallback if fallback in {"x86_64", "aarch64"} else "aarch64"
+
+
 def discover_platforms(
     artifacts_dir: Path,
     *,
     url_builder: Callable[[Path], str],
     darwin_arch: str = "aarch64",
 ) -> dict[str, dict[str, str]]:
+    darwin_arch = resolve_darwin_arch(artifacts_dir, darwin_arch)
     platforms: dict[str, dict[str, str]] = {}
     candidates = sorted(path for path in artifacts_dir.rglob("*") if path.is_file())
     updater_bundles = [

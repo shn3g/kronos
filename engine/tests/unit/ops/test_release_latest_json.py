@@ -64,6 +64,25 @@ def test_discover_platforms_builds_valid_latest_json(tmp_path: Path) -> None:
     assert payload["platforms"]["darwin-aarch64"]["signature"] == "darwin-signature"
 
 
+def test_darwin_arch_marker_overrides_default_flag(tmp_path: Path) -> None:
+    artifacts = tmp_path / "bundle"
+    macos = artifacts / "macos"
+    macos.mkdir(parents=True)
+    archive = macos / "Kronos.app.tar.gz"
+    archive_sig = macos / "Kronos.app.tar.gz.sig"
+    archive.write_bytes(b"mac")
+    archive_sig.write_text("darwin-signature", encoding="utf-8")
+    (artifacts / "darwin-arch.txt").write_text("x86_64\n", encoding="utf-8")
+
+    platforms = discover_platforms(
+        artifacts,
+        url_builder=lambda path: f"https://example.test/{path.name}",
+        darwin_arch="aarch64",
+    )
+    assert "darwin-x86_64" in platforms
+    assert "darwin-aarch64" not in platforms
+
+
 def test_missing_signature_fails_closed(tmp_path: Path) -> None:
     artifacts = tmp_path / "bundle"
     nsis = artifacts / "nsis"
