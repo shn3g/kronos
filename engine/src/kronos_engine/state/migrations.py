@@ -342,6 +342,59 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
             ON conversation_messages(conversation_id);
         """,
     ),
+    (
+        11,
+        """
+        CREATE TABLE conversations_new (
+            id TEXT PRIMARY KEY,
+            repository_id TEXT REFERENCES repositories(id),
+            title TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        INSERT INTO conversations_new(id, repository_id, title, created_at)
+        SELECT id, repository_id, title, created_at FROM conversations;
+
+        CREATE TABLE conversation_messages_new (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL
+                REFERENCES conversations_new(id) ON DELETE CASCADE,
+            role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'tool')),
+            content TEXT NOT NULL,
+            citations_json TEXT NOT NULL,
+            goal_refs_json TEXT NOT NULL,
+            model TEXT,
+            token_count INTEGER,
+            created_at TEXT NOT NULL,
+            tool_name TEXT,
+            tool_status TEXT,
+            tool_json TEXT
+        );
+        INSERT INTO conversation_messages_new(
+            id, conversation_id, role, content, citations_json, goal_refs_json,
+            model, token_count, created_at, tool_name, tool_status, tool_json
+        )
+        SELECT id, conversation_id, role, content, citations_json, goal_refs_json,
+               model, token_count, created_at, NULL, NULL, NULL
+        FROM conversation_messages;
+
+        DROP TABLE conversation_messages;
+        DROP TABLE conversations;
+        ALTER TABLE conversations_new RENAME TO conversations;
+        ALTER TABLE conversation_messages_new RENAME TO conversation_messages;
+
+        CREATE INDEX idx_conversations_repository_id ON conversations(repository_id);
+        CREATE INDEX idx_conversation_messages_conversation_id
+            ON conversation_messages(conversation_id);
+
+        CREATE TABLE chat_file_backups (
+            repository_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            before TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (repository_id, path)
+        );
+        """,
+    ),
 )
 
 

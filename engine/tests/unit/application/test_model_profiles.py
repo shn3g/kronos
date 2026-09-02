@@ -217,3 +217,84 @@ def test_update_profile_changes_model_id_and_limits_only(tmp_path: Path) -> None
     assert updated.limits.cost_ceiling == 2.5
     assert updated.limits.max_tokens == 2048
     assert updated.display_name == coder.display_name
+
+
+def test_seeded_profiles_default_to_a_32000_token_context_window(tmp_path: Path) -> None:
+    service, _store = _service(tmp_path)
+    service.register_provider(
+        ProviderDraft(
+            kind="openai_compatible",
+            display_name="Ollama",
+            base_url="http://127.0.0.1:11434/v1",
+            billed=False,
+        )
+    )
+    profiles = service.list_profiles()
+    assert profiles
+    assert {item.limits.context_window for item in profiles} == {32_000}
+    reloaded = service._registry.list_profiles()
+    assert {item.limits.context_window for item in reloaded} == {32_000}
+
+
+def test_update_profile_persists_the_context_window(tmp_path: Path) -> None:
+    service, _store = _service(tmp_path)
+    service.register_provider(
+        ProviderDraft(
+            kind="openai_compatible",
+            display_name="Ollama",
+            base_url="http://127.0.0.1:11434/v1",
+            billed=False,
+        )
+    )
+    coder = next(item for item in service.list_profiles() if item.role == "coder")
+    updated = service.update_profile(
+        coder.id,
+        model_id="llama3.1",
+        limits=ResourceLimits(
+            max_tokens=2048,
+            max_attempts=3,
+            timeout_seconds=60.0,
+            cost_ceiling=0.0,
+            context_window=8_192,
+        ),
+    )
+    assert updated.limits.context_window == 8_192
+    reloaded = next(item for item in service.list_profiles() if item.id == coder.id)
+    assert reloaded.limits.context_window == 8_192
+
+
+def test_profiles_stored_without_a_context_window_load_with_the_default(tmp_path: Path) -> None:
+    service, _store = _service(tmp_path)
+    registry = service._registry
+    registry.save_provider(
+        ProviderConfig(
+            id="prov_legacy",
+            kind="openai_compatible",
+            display_name="Ollama",
+            base_url="http://127.0.0.1:11434/v1",
+            billed=False,
+            secret_ref="provider:prov_legacy:api_key",
+        )
+    )
+    registry._conn.execute(
+        """
+        INSERT INTO model_profiles(
+            id, display_name, role, provider_id, model_id, billed,
+            approved_fallbacks_json, limits_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "prof_legacy_coder",
+            "Ollama (coder)",
+            "coder",
+            "prov_legacy",
+            "llama3",
+            0,
+            "[]",
+            '{"max_tokens": 1024, "max_attempts": 3, '
+            '"timeout_seconds": 30.0, "cost_ceiling": 0.0}',
+        ),
+    )
+    registry._conn.commit()
+    loaded = next(item for item in registry.list_profiles() if item.id == "prof_legacy_coder")
+    assert loaded.limits.context_window == 32_000

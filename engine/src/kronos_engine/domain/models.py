@@ -60,6 +60,7 @@ class ResourceLimits:
     max_attempts: int
     timeout_seconds: float
     cost_ceiling: float
+    context_window: int = 32_000
 
     def __post_init__(self) -> None:
         assert_finite_attempts(self.max_attempts)

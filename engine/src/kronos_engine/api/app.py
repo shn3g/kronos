@@ -857,6 +857,7 @@ def create_app(
                         max_attempts=body.limits.max_attempts,
                         timeout_seconds=body.limits.timeout_seconds,
                         cost_ceiling=body.limits.cost_ceiling,
+                        context_window=body.limits.context_window,
                     ),
                 )
             except LookupError as error:
@@ -1827,6 +1828,7 @@ def _profile_model(profile: ModelProfile) -> ProfileModel:
             max_attempts=profile.limits.max_attempts,
             timeout_seconds=profile.limits.timeout_seconds,
             cost_ceiling=profile.limits.cost_ceiling,
+            context_window=profile.limits.context_window,
         ),
     )
 

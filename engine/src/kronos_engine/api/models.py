@@ -187,6 +187,7 @@ class ResourceLimitsModel(BaseModel):
     max_attempts: int
     timeout_seconds: float
     cost_ceiling: float
+    context_window: int = 32_000
 
 
 class ProfileModel(BaseModel):
@@ -409,7 +410,7 @@ class ConversationCreateRequest(BaseModel):
 
 class ConversationModel(BaseModel):
     id: str
-    repository_id: str
+    repository_id: str | None
     title: str
     created_at: str
 

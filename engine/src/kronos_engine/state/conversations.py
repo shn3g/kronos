@@ -14,7 +14,7 @@ from uuid import uuid4
 @dataclass(frozen=True, slots=True)
 class ConversationRecord:
     id: str
-    repository_id: str
+    repository_id: str | None
     title: str
     created_at: str
 
@@ -30,13 +30,16 @@ class ConversationMessage:
     model: str | None
     token_count: int | None
     created_at: str
+    tool_name: str | None = None
+    tool_status: str | None = None
+    tool_json: str | None = None
 
 
 class SqliteConversationStore:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
 
-    def create(self, repository_id: str, title: str) -> ConversationRecord:
+    def create(self, repository_id: str | None, title: str) -> ConversationRecord:
         record = ConversationRecord(
             id=f"conv_{uuid4().hex[:16]}",
             repository_id=repository_id,
@@ -64,12 +67,18 @@ class SqliteConversationStore:
             created_at=row["created_at"],
         )
 
-    def list_for_repository(self, repository_id: str) -> Sequence[ConversationRecord]:
-        rows = self._conn.execute(
-            "SELECT id, repository_id, title, created_at FROM conversations "
-            "WHERE repository_id = ? ORDER BY created_at, id",
-            (repository_id,),
-        ).fetchall()
+    def list_for_repository(self, repository_id: str | None) -> Sequence[ConversationRecord]:
+        if repository_id is None:
+            rows = self._conn.execute(
+                "SELECT id, repository_id, title, created_at FROM conversations "
+                "WHERE repository_id IS NULL ORDER BY created_at, id"
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT id, repository_id, title, created_at FROM conversations "
+                "WHERE repository_id = ? ORDER BY created_at, id",
+                (repository_id,),
+            ).fetchall()
         return tuple(
             ConversationRecord(
                 id=row["id"],
@@ -100,6 +109,9 @@ class SqliteConversationStore:
         model: str | None = None,
         token_count: int | None = None,
         message_id: str | None = None,
+        tool_name: str | None = None,
+        tool_status: str | None = None,
+        tool_json: str | None = None,
     ) -> ConversationMessage:
         record = ConversationMessage(
             id=message_id or f"msg_{uuid4().hex[:16]}",
@@ -111,13 +123,16 @@ class SqliteConversationStore:
             model=model,
             token_count=token_count,
             created_at=datetime.now(tz=UTC).isoformat(),
+            tool_name=tool_name,
+            tool_status=tool_status,
+            tool_json=tool_json,
         )
         self._conn.execute(
             """
             INSERT INTO conversation_messages(
                 id, conversation_id, role, content, citations_json, goal_refs_json,
-                model, token_count, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                model, token_count, created_at, tool_name, tool_status, tool_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
@@ -129,6 +144,9 @@ class SqliteConversationStore:
                 record.model,
                 record.token_count,
                 record.created_at,
+                record.tool_name,
+                record.tool_status,
+                record.tool_json,
             ),
         )
         self._conn.commit()
@@ -141,6 +159,44 @@ class SqliteConversationStore:
             (conversation_id,),
         ).fetchall()
         return tuple(_message_from_row(row) for row in rows)
+
+    def save_file_backup(
+        self, repository_id: str, path: str, before: str, created_at: str
+    ) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO chat_file_backups(repository_id, path, before, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(repository_id, path) DO UPDATE SET
+                before = excluded.before,
+                created_at = excluded.created_at
+            """,
+            (repository_id, path, before, created_at),
+        )
+        self._conn.commit()
+
+    def get_file_backup(self, repository_id: str, path: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT before FROM chat_file_backups WHERE repository_id = ? AND path = ?",
+            (repository_id, path),
+        ).fetchone()
+        if row is None:
+            return None
+        return str(row["before"])
+
+    def delete_file_backup(self, repository_id: str, path: str) -> None:
+        self._conn.execute(
+            "DELETE FROM chat_file_backups WHERE repository_id = ? AND path = ?",
+            (repository_id, path),
+        )
+        self._conn.commit()
+
+    def list_backup_paths(self, repository_id: str) -> tuple[str, ...]:
+        rows = self._conn.execute(
+            "SELECT path FROM chat_file_backups WHERE repository_id = ? ORDER BY path",
+            (repository_id,),
+        ).fetchall()
+        return tuple(str(row["path"]) for row in rows)
 
 
 def _message_from_row(row: sqlite3.Row) -> ConversationMessage:
@@ -163,4 +219,7 @@ def _message_from_row(row: sqlite3.Row) -> ConversationMessage:
         model=row["model"],
         token_count=int(token_count) if token_count is not None else None,
         created_at=row["created_at"],
+        tool_name=row["tool_name"],
+        tool_status=row["tool_status"],
+        tool_json=row["tool_json"],
     )

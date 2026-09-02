@@ -171,7 +171,7 @@ class ChatService:
             return
         provider, profile, secret = self._require_orchestrator(cap_tokens=True)
         pack = self._indexer.search(
-            conversation.repository_id,
+            _repository_id(conversation),
             content,
             mode="hybrid",
             budget_tokens=CONTEXT_BUDGET_TOKENS,
@@ -245,7 +245,7 @@ class ChatService:
     def _create_goal_turn(
         self, conversation: ConversationRecord, title: str, success_criteria: str
     ) -> ChatTurn:
-        repo = self._repos.get(RepositoryId(conversation.repository_id))
+        repo = self._repos.get(RepositoryId(_repository_id(conversation)))
         goal = self._goals.create(
             GoalSpec(
                 repository_id=repo.id,
@@ -366,6 +366,12 @@ def _emit_plain_deltas(
                 yield part
                 streamed = True
     return "".join(parts), streamed
+
+
+def _repository_id(conversation: ConversationRecord) -> str:
+    if conversation.repository_id is None:
+        raise LookupError(f"conversation has no workspace: {conversation.id}")
+    return conversation.repository_id
 
 
 def _slash_goal_body(text: str) -> str | None:

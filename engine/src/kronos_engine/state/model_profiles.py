@@ -86,6 +86,7 @@ class SqliteModelRegistry:
                         "max_attempts": profile.limits.max_attempts,
                         "timeout_seconds": profile.limits.timeout_seconds,
                         "cost_ceiling": profile.limits.cost_ceiling,
+                        "context_window": profile.limits.context_window,
                     }
                 ),
             ),
@@ -143,5 +144,6 @@ def _profile_from_row(row: sqlite3.Row) -> ModelProfile:
             max_attempts=int(limits_raw["max_attempts"]),
             timeout_seconds=float(limits_raw["timeout_seconds"]),
             cost_ceiling=float(limits_raw["cost_ceiling"]),
+            context_window=int(limits_raw.get("context_window", 32_000)),
         ),
     )

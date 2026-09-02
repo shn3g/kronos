@@ -258,7 +258,27 @@ async def test_update_profile_model_id_and_limits(
     assert body["model_id"] == "llama3.1"
     assert body["limits"]["cost_ceiling"] == 1.25
     assert body["limits"]["max_tokens"] == 2048
+    assert body["limits"]["context_window"] == 32_000
     assert "api_key" not in str(body)
+    windowed = await http.put(
+        f"/models/profiles/{coder['id']}",
+        headers=headers,
+        json={
+            "model_id": "llama3.1",
+            "limits": {
+                "max_tokens": 2048,
+                "max_attempts": 3,
+                "timeout_seconds": 60.0,
+                "cost_ceiling": 1.25,
+                "context_window": 8192,
+            },
+        },
+    )
+    assert windowed.status_code == 200
+    assert windowed.json()["limits"]["context_window"] == 8192
+    snapshot = (await http.get("/models", headers=headers)).json()
+    reloaded = next(item for item in snapshot["profiles"] if item["id"] == coder["id"])
+    assert reloaded["limits"]["context_window"] == 8192
     missing = await http.put(
         "/models/profiles/prof_missing",
         headers=headers,
