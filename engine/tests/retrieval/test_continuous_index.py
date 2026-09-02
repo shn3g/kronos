@@ -133,6 +133,40 @@ def test_swapping_embedder_identity_does_not_reuse_stale_vectors(tmp_path: Path)
     assert second.calls >= 1
 
 
+def test_switching_catalog_onnx_identities_reembeds(tmp_path: Path) -> None:
+    paths = kronos_paths(tmp_path)
+    root = init_git_repo(
+        tmp_path / "catalog-model",
+        files={"src/mod.py": "STABLE_TOKEN = 1\n"},
+    )
+    policy = indexing_policy()
+    first = _CountingEmbedder()
+    service = IndexingService(
+        paths,
+        embeddings=first,
+        embedding_identity=EmbeddingIdentity(kind="onnx", model_id="all-MiniLM-L6-v2"),
+    )
+    service.rebuild("repo_catalog", root, policy)
+    skipped = first.calls
+    assert skipped >= 1
+    service.incremental("repo_catalog", root, policy)
+    assert first.calls == skipped
+
+    second = _CountingEmbedder()
+    swapped = IndexingService(
+        paths,
+        embeddings=second,
+        embedding_identity=EmbeddingIdentity(kind="onnx", model_id="BAAI/bge-small-en-v1.5"),
+    )
+    swapped.incremental("repo_catalog", root, policy)
+    assert second.calls >= 1
+    store = SqliteIndexStore(paths.cache / "indexes" / "repo_catalog" / "index.sqlite3")
+    try:
+        assert store.meta("embedding_model_id") == "BAAI/bge-small-en-v1.5"
+    finally:
+        store.close()
+
+
 def test_identity_swap_on_partial_incremental_keeps_vectors_for_unchanged_paths(
     tmp_path: Path,
 ) -> None:

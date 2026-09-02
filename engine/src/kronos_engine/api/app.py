@@ -38,10 +38,10 @@ from kronos_engine.api.models import (
     ConversationModel,
     DetectedToolModel,
     EmbeddingBackendModel,
+    EmbeddingInstallCatalogItem,
     EmbeddingInstallResponse,
     EmbeddingInstallStartRequest,
     EmbeddingInstallStatusModel,
-    EmbeddingInstallCatalogItem,
     EventItem,
     EventListResponse,
     GithubAppRecordResponse,
@@ -118,11 +118,11 @@ from kronos_engine.application.composition import (
     make_forge_for,
 )
 from kronos_engine.application.doctor import DoctorService, OpsSettings
-from kronos_engine.application.embeddings import ResolvedEmbedder, resolve_embedder
 from kronos_engine.application.embedding_install import (
     EMBEDDING_INSTALL_POLICY,
     EmbeddingInstaller,
 )
+from kronos_engine.application.embeddings import ResolvedEmbedder, resolve_embedder
 from kronos_engine.application.event_query import EventQuery
 from kronos_engine.application.github_setup import GitHubSetupService
 from kronos_engine.application.goal_engine import GoalEngine

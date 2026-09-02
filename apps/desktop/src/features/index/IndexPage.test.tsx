@@ -250,6 +250,36 @@ describe("IndexPage", () => {
     expect(search).toHaveBeenCalledWith("repo_alpha", "alpha");
   });
 
+  it("shows the dense backend name when dense is available", async () => {
+    render(
+      <IndexPage
+        engineClient={engine("ready")}
+        indexClient={clients({
+          status: async () => status({ denseAvailable: true }),
+        })}
+        modelsClient={{
+          snapshot: async () => ({
+            detected: [],
+            profiles: [],
+            assignments: {
+              orchestrator: null,
+              planner: null,
+              coder: null,
+              reviewer: null,
+              embedding: null,
+            },
+            embeddingBackend: {
+              kind: "onnx",
+              modelId: "BAAI/bge-small-en-v1.5",
+              displayName: "bge-small-en-v1.5",
+            },
+          }),
+        }}
+      />,
+    );
+    expect(await screen.findByText(/bge-small-en-v1.5 \(ready\)/i)).toBeInTheDocument();
+  });
+
   it("toggles the watcher without rebuilding", async () => {
     const user = userEvent.setup();
     const setWatch = vi.fn(async (_id: string, enabled: boolean) =>

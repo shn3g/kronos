@@ -67,7 +67,19 @@ def _test_catalog(base_url: str, onnx_bytes: bytes, tokenizer_bytes: bytes) -> d
                 (f"{base_url}/onnx", _sha256(onnx_bytes), onnx_name),
                 (f"{base_url}/tokenizer", _sha256(tokenizer_bytes), "tokenizer.json"),
             ),
-        )
+        ),
+        "bge-small-en-v1.5": catalog_entry(
+            key="bge-small-en-v1.5",
+            dim=384,
+            display_name="bge-small-en-v1.5",
+            document_model_id="BAAI/bge-small-en-v1.5",
+            document_filename="model.onnx",
+            document_license="MIT",
+            files=(
+                (f"{base_url}/bge-onnx", _sha256(onnx_bytes), "model.onnx"),
+                (f"{base_url}/bge-tok", _sha256(tokenizer_bytes), "tokenizer.json"),
+            ),
+        ),
     }
 
 
@@ -206,6 +218,87 @@ def test_resolve_local_models_dir_uses_active_installed_key(tmp_path: Path) -> N
     assert model_dir == installed
     adapter = local_adapter_for(key, model_dir)
     assert adapter is not None
+
+
+def test_installer_rejects_already_installed_without_deleting(tmp_path: Path) -> None:
+    onnx = b"onnx-keep"
+    tokenizer = b"tok-keep"
+    base_url, server, thread = _fixture_server(
+        {"/onnx": onnx, "/tokenizer": tokenizer},
+    )
+    try:
+        installer = EmbeddingInstaller(
+            tmp_path / "models",
+            catalog=_test_catalog(base_url, onnx, tokenizer),
+        )
+        installer.start("minilm-l6-v2")
+        _wait_until(lambda: installer.status()["state"] == "ready")
+        with pytest.raises(RuntimeError, match="already installed"):
+            installer.start("minilm-l6-v2")
+        model_dir = tmp_path / "models" / "minilm-l6-v2"
+        assert (model_dir / "all-MiniLM-L6-v2.onnx").read_bytes() == onnx
+        assert installer.active_key() == "minilm-l6-v2"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_failed_install_of_second_model_keeps_first_active(tmp_path: Path) -> None:
+    onnx = b"onnx-keep"
+    tokenizer = b"tok-keep"
+    base_url, server, thread = _fixture_server(
+        {
+            "/onnx": onnx,
+            "/tokenizer": tokenizer,
+            "/bge-onnx": onnx,
+            "/bge-tok": tokenizer,
+        },
+    )
+    catalog = _test_catalog(base_url, onnx, tokenizer)
+    bge = catalog["bge-small-en-v1.5"]
+    catalog["bge-small-en-v1.5"] = catalog_entry(
+        key=bge.key,
+        dim=bge.dim,
+        display_name=bge.display_name,
+        document_model_id=bge.document_model_id,
+        document_filename=bge.document_filename,
+        document_license=bge.document_license,
+        files=(
+            (bge.files[0].url, "0" * 64, bge.files[0].dest),
+            (bge.files[1].url, bge.files[1].sha256, bge.files[1].dest),
+        ),
+    )
+    try:
+        installer = EmbeddingInstaller(tmp_path / "models", catalog=catalog)
+        installer.start("minilm-l6-v2")
+        _wait_until(lambda: installer.status()["state"] == "ready")
+        installer.start("bge-small-en-v1.5")
+        _wait_until(lambda: installer.status()["state"] == "failed")
+        assert installer.active_key() == "minilm-l6-v2"
+        assert (tmp_path / "models" / ".active-key").read_text(encoding="utf-8") == "minilm-l6-v2"
+        assert (tmp_path / "models" / "minilm-l6-v2" / "all-MiniLM-L6-v2.onnx").read_bytes() == onnx
+        assert not (tmp_path / "models" / "bge-small-en-v1.5").exists()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_start_does_not_raise_when_size_probe_fails(tmp_path: Path) -> None:
+    def exploding_urlopen(request: object) -> object:
+        _ = request
+        raise OSError("offline")
+
+    installer = EmbeddingInstaller(
+        tmp_path / "models",
+        catalog=_test_catalog("http://127.0.0.1:9", b"onnx", b"tok"),
+        urlopen=exploding_urlopen,
+    )
+    installer.start("minilm-l6-v2")
+    _wait_until(lambda: installer.status()["state"] == "failed")
+    assert installer.status()["state"] == "failed"
+    assert installer.active_key() is None
 
 
 def test_policy_sentence_is_documented() -> None:

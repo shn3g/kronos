@@ -190,15 +190,16 @@ class EmbeddingInstaller:
     def start(self, key: str) -> None:
         if key not in self._catalog:
             raise KeyError(key)
+        if self.is_installed(key):
+            raise RuntimeError("already installed")
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 raise RuntimeError("install already in progress")
             self._state = "downloading"
             self._model_key = key
             self._bytes_done = 0
-            self._bytes_total = sum(_remote_size(spec.url, self._urlopen) for spec in self._catalog[key].files)
+            self._bytes_total = 0
             self._error = None
-            _write_active_key(self._models_root, key)
             self._thread = threading.Thread(
                 target=self._run_install,
                 args=(key,),
@@ -241,6 +242,11 @@ class EmbeddingInstaller:
         dest_dir = self._models_root / key
         staging = dest_dir.with_suffix(".staging")
         try:
+            total = 0
+            for spec in entry.files:
+                total += _remote_size(spec.url, self._urlopen)
+            with self._lock:
+                self._bytes_total = total
             if staging.exists():
                 shutil.rmtree(staging)
             staging.mkdir(parents=True, exist_ok=True)
@@ -257,14 +263,13 @@ class EmbeddingInstaller:
             if dest_dir.exists():
                 shutil.rmtree(dest_dir)
             staging.replace(dest_dir)
+            _write_active_key(self._models_root, key)
             with self._lock:
                 self._state = "ready"
                 self._error = None
         except Exception as exc:
             if staging.exists():
                 shutil.rmtree(staging, ignore_errors=True)
-            if dest_dir.exists():
-                shutil.rmtree(dest_dir, ignore_errors=True)
             with self._lock:
                 self._state = "failed"
                 self._error = str(exc)
@@ -351,8 +356,5 @@ def _remote_size(url: str, urlopen: Callable[[Request], Any]) -> int:
             if length is not None:
                 return max(0, int(length))
     except Exception:
-        pass
-    request = Request(url, headers={"User-Agent": "kronos-engine/embedding-install"})
-    with urlopen(request) as response:
-        data = response.read()
-        return len(data)
+        return 0
+    return 0

@@ -56,6 +56,10 @@ class LocalEmbeddingAdapter:
         self._tokenizer: object | None = None
         self._tokenize_failed = False
 
+    @property
+    def document_model_id(self) -> str:
+        return self._document.model_id
+
     def available(self, kind: str) -> bool:
         try:
             if self._tokenize_failed:

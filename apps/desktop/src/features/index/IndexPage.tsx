@@ -12,7 +12,7 @@ import {
   type IndexHit,
   type IndexStatus,
 } from "./client";
-import { createProductionModelsClient } from "../models/client";
+import { createProductionModelsClient, type ModelsClient } from "../models/client";
 
 export type { IndexClient } from "./client";
 
@@ -23,6 +23,7 @@ export interface IndexPageClients extends IndexClient {
 interface IndexPageProps {
   engineClient: EngineClient;
   indexClient?: IndexPageClients;
+  modelsClient?: Pick<ModelsClient, "snapshot">;
 }
 
 const productionIndex = createProductionIndexClient();
@@ -33,8 +34,9 @@ const productionPageClient: IndexPageClients = {
   listRepositories: () => productionRepos.list(),
 };
 
-export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
+export function IndexPage({ engineClient, indexClient, modelsClient }: IndexPageProps) {
   const client = indexClient ?? productionPageClient;
+  const models = modelsClient ?? productionModels;
   const [ready, setReady] = useState(false);
   const [repositories, setRepositories] = useState<EnrolledRepository[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -109,7 +111,7 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
       return;
     }
     let cancelled = false;
-    void productionModels.snapshot().then((snapshot) => {
+    void models.snapshot().then((snapshot) => {
       if (!cancelled) {
         setDenseBackend(snapshot.embeddingBackend.displayName || null);
       }
@@ -117,7 +119,7 @@ export function IndexPage({ engineClient, indexClient }: IndexPageProps) {
     return () => {
       cancelled = true;
     };
-  }, [ready, status?.denseAvailable]);
+  }, [models, ready, status?.denseAvailable]);
 
   if (!ready) {
     return (

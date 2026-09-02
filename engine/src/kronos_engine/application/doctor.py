@@ -15,9 +15,9 @@ from typing import Any
 from kronos_engine.adapters.git.detection import ManifestStackDetector
 from kronos_engine.adapters.git.repository import FilesystemGitInspector
 from kronos_engine.adapters.git.worktrees import CacheRuntimeLayout
+from kronos_engine.application.embeddings import EmbeddingBackend
 from kronos_engine.application.recorder import Recorder
 from kronos_engine.application.repositories import RepositoryService
-from kronos_engine.application.embeddings import EmbeddingBackend
 from kronos_engine.config.settings import Settings
 from kronos_engine.domain.entities import IdentifierError, Lease, TaskId
 from kronos_engine.domain.version import client_is_compatible

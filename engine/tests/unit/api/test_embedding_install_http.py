@@ -69,17 +69,10 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _wait_until(predicate, *, timeout: float = 5.0) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return
-        time.sleep(0.02)
-    raise AssertionError("timed out waiting for condition")
-
-
 @pytest.fixture
-async def client(tmp_path: Path) -> AsyncIterator[tuple[AsyncClient, dict[str, str], Path, Settings]]:
+async def client(
+    tmp_path: Path,
+) -> AsyncIterator[tuple[AsyncClient, dict[str, str], Path, Settings]]:
     onnx = b"route-onnx"
     tokenizer = b"route-tokenizer"
     _Handler.files = {"/onnx": onnx, "/tokenizer": tokenizer}
@@ -141,7 +134,7 @@ async def test_embedding_install_get_requires_auth(
 async def test_embedding_install_routes(
     client: tuple[AsyncClient, dict[str, str], Path, Settings],
 ) -> None:
-    http, headers, tmp_path, settings = client
+    http, headers, tmp_path, _settings = client
     initial = await http.get("/models/embeddings/install", headers=headers)
     assert initial.status_code == 200
     payload = initial.json()
@@ -155,11 +148,21 @@ async def test_embedding_install_routes(
         json={"key": "minilm-l6-v2"},
     )
     assert started.status_code == 200
-    _wait_until(
-        lambda: (
-            (settings.paths.cache / "models" / "minilm-l6-v2" / "all-MiniLM-L6-v2.onnx").is_file()
-        )
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        poll = await http.get("/models/embeddings/install", headers=headers)
+        if poll.json()["status"]["state"] == "ready":
+            break
+        time.sleep(0.02)
+    else:
+        raise AssertionError("install did not reach ready")
+
+    conflict = await http.post(
+        "/models/embeddings/install",
+        headers=headers,
+        json={"key": "minilm-l6-v2"},
     )
+    assert conflict.status_code == 409
 
     removed = await http.delete(
         "/models/embeddings/install",

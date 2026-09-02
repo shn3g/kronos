@@ -7,10 +7,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from kronos_engine.adapters.embeddings.local import CODE_MODEL_ID, DOCUMENT_MODEL_ID
-from kronos_engine.application.embedding_install import local_adapter_for, resolve_local_models_dir
+from kronos_engine.adapters.embeddings.local import CODE_MODEL_ID, LocalEmbeddingAdapter
 from kronos_engine.adapters.embeddings.openai_compatible import OpenAICompatibleEmbeddingAdapter
 from kronos_engine.adapters.models.openai_compatible import HttpTransport
+from kronos_engine.application.embedding_install import (
+    default_catalog,
+    local_adapter_for,
+    resolve_local_models_dir,
+)
 from kronos_engine.ports.embedding import EmbeddingPort
 from kronos_engine.ports.model_registry import ModelRegistry
 from kronos_engine.ports.secrets import ScopedSecret, SecretStore
@@ -54,15 +58,29 @@ def resolve_embedder(
     model_dir, catalog_key = resolve_local_models_dir(models_dir)
     local = local_adapter_for(catalog_key, model_dir)
     if local.available("document") or local.available("code"):
-        model_id = DOCUMENT_MODEL_ID if local.available("document") else CODE_MODEL_ID
         return ResolvedEmbedder(
             adapter=local,
-            backend=EmbeddingBackend(kind="onnx", model_id=model_id, display_name="Local ONNX"),
+            backend=onnx_backend_for(catalog_key, local),
         )
     return ResolvedEmbedder(
         adapter=UnavailableEmbeddingAdapter(),
         backend=EmbeddingBackend(kind="none", model_id="", display_name="Sparse only"),
     )
+
+
+def onnx_backend_for(catalog_key: str | None, local: LocalEmbeddingAdapter) -> EmbeddingBackend:
+    if catalog_key is not None:
+        entry = default_catalog().get(catalog_key)
+        if entry is not None:
+            return EmbeddingBackend(
+                kind="onnx",
+                model_id=entry.document_model_id,
+                display_name=entry.display_name,
+            )
+    model_id = local.document_model_id
+    if not local.available("document") and local.available("code"):
+        model_id = CODE_MODEL_ID
+    return EmbeddingBackend(kind="onnx", model_id=model_id, display_name="Local ONNX")
 
 
 def _from_assignment(

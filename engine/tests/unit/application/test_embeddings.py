@@ -9,6 +9,7 @@ import pytest
 from tests.retrieval.support import write_local_embedding_fixtures
 from tests.support.secrets import InMemorySecretStore
 
+from kronos_engine.adapters.embeddings.local import DOCUMENT_MODEL_ID, LocalEmbeddingAdapter
 from kronos_engine.application.embeddings import resolve_embedder
 from kronos_engine.application.model_profiles import ModelProfileService, ProviderDraft
 from kronos_engine.domain.models import MODEL_ROLES, ResourceLimits
@@ -49,6 +50,23 @@ def test_resolver_uses_assigned_embedding_profile_before_onnx(tmp_path: Path) ->
     assert resolved.backend.model_id == "default"
     assert resolved.backend.display_name == profiles["embedding"].display_name
     assert resolved.adapter.available("document") is True
+
+
+def test_resolver_reports_bge_catalog_model_id_not_minilm_constant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, secrets, models_dir = _service(tmp_path)
+    dest = models_dir / "bge-small-en-v1.5"
+    dest.mkdir(parents=True)
+    (dest / "model.onnx").write_bytes(b"onnx")
+    (dest / "tokenizer.json").write_bytes(b"{}")
+    (models_dir / ".active-key").write_text("bge-small-en-v1.5", encoding="utf-8")
+    monkeypatch.setattr(LocalEmbeddingAdapter, "available", lambda self, kind: kind == "document")
+    resolved = resolve_embedder(service._registry, secrets, models_dir)
+    assert resolved.backend.kind == "onnx"
+    assert resolved.backend.model_id == "BAAI/bge-small-en-v1.5"
+    assert resolved.backend.model_id != DOCUMENT_MODEL_ID
+    assert resolved.backend.display_name == "bge-small-en-v1.5"
 
 
 def test_resolver_falls_back_to_onnx_when_weights_and_tokenizer_exist(tmp_path: Path) -> None:

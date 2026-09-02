@@ -2,11 +2,7 @@
 
 import { requestEngineJson, type EngineJsonResponse } from "../../engine/transport";
 
-import type {
-  EmbeddingCatalogItem,
-  EmbeddingInstallSnapshot,
-  EmbeddingInstallStatus,
-} from "./embeddingInstall";
+import type { EmbeddingInstallSnapshot } from "./embeddingInstall";
 
 export type {
   EmbeddingCatalogItem,
