@@ -63,6 +63,15 @@ jobs:
           pnpm exec playwright install --with-deps chromium
           pnpm test:e2e
 
+      - name: Install Python engine for with-engine e2e
+        if: runner.os == 'Linux'
+        run: /usr/bin/python3 -m pip install -e "./engine" --break-system-packages
+
+      - name: Playwright with-engine (full stack)
+        if: runner.os == 'Linux'
+        working-directory: apps/desktop
+        run: pnpm test:e2e:engine
+
   desktop:
     name: Desktop build (${{ matrix.os }})
     if: github.event.pull_request.draft == false
