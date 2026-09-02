@@ -1,6 +1,6 @@
 [project]
 name = "kronos-workspace"
-version = "0.3.0"
+version = "0.4.0"
 description = "Root tooling pointers for Kronos. Runtime packages live under engine/ and services/."
 readme = "README.md"
 requires-python = ">=3.11"

@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
-const CLIENT_VERSION: &str = "0.3.0";
+const CLIENT_VERSION: &str = "0.4.0";
 const READY_TIMEOUT: Duration = Duration::from_secs(20);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const ENGINE_JSON_TIMEOUT: Duration = Duration::from_secs(30);

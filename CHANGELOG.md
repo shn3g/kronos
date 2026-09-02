@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-02
+
+Workbench: Files editor, Changes revert/commit, Health, Terminal, Goals workbench, and full-stack Playwright on Linux CI. Not one-click yet (no bundled engine, embeddings installer, or updater - those are 0.5.0).
+
+### Added
+
+- **Files activity:** tree, editor tabs, Go to file palette, Find/Replace/Go to line, Ask in chat on a selection, and Save through the workspace files API.
+- **Inspector Changes:** Revert per path and local git commit from the working-tree list (Kronos does not push to GitHub).
+- **Health tab:** doctor checks from `GET /ops/doctor` with local fallbacks for engine, model, workspace, index, secrets, and embeddings.
+- **Terminal panel:** real PTY in the enrolled workspace folder (View menu).
+- **Goals workbench:** goal list, planned steps, Plan and Tick, read-only autonomy mode, readiness from `GET /repositories/{id}/goal-readiness` with Settings fix links, and runs filtered by the selected goal.
+- **Linux CI:** `pnpm test:e2e:engine` (real engine plus mock OpenAI) after the smoke test on ready-for-review pull requests.
+
+### Changed
+
+- Chat path buttons open the Files editor on that path instead of a placeholder.
+- CI and security workflows still run on ready-for-review pull requests only, not on push to `main`.
+
+### Fixed
+
+- Files tree indentation uses `--tree-depth`.
+- Terminal and chat `run_command` share the same `run_key` on the engine.
+- Stale goal readiness clears when the selected goal changes.
+
 ## [0.3.0] - 2026-09-02
 
 Agent shell: Cursor-like desktop plus agentic chat. Files editor, Terminal, inspector revert/commit, Goals workbench, and a bundled engine are later releases.
@@ -54,7 +78,8 @@ Developed as 0.1.1–0.1.6 on this branch; tagged together as 0.2.0.
 
 First public desktop preview (`v0.1.0`). Enrol a git folder, leave freeze and observe/shadow until you want writes, unsigned Windows/Linux/macOS installers.
 
-[unreleased]: https://github.com/shn3g/kronos/compare/v0.3.0...HEAD
+[unreleased]: https://github.com/shn3g/kronos/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/shn3g/kronos/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/shn3g/kronos/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/shn3g/kronos/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/shn3g/kronos/releases/tag/v0.1.0

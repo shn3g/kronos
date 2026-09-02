@@ -31,7 +31,7 @@ pnpm test
 pnpm test:e2e
 ```
 
-`pnpm test` runs Vitest unit tests for the desktop UI. `pnpm test:e2e` runs the Playwright smoke test against the Vite web build (`vite preview` after `vite build`), not a native Tauri WebView. That keeps the check runnable without signing certificates. Native `tauri build` still runs in the desktop CI job when the runner has Rust and platform WebView libraries.
+`pnpm test` runs Vitest unit tests for the desktop UI. `pnpm test:e2e` runs the Playwright smoke test against the Vite web build (`vite preview` after `vite build`), not a native Tauri WebView. That keeps the check runnable without signing certificates. `pnpm test:e2e:engine` (`KRONOS_E2E_ENGINE=1`) runs the with-engine project against a real `python3 -m kronos_engine` sidecar and a mock model; Linux CI runs it after smoke on ready-for-review pull requests. Native `tauri build` still runs in the desktop CI job when the runner has Rust and platform WebView libraries.
 
 On Linux CI, Chromium is installed with `pnpm exec playwright install --with-deps chromium` in `apps/desktop` before `pnpm test:e2e`. Install the Playwright browser locally if the smoke test reports that it is missing.
 
@@ -75,7 +75,7 @@ Sign each commit with `Signed-off-by` (`git commit -s`) to certify the [Develope
 - Keep the change reviewable: one capability per PR when practical.
 - Do not commit secrets, `.env` files, or machine-local paths.
 - If you add a test or lint entry point, document it in the Tests section above.
-- Open pull requests as drafts. Opening a draft and pushing more draft commits does not start GitHub Actions. Mark a PR ready for review to run `.github/workflows/ci.yml` (version lockstep; frontend tests on Ubuntu, Windows, and macOS; Playwright smoke on Linux; Ubuntu `cargo test` and clippy; desktop native builds; engine pytest, ruff, and mypy) and `.github/workflows/security.yml` (dependency audit, secret scanning, SBOM). Further commits on a ready PR do not re-run those workflows; convert back to draft, push, and mark ready again, or use Re-run jobs. Merging to `main` does not start CI or Security. Converting a ready PR back to draft cancels an in-flight matrix. Monday UTC cron still runs Security against the default branch. Pushing a `v*` tag runs `.github/workflows/release.yml` and publishes installers. Keep ready-for-review checks green.
+- Open pull requests as drafts. Opening a draft and pushing more draft commits does not start GitHub Actions. Mark a PR ready for review to run `.github/workflows/ci.yml` (version lockstep; frontend tests on Ubuntu, Windows, and macOS; Playwright smoke on Linux; with-engine Playwright on Linux after smoke; Ubuntu `cargo test` and clippy; desktop native builds; engine pytest, ruff, and mypy) and `.github/workflows/security.yml` (dependency audit, secret scanning, SBOM). Further commits on a ready PR do not re-run those workflows; convert back to draft, push, and mark ready again, or use Re-run jobs. Merging to `main` does not start CI or Security. Converting a ready PR back to draft cancels an in-flight matrix. Monday UTC cron still runs Security against the default branch. Pushing a `v*` tag runs `.github/workflows/release.yml` and publishes installers. Keep ready-for-review checks green.
 - This repository does not currently include a `.github/CODEOWNERS` file. Changes to license, security policy, and required-check configuration need maintainer approval. See [GOVERNANCE.md](GOVERNANCE.md).
 
 ## Security

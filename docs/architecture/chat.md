@@ -1,6 +1,6 @@
 # Chat
 
-Chat is the main stage of the 0.3.0 desktop. `ChatService` runs an agent loop against the assigned **orchestrator** profile. It streams tokens, may call tools inside the enrolled folder, and can create a draft goal with `/goal`. Executors still run unattended work under sandbox, modes, freeze, and budgets.
+Chat is the main stage of the 0.4.0 desktop. `ChatService` runs an agent loop against the assigned **orchestrator** profile. It streams tokens, may call tools inside the enrolled folder, and can create a draft goal with `/goal`. Executors still run unattended work under sandbox, modes, freeze, and budgets.
 
 ## What chat does
 
@@ -9,12 +9,12 @@ Chat is the main stage of the 0.3.0 desktop. `ChatService` runs an agent loop ag
 - Calls tools from a fenced code block whose language is `tool` (JSON, not native function calling): `search_index`, `list_files`, `read_file`, `write_file`, `run_command`, `search_memory`, `create_goal`, `list_goals`. Writes stay inside the enrolled realpath (no absolute paths, `..`, or `.git`; locked prefixes on write). Commands are capped and timeboxed. Chat does not `git push`.
 - Accepts pasted images (png/jpeg/webp/gif, size and count capped) and `@file` mentions. Root `AGENTS.md`, `.cursorrules`, `CLAUDE.md`, and `.cursor/rules` are attached to the system prompt when a workspace is open.
 - `/goal` creates a draft goal either way, then replies with readiness checks in plain sentences (workspace active, planner/coder/reviewer assigned, mode allows writes, GitHub controller, reviewer app, branch protection, Kronos PR workflow, CODEOWNERS, budget). The goal does not start the executor from chat.
+- Path buttons in assistant text open the **Files** editor on that workspace-relative path.
 
 ## What chat does not do
 
 - Call GitHub.
-- Open a Files editor (path buttons go to the Files **placeholder** in 0.3.0).
-- Run an interactive terminal. `run_command` is a one-shot, capped shell in the workspace folder.
+- Replace the Terminal panel. `run_command` is a one-shot, capped shell in the workspace folder; the Terminal PTY is interactive and separate (View menu).
 
 ## Streaming
 
