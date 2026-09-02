@@ -2,6 +2,8 @@
 
 export type StreamPhase = "idle" | "streaming" | "tool" | "done" | "error";
 
+export const STREAM_STATUS_SETTLE_MS = 2000;
+
 export function streamStatusMessage(phase: StreamPhase, toolLabel?: string): string | null {
   if (phase === "streaming") {
     return "Streaming reply.";

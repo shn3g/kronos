@@ -95,7 +95,10 @@ export function SettingsPage({ engineClient, settingsClient }: SettingsPageProps
     <section className="settings-page">
       <p className="page-kicker">Settings</p>
       <h1 className="page-title">Settings</h1>
-      <p className="page-body">Telemetry, backups, and doctor checks for this install.</p>
+      <p className="page-body">
+        Telemetry, backups, and doctor checks for this install. Tokens and keys stay in the OS
+        secret store.
+      </p>
       <label className="models__confirm">
         <input
           type="checkbox"

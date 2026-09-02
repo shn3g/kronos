@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DESKTOP_CLIENT_VERSION } from "../api/kronosClient";
@@ -1028,8 +1028,67 @@ describe("App shell", () => {
     );
 
     await screen.findByRole("heading", { level: 1, name: "Ask Kronos" });
-    expect(screen.getByRole("button", { name: /settings, 2 notifications/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /settings, 2 notifications/i })).toBeInTheDocument();
     expect(screen.getByText("2")).toBeInTheDocument();
+  });
+
+  it("does not poll notifications until the engine and model are ready", async () => {
+    const list = vi.fn(async () => [
+      { id: "a1", title: "Index degraded", detail: "Rebuild needed.", severity: "pause" },
+    ]);
+    render(
+      <App
+        engineClient={clientOf({ status: "unavailable" })}
+        modelsClient={assignedModels()}
+        chatClient={quietChat()}
+        notificationsClient={{ list }}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: /local engine is not running/i }),
+    ).toBeInTheDocument();
+    expect(list).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /notifications/i })).not.toBeInTheDocument();
+  });
+
+  it("hides the notifications badge when the list request fails", async () => {
+    const list = vi.fn(async () => {
+      throw new Error("engine down");
+    });
+    render(
+      <App
+        {...readyFrame({
+          notificationsClient: { list },
+        })}
+      />,
+    );
+
+    await screen.findByRole("heading", { level: 1, name: "Ask Kronos" });
+    await waitFor(() => expect(list).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: /^settings$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /notifications/i })).not.toBeInTheDocument();
+  });
+
+  it("stops polling notifications on unmount", async () => {
+    const list = vi.fn(async () => []);
+    const { unmount } = render(
+      <App
+        {...readyFrame({
+          notificationsClient: { list },
+        })}
+      />,
+    );
+    await screen.findByRole("heading", { level: 1, name: "Ask Kronos" });
+    await waitFor(() => expect(list.mock.calls.length).toBeGreaterThan(0));
+    const callsAtUnmount = list.mock.calls.length;
+    unmount();
+    await act(async () => {
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 1600);
+      });
+    });
+    expect(list).toHaveBeenCalledTimes(callsAtUnmount);
   });
 
   it("keeps skip-link, menu bar, activity bar, main, inspector, and terminal in focus order", async () => {

@@ -17,6 +17,7 @@ import type {
   ChatStreamHandlers,
   ChatToolEvent,
 } from "./client";
+import { STREAM_STATUS_SETTLE_MS } from "./streamStatus";
 
 const TINY_PNG_B64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
@@ -263,6 +264,83 @@ describe("ChatPage", () => {
       "What is broken in onboarding?",
       expect.objectContaining({ requestId: expect.any(String) }),
     );
+  });
+
+  it("clears stream status on New chat so the empty state does not keep Turn finished", async () => {
+    const user = userEvent.setup();
+    let handlers!: ChatStreamHandlers;
+    let finish!: () => void;
+    const streamMessage = vi.fn((_id: string, _content: string, next: ChatStreamHandlers) => {
+      handlers = next;
+      return new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    });
+    const { rerender } = render(
+      <ChatPage
+        chatClient={chatClient({ streamMessage })}
+        repositoryId={null}
+        historyOpen={false}
+        newChatRequest={0}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "What is broken in onboarding?");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    await act(async () => {
+      handlers.onDone({ content: "Staff is missing.", citations: [], goalRefs: [] });
+      finish();
+    });
+    expect(await screen.findByText(/turn finished/i)).toBeInTheDocument();
+
+    rerender(
+      <ChatPage
+        chatClient={chatClient({ streamMessage })}
+        repositoryId={null}
+        historyOpen={false}
+        newChatRequest={1}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+    expect(await screen.findByRole("heading", { level: 1, name: "Ask Kronos" })).toBeInTheDocument();
+    expect(screen.queryByText(/turn finished/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/message failed/i)).not.toBeInTheDocument();
+  });
+
+  it("returns stream status to idle after a finished turn settles", async () => {
+    const user = userEvent.setup();
+    let handlers!: ChatStreamHandlers;
+    let finish!: () => void;
+    const streamMessage = vi.fn((_id: string, _content: string, next: ChatStreamHandlers) => {
+      handlers = next;
+      return new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    });
+    render(
+      <ChatPage
+        chatClient={chatClient({ streamMessage })}
+        repositoryId={null}
+        historyOpen={false}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "What is broken in onboarding?");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    await act(async () => {
+      handlers.onDone({ content: "Staff is missing.", citations: [], goalRefs: [] });
+      finish();
+    });
+    expect(await screen.findByText(/turn finished/i)).toBeInTheDocument();
+    await waitFor(
+      () => {
+        expect(screen.queryByText(/turn finished/i)).not.toBeInTheDocument();
+      },
+      { timeout: STREAM_STATUS_SETTLE_MS + 1000 },
+    );
+    expect(screen.getByText(/staff is missing/i)).toBeInTheDocument();
   });
 
   it("transitions a tool card from running to ok", async () => {

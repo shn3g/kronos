@@ -40,7 +40,7 @@ import {
   type ChatComposerImage,
 } from "./pastedImage";
 import { toolCardLabel, toolDisplayName } from "./toolCard";
-import { streamStatusMessage, type StreamPhase } from "./streamStatus";
+import { streamStatusMessage, STREAM_STATUS_SETTLE_MS, type StreamPhase } from "./streamStatus";
 
 const EMPTY_MENTION_REQUEST = { path: "", nonce: 0, selectedText: "", startLine: 0, endLine: 0 };
 
@@ -111,6 +111,30 @@ export function ChatPage({
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const skipSelectRef = useRef(false);
+  const streamIdleTimerRef = useRef<number | null>(null);
+
+  function clearStreamIdleTimer(): void {
+    if (streamIdleTimerRef.current !== null) {
+      window.clearTimeout(streamIdleTimerRef.current);
+      streamIdleTimerRef.current = null;
+    }
+  }
+
+  function resetStreamStatus(): void {
+    clearStreamIdleTimer();
+    setStreamPhase("idle");
+    setActiveToolLabel(null);
+  }
+
+  function settleStreamStatus(phase: Extract<StreamPhase, "done" | "error">): void {
+    clearStreamIdleTimer();
+    setStreamPhase(phase);
+    setActiveToolLabel(null);
+    streamIdleTimerRef.current = window.setTimeout(() => {
+      streamIdleTimerRef.current = null;
+      setStreamPhase("idle");
+    }, STREAM_STATUS_SETTLE_MS);
+  }
 
   function closeMentionPicker(): void {
     setMentionPaths([]);
@@ -211,6 +235,12 @@ export function ChatPage({
   }, [chatClient]);
 
   useEffect(() => {
+    return () => {
+      clearStreamIdleTimer();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!indexClient || !repositoryId) {
       closeMentionPicker();
       return;
@@ -268,6 +298,7 @@ export function ChatPage({
     setDraft("");
     setComposerImages([]);
     setError(null);
+    resetStreamStatus();
     closeMentionPicker();
   }
 
@@ -311,6 +342,7 @@ export function ChatPage({
       streaming: true,
     };
     setError(null);
+    clearStreamIdleTimer();
     setStreamPhase("streaming");
     setActiveToolLabel(null);
     if (options.clearDraft) {
@@ -348,8 +380,7 @@ export function ChatPage({
           setMessages((current) => upsertGoalMessage(current, goal, assistantId));
         },
         onDone: (result) => {
-          setStreamPhase("done");
-          setActiveToolLabel(null);
+          settleStreamStatus("done");
           setMessages((current) =>
             current.map((item) =>
               item.id === assistantId
@@ -366,8 +397,7 @@ export function ChatPage({
         },
         onError: () => {
           failed = true;
-          setStreamPhase("error");
-          setActiveToolLabel(null);
+          settleStreamStatus("error");
         },
       });
       if (failed) {
@@ -377,7 +407,7 @@ export function ChatPage({
           setComposerImages(options.images);
         }
         setError("Could not send that message. Check the model connection and try again.");
-        setStreamPhase("error");
+        settleStreamStatus("error");
       }
     } catch {
       setMessages((current) => current.filter((item) => item.id !== pending.id && item.id !== assistantId));
@@ -386,7 +416,7 @@ export function ChatPage({
         setComposerImages(options.images);
       }
       setError("Could not send that message. Check the model connection and try again.");
-      setStreamPhase("error");
+      settleStreamStatus("error");
     } finally {
       inflightRef.current = null;
       setBusy(false);
@@ -559,6 +589,7 @@ export function ChatPage({
                   aria-current={item.id === activeId ? "true" : undefined}
                   onClick={() => {
                     setActiveId(item.id);
+                    resetStreamStatus();
                     void chatClient.getConversation(item.id).then((payload) => {
                       setMessages(payload.messages);
                     });

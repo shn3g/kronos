@@ -44,6 +44,7 @@ describe("SettingsPage", () => {
     expect(screen.getByLabelText(/langfuse export/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /run doctor/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /backup/i })).toBeInTheDocument();
+    expect(screen.getByText(/tokens and keys stay in the os secret store/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/bot token/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/private key/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();

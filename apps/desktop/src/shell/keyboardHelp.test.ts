@@ -12,6 +12,9 @@ describe("KEYBOARD_SHORTCUTS", () => {
         "Toggle activity bar",
         "Toggle inspector",
         "Terminal",
+        "Go to file",
+        "Ask in chat",
+        "Find in files",
         "Settings",
         "Close menus",
       ]),
@@ -24,6 +27,9 @@ describe("KEYBOARD_SHORTCUTS", () => {
     expect(shortcuts).toMatch(/Ctrl\+B|Cmd\+B/);
     expect(shortcuts).toMatch(/Ctrl\+Shift\+J|Cmd\+Shift\+J/);
     expect(shortcuts).toMatch(/Ctrl\+`|Cmd\+`/);
+    expect(shortcuts).toMatch(/Ctrl\+P|Cmd\+P/);
+    expect(shortcuts).toMatch(/Ctrl\+L|Cmd\+L/);
+    expect(shortcuts).toMatch(/Ctrl\+Shift\+F|Cmd\+Shift\+F/);
     expect(shortcuts).toMatch(/Ctrl\+,|Cmd\+,/);
   });
 });
