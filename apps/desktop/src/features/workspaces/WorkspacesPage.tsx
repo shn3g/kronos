@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useEngineConnection } from "../../engine/EngineConnectionProvider";
+import "./workspaces.css";
 import {
   createProductionRepositoriesClient,
   pickRepositoryFolder,
@@ -9,6 +10,7 @@ import {
   type InspectResult,
   type RepositoriesClient,
 } from "./client";
+import { openRepositoryFolder } from "../../shell/openFolder";
 
 export type { RepositoriesClient } from "./client";
 
@@ -17,11 +19,13 @@ const productionRepos = createProductionRepositoriesClient();
 interface WorkspacesPageProps {
   repositoriesClient?: RepositoriesClient;
   pickFolder?: () => Promise<string | null>;
+  onFolderOpened?: (repository: EnrolledRepository) => void;
 }
 
 export function WorkspacesPage({
   repositoriesClient,
   pickFolder,
+  onFolderOpened,
 }: WorkspacesPageProps) {
   const { engineReady: ready } = useEngineConnection();
   const client = repositoriesClient ?? productionRepos;
@@ -76,6 +80,23 @@ export function WorkspacesPage({
     }
   }
 
+  async function onOpenFolder() {
+    setError(null);
+    try {
+      const result = await openRepositoryFolder(client, {
+        pickFolder: pickFolder ?? pickRepositoryFolder,
+        repositories,
+      });
+      if (!result) {
+        return;
+      }
+      setRepositories((current) => upsertRepo(current, result.repository));
+      onFolderOpened?.(result.repository);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not open that folder.");
+    }
+  }
+
   async function onEnrol() {
     if (!folderPath) {
       return;
@@ -86,8 +107,8 @@ export function WorkspacesPage({
       setRepositories((current) => upsertRepo(current, enrolled));
       setWizardOpen(false);
       setInspection(null);
-    } catch {
-      setError("Could not enrol that repository.");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not enrol that repository.");
     }
   }
 
@@ -118,14 +139,31 @@ export function WorkspacesPage({
       <p className="page-kicker">Workspaces</p>
       <h1 className="page-title">Workspaces</h1>
       <p className="page-body">Open git folders so Kronos can index them and run chat and Goals.</p>
-      <div className="workspaces__toolbar">
-        <button type="button" className="btn-primary" onClick={() => setWizardOpen(true)}>
-          Add workspace
-        </button>
-      </div>
       {repositories.length === 0 ? (
-        <p className="workspaces__empty">No repositories enrolled yet.</p>
+        <div className="workspaces__empty-state">
+          <p className="workspaces__empty">You have not opened a folder yet.</p>
+          <button type="button" className="btn-primary" onClick={() => void onOpenFolder()}>
+            Open a folder
+          </button>
+          <button type="button" className="btn-quiet" onClick={() => setWizardOpen(true)}>
+            Add workspace
+          </button>
+          {error ? <p className="workspaces__error">{error}</p> : null}
+        </div>
       ) : (
+        <>
+          <div className="workspaces__toolbar">
+            <button type="button" className="btn-primary" onClick={() => void onOpenFolder()}>
+              Open a folder
+            </button>
+            <button type="button" className="btn-quiet" onClick={() => setWizardOpen(true)}>
+              Add workspace
+            </button>
+          </div>
+          {error ? <p className="workspaces__error">{error}</p> : null}
+        </>
+      )}
+      {repositories.length === 0 ? null : (
         <ul className="workspace-list">
           {repositories.map((repo) => (
             <li key={repo.id} className="workspace-card">

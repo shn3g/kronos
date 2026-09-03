@@ -108,3 +108,62 @@ export function assignmentsFromCreatedProfiles(
     embedding: byRole.embedding ?? fill,
   };
 }
+
+/** Parse a chat-like one-liner into a provider draft. Returns null if unusable. */
+export function parseModelSetupLine(raw: string): ProviderDraft | null {
+  const text = raw.trim();
+  if (!text) {
+    return null;
+  }
+  const keyMatch = text.match(/\b(?:key|api[_-]?key)\s*[:=]?\s*(\S+)/i);
+  const bareKey = text.match(/\b(sk-[A-Za-z0-9\-_.]+)\b/);
+  const apiKey = (keyMatch?.[1] ?? bareKey?.[1] ?? "").trim() || null;
+
+  const lower = text.toLowerCase();
+  const preset =
+    MODEL_URL_PRESETS.find((item) => lower.includes(item.id) || lower.includes(item.label.toLowerCase())) ??
+    null;
+
+  const urlMatch = text.match(/https?:\/\/\S+/i);
+  const modelMatch = text.match(/\bmodel(?:\s*id)?\s*[:=]\s*(\S+)/i);
+  let modelId = modelMatch?.[1]?.replace(/[.,;]+$/, "") ?? "";
+
+  if (!modelId && preset) {
+    const after = text
+      .replace(new RegExp(preset.label, "ig"), " ")
+      .replace(new RegExp(preset.id, "ig"), " ")
+      .replace(/\b(?:use|with|key|api[_-]?key)\b/gi, " ")
+      .replace(/\bsk-[A-Za-z0-9\-_.]+\b/g, " ")
+      .replace(/https?:\/\/\S+/gi, " ")
+      .trim();
+    const token = after.split(/\s+/).find((part) => part.includes("/") || /^[a-z0-9][\w.\-:]+$/i.test(part));
+    if (token) {
+      modelId = token.replace(/[.,;]+$/, "");
+    }
+  }
+
+  if (preset) {
+    return {
+      kind: "openai_compatible",
+      displayName: preset.label,
+      baseUrl: urlMatch?.[0] ?? preset.url,
+      billed: preset.billed,
+      apiKey,
+      modelId: modelId || preset.modelId,
+    };
+  }
+
+  if (urlMatch) {
+    const url = urlMatch[0];
+    return {
+      kind: "openai_compatible",
+      displayName: displayNameFromEndpointLabel(url),
+      baseUrl: url,
+      billed: billedFromBaseUrl(url),
+      apiKey,
+      modelId: modelId || null,
+    };
+  }
+
+  return null;
+}

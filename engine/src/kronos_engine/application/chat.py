@@ -30,7 +30,13 @@ from kronos_engine.application.chat_images import (
     user_message_content_parts,
 )
 from kronos_engine.application.chat_mentions import mentioned_workspace_paths
-from kronos_engine.application.chat_tools import ToolCall, ToolParseError, parse_tool_call
+from kronos_engine.application.chat_tools import (
+    ToolCall,
+    ToolParseError,
+    parse_tool_call,
+    redact_secrets_in_text,
+    redact_tool_arguments,
+)
 from kronos_engine.application.chat_workspace_instructions import workspace_instruction_text
 from kronos_engine.application.goal_readiness import GoalReadiness, evaluate_goal_readiness
 from kronos_engine.application.goals import GoalService
@@ -48,7 +54,11 @@ from kronos_engine.application.workspace_writes import (
 )
 from kronos_engine.domain.entities import EnrolledRepository, EventId, RepositoryId
 from kronos_engine.domain.goals import GoalRecord, GoalSource, GoalSpec
-from kronos_engine.domain.models import CostCeilingExceeded, ModelProfile, assert_cost_allowed
+from kronos_engine.domain.models import (
+    CostCeilingExceeded,
+    ModelProfile,
+    assert_cost_allowed,
+)
 from kronos_engine.indexing.context import ContextPack, assemble_context, estimate_tokens
 from kronos_engine.memory.procedural import retrieve_records
 from kronos_engine.memory.records import MemoryRecord
@@ -88,7 +98,9 @@ When you need a tool, emit only a fenced JSON block:
 
 Tools: search_index (query), list_files (glob), read_file (path), write_file (path, content),
 run_command (command), search_memory (query), create_goal (title, success_criteria),
-list_goals.
+list_goals, configure_model (never mutates — tell the user to use Settings or Connect a model).
+configure_model does not register providers or assign roles from chat. Never ask for or
+repeat an API key in chat; model setup happens only through Settings / Connect a model.
 Stay inside the current workspace. Do not claim you edited files unless write_file succeeded.
 When you show a file in a fenced block, put the path on the fence line, like ts src/app.ts.
 run_command runs in the workspace folder. Prefer tests and local tools. Do not push.
@@ -134,7 +146,7 @@ class ToolEvent:
     id: str
     name: str
     status: str
-    args: dict[str, str] | None = None
+    args: dict[str, object] | None = None
     summary: str | None = None
     output: str | None = None
 
@@ -377,7 +389,7 @@ class ChatService:
                     id=tool_id,
                     name=call.name,
                     status="running",
-                    args=dict(call.arguments),
+                    args=redact_tool_arguments(call.arguments),
                 )
                 result, summary, ok = self._execute_tool(call, conversation, cancel)
                 clipped = _clip(result, TOOL_OUTPUT_CLIP)
@@ -389,7 +401,7 @@ class ChatService:
                     tool_status="ok" if ok else "error",
                     tool_json=json.dumps(
                         {
-                            "args": call.arguments,
+                            "args": redact_tool_arguments(call.arguments),
                             "summary": summary,
                             "output": clipped,
                         }
@@ -799,7 +811,7 @@ class ChatService:
             summary = _tool_summary(call.name, result)
             return result, summary, True
         except Exception as error:  # noqa: BLE001 — tool errors stay in the thread
-            text = str(error)
+            text = _redact_tool_text(str(error), call.arguments)
             return text, text, False
 
     def _run_tool(
@@ -808,27 +820,39 @@ class ChatService:
         if call.name == "list_goals":
             return self._list_goals()
         if call.name == "search_memory":
-            return self._search_memory(call.arguments.get("query", ""))
+            return self._search_memory(_tool_string(call.arguments, "query"))
+        if call.name == "configure_model":
+            return self._configure_model(call.arguments)
         repo_id = conversation.repository_id
         if repo_id is None or repo_id == "":
             return NO_WORKSPACE
         if call.name == "search_index":
-            return self._search_index(repo_id, call.arguments.get("query", ""))
+            return self._search_index(repo_id, _tool_string(call.arguments, "query"))
         if call.name == "list_files":
-            return self._list_files(repo_id, call.arguments.get("glob", ""))
+            return self._list_files(repo_id, _tool_string(call.arguments, "glob"))
         if call.name == "read_file":
-            return self._read_file(repo_id, call.arguments.get("path", ""))
+            return self._read_file(repo_id, _tool_string(call.arguments, "path"))
         if call.name == "write_file":
             return self._write_file(
                 repo_id,
-                call.arguments.get("path", ""),
-                call.arguments.get("content", ""),
+                _tool_string(call.arguments, "path"),
+                _tool_string(call.arguments, "content"),
             )
         if call.name == "run_command":
-            return self._run_command(repo_id, call.arguments.get("command", ""), cancel)
+            return self._run_command(repo_id, _tool_string(call.arguments, "command"), cancel)
         if call.name == "create_goal":
             return self._create_goal(repo_id, call.arguments)
         return "unknown tool"
+
+    def _configure_model(self, arguments: dict[str, object]) -> str:
+        # Chat must not register providers or assign roles: prompt injection could
+        # redirect completions (and secrets) to an attacker-controlled base_url.
+        # Setup stays in Settings / Connect a model (authenticated HTTP APIs).
+        _ = arguments
+        return (
+            "Chat cannot configure or replace models. "
+            "Use Settings → Models, or the Connect a model gate on first run."
+        )
 
     def _search_index(self, repository_id: str, query: str) -> str:
         pack = self._indexer.search(repository_id, query)
@@ -948,22 +972,24 @@ class ChatService:
             return "No matching memories."
         return "\n".join(item.text[:400] for item in records)
 
-    def _create_goal(self, repository_id: str, arguments: dict[str, str]) -> str:
-        title = arguments.get("title", "").strip()
-        criteria = arguments.get("success_criteria", "").strip() or title
+    def _create_goal(self, repository_id: str, arguments: Mapping[str, object]) -> str:
+        title = _tool_string(arguments, "title").strip()
+        criteria = _tool_string(arguments, "success_criteria").strip() or title
         if title == "" or criteria == "":
             return "create_goal needs title and success_criteria."
         try:
             repo = self._repos.get(RepositoryId(repository_id))
         except (RepositoryNotFound, LookupError, ValueError):
             return "Workspace was not found."
+        non_goals = _tool_string(arguments, "non_goals").strip() or DEFAULT_NON_GOALS
+        risk_ceiling = _tool_string(arguments, "risk_ceiling").strip() or "low"
         goal = self._goals.create(
             GoalSpec(
                 repository_id=repo.id,
                 title=title,
                 success_criteria=criteria,
-                non_goals=arguments.get("non_goals", "").strip() or DEFAULT_NON_GOALS,
-                risk_ceiling=arguments.get("risk_ceiling", "low") or "low",
+                non_goals=non_goals,
+                risk_ceiling=risk_ceiling,
                 source=GoalSource.CHAT,
                 max_attempts=repo.policy.budgets.max_attempts_per_issue,
             )
@@ -1179,6 +1205,17 @@ def _clip(text: str, limit: int) -> str:
 def _tool_summary(name: str, result: str) -> str:
     first = result.strip().splitlines()[0] if result.strip() else name
     return first[:240]
+
+
+def _tool_string(arguments: Mapping[str, object], key: str) -> str:
+    value = arguments.get(key)
+    if value is None:
+        return ""
+    return value if isinstance(value, str) else str(value)
+
+
+def _redact_tool_text(text: str, arguments: Mapping[str, object]) -> str:
+    return redact_secrets_in_text(text, dict(arguments))
 
 
 def _glob_matches(path: str, pattern: str) -> bool:

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 import { ConnectModelGate } from "../../shell/ConnectModelGate";
+import "./chat.css";
 import { safeWorkspaceRelPath } from "../files/workspacePath";
 import type { IndexClient } from "../index/client";
 import type { ModelsClient, ModelProfileOption, RoleAssignments } from "../models/client";

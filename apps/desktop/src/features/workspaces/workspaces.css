@@ -1,0 +1,66 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* Workspaces feature styles. */
+
+.workspaces__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 28px;
+}
+
+.workspaces__empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.workspaces__error {
+  margin: 12px 0 0;
+  color: #f08a8a;
+  font-size: 13px;
+}
+
+.workspaces__empty,
+.workspace-card__meta,
+.workspace-card__status {
+  color: var(--muted);
+}
+
+.workspace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--void-raised);
+}
+
+.workspace-card__name {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.workspace-card__meta,
+.workspace-card__status {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.workspace-card__actions {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}

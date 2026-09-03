@@ -57,6 +57,7 @@ export function useSessionContext({
   changes: InspectorChange[];
   goals: { id: string; title: string; state: string }[];
   checks: HealthCheck[];
+  indexReady: boolean;
   refresh: () => Promise<void>;
 } {
   const [repositories, setRepositories] = useState<EnrolledRepository[]>([]);
@@ -186,6 +187,7 @@ export function useSessionContext({
     changes,
     goals,
     checks: doctorChecks ?? localChecks,
+    indexReady: Boolean(workspaceId) && indexReady,
     refresh: () => refreshRef.current(),
   };
 }

@@ -1,3 +1,5 @@
+/* Kronos design tokens (shared). Feature packages own their layout CSS under
+ * apps/desktop/src/features/<name>/ — do not grow feature styles in shell.css. */
 :root {
   color-scheme: dark;
   --void: #050508;

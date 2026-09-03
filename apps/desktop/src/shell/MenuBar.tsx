@@ -12,7 +12,7 @@ interface MenuBarProps {
   inspectorCollapsed: boolean;
   terminalOpen: boolean;
   onNewChat: () => void;
-  onOpenWorkspace: () => void;
+  onOpenFolder: () => void;
   onGoToFile: () => void;
   onFindInFile: () => void;
   onFindInFiles: () => void;
@@ -33,7 +33,7 @@ export function MenuBar({
   inspectorCollapsed,
   terminalOpen,
   onNewChat,
-  onOpenWorkspace,
+  onOpenFolder,
   onGoToFile,
   onFindInFile,
   onFindInFiles,
@@ -81,10 +81,10 @@ export function MenuBar({
           }}
         />
         <MenuItem
-          label="Open workspace"
+          label="Open Folder"
           onSelect={() => {
             setOpen(null);
-            onOpenWorkspace();
+            onOpenFolder();
           }}
         />
         <MenuItem

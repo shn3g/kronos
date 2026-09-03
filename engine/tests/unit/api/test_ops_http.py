@@ -125,6 +125,14 @@ async def test_doctor_backup_dead_letters_and_settings_hide_secrets(
     assert all(
         isinstance(item.get("id"), str) and isinstance(item.get("detail"), str) for item in checks
     )
+    background_ids = {item["id"] for item in checks if str(item["id"]).startswith("background:")}
+    assert "background:index" in background_ids
+    assert "background:goals" in background_ids
+    assert all(
+        item["ok"] is True
+        for item in checks
+        if str(item["id"]).startswith("background:")
+    )
     assert BOT not in str(doctor_body)
 
     backup = await http.post("/ops/backup", json={"dest": str(tmp_path / "bak")}, headers=headers)
