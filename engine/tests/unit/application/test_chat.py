@@ -792,6 +792,22 @@ def test_cancel_stops_before_running_more_tools(tmp_path: Path) -> None:
     assert any("Stopped" in item.content for item in messages if item.role == "assistant")
 
 
+def test_repeated_tool_call_is_blocked_and_requests_reflection(tmp_path: Path) -> None:
+    fence = '```tool\n{"name": "list_files", "glob": "src/**/*.py"}\n```'
+    chat, _goals, _enrolled, conversation, _indexer, _conn = _harness(
+        tmp_path, complete=_scripted([fence, fence])
+    )
+
+    turn = chat.handle_message(conversation.id, "Inspect the source.")
+
+    tools = [
+        item for item in chat.get_conversation(conversation.id).messages if item.role == "tool"
+    ]
+    assert len(tools) == 1
+    assert "Repeated tool call blocked" in turn.content
+    assert "Reflect" in turn.content
+
+
 def test_write_file_stays_inside_workspace_and_rejects_escape(tmp_path: Path) -> None:
     chat, _goals, enrolled, conversation, _indexer, _conn = _harness(
         tmp_path,
