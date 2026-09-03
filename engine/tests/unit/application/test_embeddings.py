@@ -139,7 +139,7 @@ def test_resolver_falls_back_to_local_onnx_when_secret_store_unavailable(
     class _UnavailableSecretStore:
         def get(self, name: str) -> str | None:
             _ = name
-            raise SecretStoreError("refusing plaintext file or missing OS credential keyring backend")
+            raise SecretStoreError("missing OS credential keyring backend")
 
     resolved = resolve_embedder(service._registry, _UnavailableSecretStore(), models_dir)
     assert resolved.backend.kind in {"onnx", "none"}

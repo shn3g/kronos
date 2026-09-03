@@ -685,7 +685,9 @@ class ChatService:
         try:
             raw = self._secrets.get(provider.secret_ref)
         except SecretStoreError as error:
-            raise OrchestratorNotConfigured() from error
+            if provider.billed or profile.billed:
+                raise OrchestratorNotConfigured() from error
+            raw = None
         if not raw and provider.billed:
             raise OrchestratorNotConfigured()
         secret = ScopedSecret(value=raw, ttl_seconds=_SECRET_TTL_SECONDS) if raw else None

@@ -404,7 +404,10 @@ function tauriStreamTransport(): EngineStreamTransport {
       }
     },
     async start(args) {
-      const { invoke } = await import("@tauri-apps/api/core");
+      const { invoke, isTauri } = await import("@tauri-apps/api/core");
+      if (!isTauri()) {
+        throw new Error("not in tauri");
+      }
       await invoke("engine_stream", {
         method: args.method,
         path: args.path,
