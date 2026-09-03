@@ -3,15 +3,17 @@
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import keyring
 from keyring.errors import KeyringError, PasswordDeleteError
 
 
 class SecretStoreError(RuntimeError):
-    """Raised when the OS credential backend is missing or insecure."""
+    """Raised when the OS credential backend is missing, insecure, or unresponsive."""
 
 
 class KeyringBackend(Protocol):
@@ -24,6 +26,29 @@ class KeyringBackend(Protocol):
 
 SERVICE = "kronos.engine"
 
+# Headless D-Bus SecretService can block keyring calls forever; never let that hang a request.
+KEYRING_TIMEOUT_SECONDS = 5.0
+_TIMEOUT_MESSAGE = "The system credential store did not respond. Kronos could not save the key."
+
+
+def _call_with_timeout(fn: Callable[..., Any], *args: Any) -> Any:
+    result: dict[str, Any] = {}
+
+    def run() -> None:
+        try:
+            result["value"] = fn(*args)
+        except BaseException as error:  # re-raised on the caller thread below
+            result["error"] = error
+
+    worker = threading.Thread(target=run, daemon=True, name="kronos-keyring")
+    worker.start()
+    worker.join(KEYRING_TIMEOUT_SECONDS)
+    if worker.is_alive():
+        raise SecretStoreError(_TIMEOUT_MESSAGE)
+    if "error" in result:
+        raise result["error"]
+    return result.get("value")
+
 
 class OsSecretStore:
     def __init__(self, config_root: Path, *, backend: KeyringBackend | None = None) -> None:
@@ -33,28 +58,32 @@ class OsSecretStore:
     def put(self, name: str, value: str) -> None:
         backend = self._resolved_backend()
         try:
-            backend.set_password(SERVICE, name, value)
+            _call_with_timeout(backend.set_password, SERVICE, name, value)
         except KeyringError as error:
             raise SecretStoreError("OS credential storage rejected the secret") from error
 
     def get(self, name: str) -> str | None:
         backend = self._resolved_backend()
         try:
-            return backend.get_password(SERVICE, name)
+            value = _call_with_timeout(backend.get_password, SERVICE, name)
         except KeyringError as error:
             raise SecretStoreError("OS credential storage could not read the secret") from error
+        return value if isinstance(value, str) else None
 
     def delete(self, name: str) -> None:
         backend = self._resolved_backend()
         try:
-            backend.delete_password(SERVICE, name)
+            _call_with_timeout(backend.delete_password, SERVICE, name)
         except PasswordDeleteError:
             return
         except KeyringError as error:
             raise SecretStoreError("OS credential storage could not delete the secret") from error
 
     def _resolved_backend(self) -> KeyringBackend:
-        backend: KeyringBackend = self._backend or keyring.get_keyring()
+        backend = self._backend
+        if backend is None:
+            resolved: KeyringBackend = _call_with_timeout(keyring.get_keyring)
+            self._backend = backend = resolved
         if _is_insecure_backend(backend):
             raise SecretStoreError(
                 "refusing plaintext file or missing OS credential keyring backend"

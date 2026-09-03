@@ -55,11 +55,7 @@ from kronos_engine.application.workspace_writes import (
 )
 from kronos_engine.domain.entities import EnrolledRepository, EventId, RepositoryId
 from kronos_engine.domain.goals import GoalRecord, GoalSource, GoalSpec
-from kronos_engine.domain.models import (
-    CostCeilingExceeded,
-    ModelProfile,
-    assert_cost_allowed,
-)
+from kronos_engine.domain.models import ModelProfile
 from kronos_engine.indexing.context import ContextPack, assemble_context, estimate_tokens
 from kronos_engine.memory.procedural import retrieve_records
 from kronos_engine.memory.records import MemoryRecord
@@ -722,11 +718,6 @@ class ChatService:
         if not raw and provider.billed:
             raise OrchestratorNotConfigured()
         secret = ScopedSecret(value=raw, ttl_seconds=_SECRET_TTL_SECONDS) if raw else None
-        billed = provider.billed or profile.billed
-        try:
-            assert_cost_allowed(profile.limits, estimated_cost=0.0, billed=billed)
-        except CostCeilingExceeded as error:
-            raise OrchestratorNotConfigured() from error
         _ = cap_tokens
         return provider, profile, secret
 

@@ -193,6 +193,7 @@ from kronos_engine.memory.procedural import backfill_memory_vectors
 from kronos_engine.memory.promotion import PromotionBlocked, activate_promoted
 from kronos_engine.memory.records import MemoryRecord, MemoryRejected
 from kronos_engine.observability.otel import LocalMetrics, Tracer
+from kronos_engine.observability.redaction import redact_text
 from kronos_engine.ports.embedding import EmbeddingIdentity
 from kronos_engine.ports.executor import Executor
 from kronos_engine.ports.forge import (
@@ -275,8 +276,12 @@ def create_app(
         supervisor.start_all()
 
         def _supervise_loop() -> None:
+            log = logging.getLogger("kronos.engine")
             while not stop_supervise.wait(1.0):
-                supervisor.supervise_once()
+                try:
+                    supervisor.supervise_once()
+                except Exception:  # supervision must outlive worker bugs
+                    log.exception("component supervision tick failed")
 
         supervise_worker = threading.Thread(
             target=_supervise_loop, daemon=True, name="kronos-supervise"
@@ -288,6 +293,17 @@ def create_app(
         supervisor.stop_all()
 
     app = FastAPI(title="Kronos Engine", version=settings.engine_version, lifespan=lifespan)
+
+    @app.exception_handler(Exception)
+    async def _unhandled_error(request: Request, error: Exception) -> JSONResponse:
+        logging.getLogger("kronos.engine").exception(
+            "unhandled error on %s %s", request.method, request.url.path
+        )
+        message = redact_text(str(error))[:300] or "no details"
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"{type(error).__name__}: {message}"},
+        )
 
     def require_auth(request: Request) -> None:
         authorization = request.headers.get("Authorization", "")
