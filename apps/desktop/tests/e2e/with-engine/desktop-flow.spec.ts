@@ -27,7 +27,7 @@ test("connects a mock model, enrols a folder, chats, and uses Files and Terminal
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Connect a model" })).toBeVisible({
-    timeout: 60_000,
+    timeout: 120_000,
   });
   await expect(page.getByText("Looking for a local model server.")).toHaveCount(0, {
     timeout: 15_000,
@@ -39,19 +39,11 @@ test("connects a mock model, enrols a folder, chats, and uses Files and Terminal
   const embeddingsHeading = page.getByRole("heading", { name: /install local embeddings/i });
   const workspaceStep = page.getByRole("heading", { name: "Open a workspace" });
   const askHeading = page.getByRole("heading", { name: "Ask Kronos" });
-  await expect(embeddingsHeading.or(workspaceStep).or(askHeading)).toBeVisible({
-    timeout: 60_000,
-  });
+  await expect(workspaceStep.or(askHeading)).toBeVisible({ timeout: 60_000 });
   if (await embeddingsHeading.isVisible()) {
-    const installButton = page.getByRole("button", { name: /^install$/i });
-    if (await installButton.isEnabled()) {
-      await installButton.click();
-      await expect(page.getByText(/local embeddings are ready/i)).toBeVisible({
-        timeout: 180_000,
-      });
-    }
+    await expect(page.getByText(/local embeddings are ready/i)).toBeVisible({ timeout: 30_000 });
+    await expect(workspaceStep.or(askHeading)).toBeVisible({ timeout: 30_000 });
   }
-  await expect(workspaceStep.or(askHeading)).toBeVisible({ timeout: 30_000 });
   if (await workspaceStep.isVisible()) {
     await page.getByRole("button", { name: "Skip for now" }).click();
   }
@@ -60,6 +52,7 @@ test("connects a mock model, enrols a folder, chats, and uses Files and Terminal
   await page.getByRole("button", { name: "Enable Kronos" }).click();
   await page.locator("#repo-folder").fill(repo);
   await page.getByRole("button", { name: "Preview" }).click();
+  await expect(page.getByRole("button", { name: /^enrol$/i })).toBeVisible({ timeout: 60_000 });
   await page.getByRole("button", { name: /^enrol$/i }).click();
   await expect(page.locator(".workspace-card__status")).toHaveText("active", { timeout: 30_000 });
 

@@ -133,7 +133,10 @@ async function main(): Promise<void> {
       return child;
     },
     waitForEngine: (child) => waitForReady(child as ChildProcess),
-    waitForVite: () => waitForHttp("http://127.0.0.1:1420/", 120_000),
+    waitForVite: async () => {
+      await waitForEmbeddingsReady();
+      await waitForHttp("http://127.0.0.1:1420/", 120_000);
+    },
   });
   const engineProc = engine as ChildProcess;
   const viteProc = vite as ChildProcess;
@@ -177,6 +180,26 @@ function waitForReady(child: ChildProcess): Promise<void> {
       reject(new Error(`engine exited ${code}: ${buf}`));
     });
   });
+}
+
+async function waitForEmbeddingsReady(): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  const url = `http://127.0.0.1:${E2E_ENGINE_PORT}/models/embeddings/install`;
+  while (Date.now() < deadline) {
+    const response = await fetch(url, {
+      headers: { authorization: `Bearer ${E2E_AUTH_TOKEN}` },
+    }).catch(() => null);
+    if (response?.ok) {
+      const payload = (await response.json()) as { active_key?: string | null };
+      if (payload.active_key === "minilm-l6-v2") {
+        return;
+      }
+    }
+    await new Promise((resolve) => {
+      setTimeout(resolve, 250);
+    });
+  }
+  throw new Error("e2e embedding seed was not visible to the engine");
 }
 
 function waitForHttp(url: string, timeoutMs: number): Promise<void> {
