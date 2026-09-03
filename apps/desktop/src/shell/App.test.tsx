@@ -511,6 +511,40 @@ describe("App shell", () => {
     expect(screen.getByRole("menubar")).toBeInTheDocument();
   });
 
+  it("keeps the model gate cleared across a brief engine respawn blip", async () => {
+    const frame = {
+      modelsClient: assignedModels(),
+      chatClient: quietChat(),
+      repositoriesClient: quietRepos(),
+      homeClient: quietHome(),
+      goalsClient: quietGoals(),
+      settingsClient: quietSettings(),
+    };
+    const { rerender } = render(
+      <App engineClient={clientOf({ status: "ready", version: ENGINE_VERSION })} {...frame} />,
+    );
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Ask Kronos" })).toBeInTheDocument();
+
+    rerender(<App engineClient={clientOf({ status: "unavailable" })} {...frame} />);
+    expect(
+      await screen.findByRole("heading", { name: /Kronos stopped unexpectedly/i }),
+    ).toBeInTheDocument();
+
+    rerender(<App engineClient={clientOf({ status: "starting" })} {...frame} />);
+    expect(await screen.findByRole("heading", { name: /starting kronos/i })).toBeInTheDocument();
+
+    rerender(
+      <App engineClient={clientOf({ status: "ready", version: ENGINE_VERSION })} {...frame} />,
+    );
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Ask Kronos" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /checking the model connection/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("menubar")).toBeInTheDocument();
+  });
+
   it("does not say the engine is starting while the model snapshot loads", async () => {
     render(
       <App

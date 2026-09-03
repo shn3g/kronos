@@ -156,10 +156,8 @@ function AppShell({
 
   useEffect(() => {
     if (!engineReady) {
-      setModelReady(false);
-      setModelKnown(false);
-      setEmbeddingsReady(false);
-      setEmbeddingsKnown(false);
+      // Keep prior model/embedding readiness across brief respawn blips so the
+      // shell does not bounce through "Checking the model connection" again.
       return;
     }
     let cancelled = false;
@@ -179,7 +177,10 @@ function AppShell({
   }, [engineReady, engineState.status, models]);
 
   useEffect(() => {
-    if (!engineReady || !modelReady) {
+    if (!engineReady) {
+      return;
+    }
+    if (!modelReady) {
       setEmbeddingsReady(false);
       setEmbeddingsKnown(false);
       return;
