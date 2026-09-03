@@ -261,13 +261,42 @@ async function jsonRequest(
 ): Promise<Record<string, unknown>> {
   const response = await request(method, path, body);
   if (response.status < 200 || response.status >= 300) {
-    throw new Error(`engine request failed: ${response.status}`);
+    throw new Error(engineErrorMessage(response.status, response.body, path));
   }
   try {
     return JSON.parse(response.body) as Record<string, unknown>;
   } catch {
     return {};
   }
+}
+
+function engineErrorMessage(status: number, body: string, path: string): string {
+  const detail = parseEngineDetail(body);
+  if (detail) {
+    return detail;
+  }
+  if (status === 0) {
+    return "Kronos is not reachable right now.";
+  }
+  if (path.includes("/repositories/inspect")) {
+    return "Could not inspect that folder.";
+  }
+  return `Request failed (${status}).`;
+}
+
+function parseEngineDetail(body: string): string | null {
+  if (!body.trim()) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(body) as { detail?: unknown };
+    if (typeof parsed.detail === "string" && parsed.detail.trim()) {
+      return parsed.detail.trim();
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function mapRepository(raw: unknown): EnrolledRepository {

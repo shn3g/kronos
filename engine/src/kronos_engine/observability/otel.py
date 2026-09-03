@@ -12,6 +12,8 @@ from typing import Any
 
 from kronos_engine.observability.redaction import redact_mapping, redact_text
 
+_DEFAULT_MAX_LOCAL_BYTES = 2_000_000
+
 
 def export_enabled(environ: Mapping[str, str] | None = None) -> bool:
     env = os.environ if environ is None else environ
@@ -38,12 +40,16 @@ class Tracer:
         otel_export: bool = False,
         langfuse_export: bool = False,
         export_sink: Path | None = None,
+        persist_local: bool = False,
+        max_local_bytes: int = _DEFAULT_MAX_LOCAL_BYTES,
     ) -> None:
         self._destination = destination
         self._environ = environ
         self._otel_export = otel_export
         self._langfuse_export = langfuse_export
         self._export_sink = export_sink
+        self._persist_local = persist_local
+        self._max_local_bytes = max(1, max_local_bytes)
         self._local: list[dict[str, Any]] = []
         self._network: list[str] = []
 
@@ -65,8 +71,14 @@ class Tracer:
 
     def _write_local(self, path: Path, record: Mapping[str, object]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        existing = path.read_text(encoding="utf-8") if path.is_file() else ""
-        path.write_text(existing + json.dumps(dict(record)) + "\n", encoding="utf-8")
+        line = json.dumps(dict(record)) + "\n"
+        encoded = line.encode("utf-8")
+        too_large = path.is_file() and path.stat().st_size + len(encoded) > self._max_local_bytes
+        if too_large:
+            path.write_text(line, encoding="utf-8")
+            return
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line)
 
     @contextmanager
     def span(self, name: str, payload: Mapping[str, object] | None = None) -> Iterator[None]:
@@ -78,7 +90,7 @@ class Tracer:
             "langfuse_export": self._langfuse_export,
         }
         self._local.append(record)
-        if self._destination is not None:
+        if self._persist_local and self._destination is not None:
             self._write_local(self._destination, record)
         if self.export_active():
             sink = self._export_sink or self._destination

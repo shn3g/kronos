@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import { renderWithEngineConnection } from "../../engine/testUtils";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DESKTOP_CLIENT_VERSION } from "../../api/kronosClient";
@@ -80,14 +81,11 @@ function repos(overrides: Partial<RepositoriesClient> = {}): RepositoriesClient 
 describe("FilesPage", () => {
   it("stays closed when the engine is not ready", async () => {
     const listWorkspaceFiles = vi.fn(async () => [{ path: "README.md" }]);
-    render(
-      <FilesPage
-        engineClient={engine("unavailable")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({ listWorkspaceFiles })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("unavailable"));
 
     expect(await screen.findByRole("heading", { level: 1, name: "Files" })).toBeInTheDocument();
     expect(screen.getByText(/waiting for the engine/i)).toBeInTheDocument();
@@ -98,14 +96,11 @@ describe("FilesPage", () => {
   it("asks to open a folder when no workspace is selected", async () => {
     const onOpenWorkspace = vi.fn();
     const listWorkspaceFiles = vi.fn(async () => [{ path: "README.md" }]);
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId={null}
+    renderWithEngineConnection(<FilesPage
+repositoryId={null}
         repositoriesClient={repos({ listWorkspaceFiles })}
         onOpenWorkspace={onOpenWorkspace}
-      />,
-    );
+      />, engine("ready"));
 
     expect(await screen.findByText(/open a git folder from workspaces to browse files here/i)).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("button", { name: /open folder/i }));
@@ -122,14 +117,11 @@ describe("FilesPage", () => {
       }
       return { path, content: "# hello\n", binary: false };
     });
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({ readWorkspaceFile })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     expect(await screen.findByRole("treeitem", { name: "README.md" })).toBeInTheDocument();
     await user.click(screen.getByRole("treeitem", { name: "src" }));
@@ -141,10 +133,8 @@ describe("FilesPage", () => {
 
   it("indents selected lines with Tab and outdents with Shift+Tab", async () => {
     const user = userEvent.setup();
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({
           readWorkspaceFile: async () => ({
             path: "src/app.py",
@@ -153,8 +143,7 @@ describe("FilesPage", () => {
           }),
         })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("treeitem", { name: "src" }));
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
@@ -174,14 +163,11 @@ describe("FilesPage", () => {
   it("saves edited text into the workspace", async () => {
     const user = userEvent.setup();
     const writeWorkspaceFile = vi.fn(async () => undefined);
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({ writeWorkspaceFile })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("treeitem", { name: "src" }));
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
@@ -197,18 +183,15 @@ describe("FilesPage", () => {
 
   it("says so when save cannot reach the engine", async () => {
     const user = userEvent.setup();
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({
           writeWorkspaceFile: async () => {
             throw new Error("engine request failed: 500");
           },
         })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("treeitem", { name: "src" }));
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
@@ -230,14 +213,11 @@ describe("FilesPage", () => {
       }
       return { path, content: "print(1)\n", binary: false };
     });
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({ readWorkspaceFile, writeWorkspaceFile })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("treeitem", { name: "src" }));
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
@@ -256,14 +236,11 @@ describe("FilesPage", () => {
   it("saves from Ctrl+S while the editor is open", async () => {
     const user = userEvent.setup();
     const writeWorkspaceFile = vi.fn(async () => undefined);
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({ writeWorkspaceFile })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("treeitem", { name: "src" }));
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
@@ -276,18 +253,15 @@ describe("FilesPage", () => {
   it("does not edit binary files", async () => {
     const user = userEvent.setup();
     const writeWorkspaceFile = vi.fn(async () => undefined);
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({
           listWorkspaceFiles: async () => [{ path: "logo.png" }],
           readWorkspaceFile: async () => ({ path: "logo.png", content: "", binary: true }),
           writeWorkspaceFile,
         })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("treeitem", { name: "logo.png" }));
     expect(
@@ -299,18 +273,15 @@ describe("FilesPage", () => {
   });
 
   it("shows a specific error when listing fails", async () => {
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({
           listWorkspaceFiles: async () => {
             throw new Error("engine request failed: 500");
           },
         })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     expect(
       await screen.findByText(/could not load the file list\. check that the engine is running, then try again/i),
@@ -319,14 +290,11 @@ describe("FilesPage", () => {
 
   it("filters the tree by file name", async () => {
     const user = userEvent.setup();
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos()}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await user.type(await screen.findByRole("searchbox", { name: /filter files/i }), "readme");
     expect(await screen.findByRole("treeitem", { name: "README.md" })).toBeInTheDocument();
@@ -336,15 +304,12 @@ describe("FilesPage", () => {
   it("asks in chat for the selected file", async () => {
     const user = userEvent.setup();
     const onAskInChat = vi.fn();
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos()}
         onOpenWorkspace={() => undefined}
         onAskInChat={onAskInChat}
-      />,
-    );
+      />, engine("ready"));
 
     expect(screen.queryByRole("button", { name: /ask in chat/i })).not.toBeInTheDocument();
     await user.click(await screen.findByRole("treeitem", { name: "src" }));
@@ -356,10 +321,8 @@ describe("FilesPage", () => {
   it("asks in chat with the selected editor lines", async () => {
     const user = userEvent.setup();
     const onAskInChat = vi.fn();
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({
           readWorkspaceFile: async () => ({
             path: "src/app.py",
@@ -369,8 +332,7 @@ describe("FilesPage", () => {
         })}
         onOpenWorkspace={() => undefined}
         onAskInChat={onAskInChat}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("treeitem", { name: "src" }));
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
@@ -388,15 +350,12 @@ describe("FilesPage", () => {
   it("asks in chat from the Ask in chat event with the current selection", async () => {
     const user = userEvent.setup();
     const onAskInChat = vi.fn();
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos()}
         onOpenWorkspace={() => undefined}
         onAskInChat={onAskInChat}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("treeitem", { name: "src" }));
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
@@ -430,15 +389,12 @@ describe("FilesPage", () => {
       content: "print(0)\ndef connect():\n    pass\n",
       binary: false,
     }));
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({ readWorkspaceFile })}
         indexClient={idleIndex(search)}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await user.type(await screen.findByRole("searchbox", { name: /search contents/i }), "connect");
     await user.click(screen.getByRole("button", { name: /^search$/i }));
@@ -454,15 +410,12 @@ describe("FilesPage", () => {
   });
 
   it("focuses workspace search when Find in files is requested", async () => {
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos()}
         indexClient={idleIndex(async () => [])}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await screen.findByRole("searchbox", { name: /search contents/i });
     window.dispatchEvent(new Event("kronos-find-in-files"));
@@ -473,17 +426,14 @@ describe("FilesPage", () => {
 
   it("shows a specific error when content search fails", async () => {
     const user = userEvent.setup();
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos()}
         indexClient={idleIndex(async () => {
           throw new Error("engine request failed: 500");
         })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await user.type(await screen.findByRole("searchbox", { name: /search contents/i }), "connect");
     await user.click(screen.getByRole("button", { name: /^search$/i }));
@@ -501,15 +451,12 @@ describe("FilesPage", () => {
       binary: false,
     }));
 
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({ readWorkspaceFile })}
         onOpenWorkspace={() => undefined}
         revealRequest={{ path: "src/app.py", nonce: 1 }}
-      />,
-    );
+      />, engine("ready"));
 
     expect(await screen.findByRole("textbox", { name: "src/app.py" })).toHaveValue("print(1)\n");
     expect(readWorkspaceFile).toHaveBeenCalledWith("repo_alpha", "src/app.py");
@@ -523,15 +470,12 @@ describe("FilesPage", () => {
       binary: false,
     }));
 
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({ readWorkspaceFile })}
         onOpenWorkspace={() => undefined}
         revealRequest={{ path: "", nonce: 0 }}
-      />,
-    );
+      />, engine("ready"));
 
     expect(await screen.findByRole("treeitem", { name: "src" })).toBeInTheDocument();
     expect(screen.getByText(/select a file to open it/i)).toBeInTheDocument();
@@ -545,15 +489,12 @@ describe("FilesPage", () => {
       binary: false,
     }));
 
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({ readWorkspaceFile })}
         onOpenWorkspace={() => undefined}
         revealRequest={{ path: "../secret.txt", nonce: 1 }}
-      />,
-    );
+      />, engine("ready"));
 
     expect(await screen.findByRole("treeitem", { name: "src" })).toBeInTheDocument();
     expect(screen.getByText(/select a file to open it/i)).toBeInTheDocument();
@@ -562,14 +503,11 @@ describe("FilesPage", () => {
 
   it("shows a line-number gutter for the open file", async () => {
     const user = userEvent.setup();
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos()}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("treeitem", { name: "src" }));
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
@@ -580,10 +518,8 @@ describe("FilesPage", () => {
 
   it("finds matches in the open file and steps through them", async () => {
     const user = userEvent.setup();
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({
           readWorkspaceFile: async () => ({
             path: "src/app.py",
@@ -592,8 +528,7 @@ describe("FilesPage", () => {
           }),
         })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("treeitem", { name: "src" }));
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
@@ -614,14 +549,11 @@ describe("FilesPage", () => {
 
   it("says so when find matches nothing, and Escape closes the bar", async () => {
     const user = userEvent.setup();
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos()}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("treeitem", { name: "src" }));
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
@@ -635,10 +567,8 @@ describe("FilesPage", () => {
 
   it("colors Python keywords in the open file", async () => {
     const user = userEvent.setup();
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({
           readWorkspaceFile: async () => ({
             path: "src/app.py",
@@ -647,8 +577,7 @@ describe("FilesPage", () => {
           }),
         })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("treeitem", { name: "src" }));
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
@@ -664,10 +593,8 @@ describe("FilesPage", () => {
 
   it("replaces the current match and can replace all remaining matches", async () => {
     const user = userEvent.setup();
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({
           readWorkspaceFile: async () => ({
             path: "src/app.py",
@@ -676,8 +603,7 @@ describe("FilesPage", () => {
           }),
         })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("treeitem", { name: "src" }));
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
@@ -695,10 +621,8 @@ describe("FilesPage", () => {
 
   it("jumps to a line in the open file", async () => {
     const user = userEvent.setup();
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({
           readWorkspaceFile: async () => ({
             path: "src/app.py",
@@ -707,8 +631,7 @@ describe("FilesPage", () => {
           }),
         })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("treeitem", { name: "src" }));
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
@@ -723,10 +646,8 @@ describe("FilesPage", () => {
 
   it("can require the same letter case when finding in the open file", async () => {
     const user = userEvent.setup();
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({
           readWorkspaceFile: async () => ({
             path: "src/app.py",
@@ -735,8 +656,7 @@ describe("FilesPage", () => {
           }),
         })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("treeitem", { name: "src" }));
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
@@ -752,10 +672,8 @@ describe("FilesPage", () => {
 
   it("can require a whole word when finding in the open file", async () => {
     const user = userEvent.setup();
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({
           readWorkspaceFile: async () => ({
             path: "src/app.py",
@@ -764,8 +682,7 @@ describe("FilesPage", () => {
           }),
         })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("treeitem", { name: "src" }));
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
@@ -784,14 +701,11 @@ describe("FilesPage", () => {
 
   it("says so when a find regular expression is not valid", async () => {
     const user = userEvent.setup();
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos()}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("treeitem", { name: "src" }));
     await user.click(screen.getByRole("treeitem", { name: "app.py" }));
@@ -812,14 +726,11 @@ describe("FilesPage", () => {
     );
     const itemRule = css.match(/\.files-page__item \{[^}]+\}/)?.[0] ?? "";
 
-    render(
-      <FilesPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<FilesPage
+repositoryId="repo_alpha"
         repositoriesClient={repos()}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
     await userEvent.setup().click(await screen.findByRole("treeitem", { name: "src" }));
     const nested = screen.getByRole("treeitem", { name: "app.py" });
 

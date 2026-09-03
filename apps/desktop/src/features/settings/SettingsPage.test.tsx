@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { renderWithEngineConnection } from "../../engine/testUtils";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineClient } from "../../engine/client";
 import { SettingsPage, type SettingsPageClients } from "./SettingsPage";
@@ -25,9 +26,8 @@ function clients(overrides: Partial<SettingsPageClients> = {}): SettingsPageClie
 describe("SettingsPage", () => {
   it("stays fail-closed when the engine is not ready", async () => {
     const load = vi.fn(async () => clients().load());
-    render(
-      <SettingsPage engineClient={engine("unavailable")} settingsClient={clients({ load })} />,
-    );
+    renderWithEngineConnection(<SettingsPage
+settingsClient={clients({ load })} />, engine("unavailable"));
     expect(await screen.findByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
     expect(
       screen.getByText(/waiting for the engine/i),
@@ -38,7 +38,8 @@ describe("SettingsPage", () => {
   });
 
   it("shows export toggles and doctor without secret paste fields", async () => {
-    render(<SettingsPage engineClient={engine("ready")} settingsClient={clients()} />);
+    renderWithEngineConnection(<SettingsPage
+settingsClient={clients()} />, engine("ready"));
     expect(await screen.findByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
     expect(await screen.findByLabelText(/opentelemetry export/i)).not.toBeChecked();
     expect(screen.getByLabelText(/langfuse export/i)).toBeInTheDocument();

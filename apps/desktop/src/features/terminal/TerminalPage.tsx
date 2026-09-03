@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { Terminal } from "@xterm/xterm";
-import type { EngineClient } from "../../engine/client";
+import { useEngineConnection } from "../../engine/EngineConnectionProvider";
 import {
   createProductionRepositoriesClient,
   type RepositoriesClient,
@@ -13,20 +13,18 @@ import { ptyInputFromKeyboard, xtermCanvasIsUsable } from "./terminalInput";
 const productionRepos = createProductionRepositoriesClient();
 
 interface TerminalPageProps {
-  engineClient: EngineClient;
   repositoryId: string | null;
   repositoriesClient?: RepositoriesClient;
   onOpenWorkspace: () => void;
 }
 
 export function TerminalPage({
-  engineClient,
   repositoryId,
   repositoriesClient,
   onOpenWorkspace,
 }: TerminalPageProps) {
   const client = repositoriesClient ?? productionRepos;
-  const [ready, setReady] = useState(false);
+  const { engineReady: ready } = useEngineConnection();
   const [error, setError] = useState<string | null>(null);
   const [run, setRun] = useState<WorkspaceTerminalRun | null>(null);
   const [xtermMode, setXtermMode] = useState(false);
@@ -60,23 +58,6 @@ export function TerminalPage({
     }
     previousRepoRef.current = repositoryId;
   }, [client, repositoryId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const apply = () => {
-      void engineClient.getState().then((state) => {
-        if (!cancelled) {
-          setReady(state.status === "ready");
-        }
-      });
-    };
-    apply();
-    const interval = window.setInterval(apply, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [engineClient]);
 
   useEffect(() => {
     if (!ready || !repositoryId) {

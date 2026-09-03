@@ -9,16 +9,16 @@ export function EngineGate({ starting }: EngineGateProps) {
     return (
       <section className="gate">
         <h1 className="gate__title">Starting Kronos</h1>
-        <p className="gate__body">Waiting for the local engine. This usually takes a few seconds.</p>
+        <p className="gate__body">This usually takes a few seconds.</p>
       </section>
     );
   }
   return (
     <section className="gate">
-      <h1 className="gate__title">The local engine is not running</h1>
+      <h1 className="gate__title">Kronos stopped unexpectedly</h1>
       <p className="gate__body">
-        Kronos is a desktop app that talks to a local engine on this machine. Start the app from
-        the installer, or run the engine from a developer checkout, then try again.
+        Kronos is restarting the local service. If this message stays up, quit and reopen the app,
+        or check Health for details.
       </p>
     </section>
   );
@@ -31,7 +31,7 @@ export function CheckingModelGate({ label }: { label?: string }) {
       <p className="gate__body">
         {label
           ? "Looking up local embedding install status."
-          : "The local engine is ready. Looking up the assigned model."}
+          : "Looking up the assigned model."}
       </p>
     </section>
   );

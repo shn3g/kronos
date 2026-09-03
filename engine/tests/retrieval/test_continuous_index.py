@@ -418,7 +418,16 @@ def test_watch_override_persists_outside_the_enrolled_tree(tmp_path: Path) -> No
         tmp_path / "watch-flag",
         files={"src/mod.py": "WATCH_TOKEN = 1\n"},
     )
-    before = {path.relative_to(root) for path in root.rglob("*") if path.is_file()}
+
+    def _tracked_files() -> set[Path]:
+        # Ignore ephemeral git lockfiles (e.g. objects/maintenance.lock on newer git).
+        return {
+            path.relative_to(root)
+            for path in root.rglob("*")
+            if path.is_file() and path.suffix != ".lock"
+        }
+
+    before = _tracked_files()
     service = IndexingService(paths, embeddings=_CountingEmbedder())
     policy = indexing_policy()
     service.rebuild("repo_watch", root, policy)
@@ -426,5 +435,5 @@ def test_watch_override_persists_outside_the_enrolled_tree(tmp_path: Path) -> No
     assert status.watch_enabled is False
     loaded = service.status("repo_watch", policy=policy)
     assert loaded.watch_enabled is False
-    after = {path.relative_to(root) for path in root.rglob("*") if path.is_file()}
+    after = _tracked_files()
     assert after == before

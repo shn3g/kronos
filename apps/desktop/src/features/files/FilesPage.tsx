@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
-import type { EngineClient } from "../../engine/client";
+import { useEngineConnection } from "../../engine/EngineConnectionProvider";
 import type { IndexClient, IndexHit } from "../index/client";
 import {
   createProductionRepositoriesClient,
@@ -44,7 +44,6 @@ import { editorLanguageFromPath, highlightEditorTokens } from "./fileHighlight";
 const productionRepos = createProductionRepositoriesClient();
 
 interface FilesPageProps {
-  engineClient: EngineClient;
   repositoryId: string | null;
   repositoriesClient?: RepositoriesClient;
   indexClient?: IndexClient;
@@ -57,7 +56,6 @@ interface FilesPageProps {
 const EMPTY_REVEAL = { path: "", nonce: 0 };
 
 export function FilesPage({
-  engineClient,
   repositoryId,
   repositoriesClient,
   indexClient,
@@ -67,7 +65,7 @@ export function FilesPage({
   revealRequest = EMPTY_REVEAL,
 }: FilesPageProps) {
   const client = repositoriesClient ?? productionRepos;
-  const [ready, setReady] = useState(false);
+  const { engineReady: ready } = useEngineConnection();
   const [filter, setFilter] = useState("");
   const [paths, setPaths] = useState<string[]>([]);
   const [listError, setListError] = useState<string | null>(null);
@@ -125,23 +123,6 @@ export function FilesPage({
   const findQueryError = fileFindQueryError(findQuery, findOptions);
   const activeFind =
     findMatches.length === 0 ? 0 : Math.min(findIndex, findMatches.length - 1);
-
-  useEffect(() => {
-    let cancelled = false;
-    const apply = () => {
-      void engineClient.getState().then((state) => {
-        if (!cancelled) {
-          setReady(state.status === "ready");
-        }
-      });
-    };
-    apply();
-    const interval = window.setInterval(apply, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [engineClient]);
 
   useEffect(() => {
     setFilter("");

@@ -4,28 +4,28 @@ import { DESKTOP_CLIENT_VERSION } from "../api/kronosClient";
 import { EngineStatus } from "./EngineStatus";
 
 describe("EngineStatus", () => {
-  it("announces engine unavailable", () => {
+  it("announces when Kronos stopped and is restarting", () => {
     render(<EngineStatus state={{ status: "unavailable" }} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("Engine unavailable");
+    expect(screen.getByRole("status")).toHaveTextContent("Kronos stopped");
   });
 
-  it("announces engine starting", () => {
+  it("announces when Kronos is starting", () => {
     render(<EngineStatus state={{ status: "starting" }} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("Engine starting");
+    expect(screen.getByRole("status")).toHaveTextContent("Starting Kronos");
   });
 
-  it("announces engine ready with desktop and engine versions", () => {
+  it("announces ready with desktop and service versions", () => {
     render(<EngineStatus state={{ status: "ready", version: "2.4.1" }} />);
 
     const status = screen.getByRole("status");
-    expect(status).toHaveTextContent("Engine ready");
+    expect(status).toHaveTextContent("Kronos ready");
     expect(status).toHaveTextContent(`Desktop ${DESKTOP_CLIENT_VERSION}`);
-    expect(status).toHaveTextContent("Engine 2.4.1");
+    expect(status).toHaveTextContent("Service 2.4.1");
   });
 
-  it("announces incompatible engine version with both versions", () => {
+  it("announces incompatible versions", () => {
     render(
       <EngineStatus
         state={{
@@ -37,9 +37,8 @@ describe("EngineStatus", () => {
     );
 
     const status = screen.getByRole("status");
-    expect(status).toHaveTextContent("Incompatible engine version");
+    expect(status).toHaveTextContent("Version mismatch");
     expect(status).toHaveTextContent(DESKTOP_CLIENT_VERSION);
     expect(status).toHaveTextContent("9.9.9");
-    expect(status).toHaveTextContent("on PATH");
   });
 });

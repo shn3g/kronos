@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useEffect, useState } from "react";
-import type { EngineClient } from "../../engine/client";
+import { useEngineConnection } from "../../engine/EngineConnectionProvider";
 import {
   createProductionSkillsClient,
   type SkillRecord,
@@ -11,36 +11,18 @@ import {
 export type { SkillsClient } from "./client";
 
 interface SkillsPageProps {
-  engineClient: EngineClient;
   skillsClient?: SkillsClient;
 }
 
 const productionSkills = createProductionSkillsClient();
 
-export function SkillsPage({ engineClient, skillsClient }: SkillsPageProps) {
+export function SkillsPage({ skillsClient }: SkillsPageProps) {
   const client = skillsClient ?? productionSkills;
-  const [ready, setReady] = useState(false);
+  const { engineReady: ready } = useEngineConnection();
   const [skills, setSkills] = useState<SkillRecord[]>([]);
   const [locator, setLocator] = useState("");
   const [revision, setRevision] = useState("");
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const apply = () => {
-      void engineClient.getState().then((state) => {
-        if (!cancelled) {
-          setReady(state.status === "ready");
-        }
-      });
-    };
-    apply();
-    const interval = window.setInterval(apply, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [engineClient]);
 
   useEffect(() => {
     if (!ready) {

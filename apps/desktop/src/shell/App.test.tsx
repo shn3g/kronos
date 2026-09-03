@@ -353,8 +353,10 @@ describe("App shell", () => {
   it("shows engine unavailable by default without an injected client", async () => {
     render(<App />);
 
-    expect(await screen.findByText(/engine unavailable/i)).toBeInTheDocument();
-    expect(screen.queryByText("Engine ready")).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: /Kronos stopped unexpectedly/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Kronos ready")).not.toBeInTheDocument();
     expect(screen.queryByText(/engineering OS/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("menubar")).not.toBeInTheDocument();
   });
@@ -369,10 +371,10 @@ describe("App shell", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: /local engine is not running/i }),
+      await screen.findByRole("heading", { name: /Kronos stopped unexpectedly/i }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "The local engine is not running" }),
+      screen.getByRole("heading", { name: "Kronos stopped unexpectedly" }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /^chat$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /^Home$/ })).not.toBeInTheDocument();
@@ -395,17 +397,17 @@ describe("App shell", () => {
     );
 
     expect(screen.getByRole("heading", { name: /starting kronos/i })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Engine starting");
+    expect(screen.getByRole("status")).toHaveTextContent("Starting Kronos");
     expect(
-      screen.queryByRole("heading", { name: /local engine is not running/i }),
+      screen.queryByRole("heading", { name: /Kronos stopped unexpectedly/i }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText("Engine ready")).not.toBeInTheDocument();
+    expect(screen.queryByText("Kronos ready")).not.toBeInTheDocument();
     release({ status: "unavailable" });
     expect(
-      await screen.findByRole("heading", { name: /local engine is not running/i }),
+      await screen.findByRole("heading", { name: /Kronos stopped unexpectedly/i }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Engine unavailable");
-    expect(screen.queryByText("Engine ready")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Kronos stopped");
+    expect(screen.queryByText("Kronos ready")).not.toBeInTheDocument();
   });
 
   it("treats a rejecting engine client as unavailable", async () => {
@@ -422,10 +424,10 @@ describe("App shell", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: /local engine is not running/i }),
+      await screen.findByRole("heading", { name: /Kronos stopped unexpectedly/i }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Engine unavailable");
-    expect(screen.queryByText("Engine ready")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Kronos stopped");
+    expect(screen.queryByText("Kronos ready")).not.toBeInTheDocument();
   });
 
   it("blocks on connect a model before the chat chrome when no orchestrator is assigned", async () => {
@@ -506,6 +508,40 @@ describe("App shell", () => {
     render(<App {...readyFrame()} />);
 
     expect(await screen.findByRole("heading", { level: 1, name: "Ask Kronos" })).toBeInTheDocument();
+    expect(screen.getByRole("menubar")).toBeInTheDocument();
+  });
+
+  it("keeps the model gate cleared across a brief engine respawn blip", async () => {
+    const frame = {
+      modelsClient: assignedModels(),
+      chatClient: quietChat(),
+      repositoriesClient: quietRepos(),
+      homeClient: quietHome(),
+      goalsClient: quietGoals(),
+      settingsClient: quietSettings(),
+    };
+    const { rerender } = render(
+      <App engineClient={clientOf({ status: "ready", version: ENGINE_VERSION })} {...frame} />,
+    );
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Ask Kronos" })).toBeInTheDocument();
+
+    rerender(<App engineClient={clientOf({ status: "unavailable" })} {...frame} />);
+    expect(
+      await screen.findByRole("heading", { name: /Kronos stopped unexpectedly/i }),
+    ).toBeInTheDocument();
+
+    rerender(<App engineClient={clientOf({ status: "starting" })} {...frame} />);
+    expect(await screen.findByRole("heading", { name: /starting kronos/i })).toBeInTheDocument();
+
+    rerender(
+      <App engineClient={clientOf({ status: "ready", version: ENGINE_VERSION })} {...frame} />,
+    );
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Ask Kronos" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /checking the model connection/i }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("menubar")).toBeInTheDocument();
   });
 
@@ -1119,7 +1155,7 @@ describe("App shell", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: /local engine is not running/i }),
+      await screen.findByRole("heading", { name: /Kronos stopped unexpectedly/i }),
     ).toBeInTheDocument();
     expect(list).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: /notifications/i })).not.toBeInTheDocument();

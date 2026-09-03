@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useEffect, useState } from "react";
-import type { EngineClient } from "../../engine/client";
+import { useEngineConnection } from "../../engine/EngineConnectionProvider";
 import {
   createProductionModelsClient,
   type DetectedTool,
@@ -58,7 +58,6 @@ const PROVIDER_PRESETS = [
 ] as const;
 
 interface ModelsPageProps {
-  engineClient: EngineClient;
   modelsClient?: ModelsClient;
 }
 
@@ -84,9 +83,9 @@ const emptyProviderForm = (): ProviderForm => ({
   modelId: "",
 });
 
-export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
+export function ModelsPage({ modelsClient }: ModelsPageProps) {
   const client = modelsClient ?? productionModels;
-  const [ready, setReady] = useState(false);
+  const { engineReady: ready } = useEngineConnection();
   const [snapshot, setSnapshot] = useState<ModelsSnapshot | null>(null);
   const [assignments, setAssignments] = useState<Record<ModelRole, string>>({
     orchestrator: "",
@@ -100,23 +99,6 @@ export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
   const [saved, setSaved] = useState(false);
   const [providerForm, setProviderForm] = useState<ProviderForm>(emptyProviderForm);
   const [profileDrafts, setProfileDrafts] = useState<Record<string, ProfileDraft>>({});
-
-  useEffect(() => {
-    let cancelled = false;
-    const apply = () => {
-      void engineClient.getState().then((state) => {
-        if (!cancelled) {
-          setReady(state.status === "ready");
-        }
-      });
-    };
-    apply();
-    const interval = window.setInterval(apply, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [engineClient]);
 
   useEffect(() => {
     if (!ready) {

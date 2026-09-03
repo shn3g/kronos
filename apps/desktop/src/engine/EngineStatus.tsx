@@ -10,13 +10,13 @@ interface EngineStatusProps {
 function labelFor(state: EngineConnectionState): string {
   switch (state.status) {
     case "unavailable":
-      return "Engine unavailable. The local engine is not connected.";
+      return "Kronos stopped. Restarting the local service…";
     case "starting":
-      return "Engine starting. Waiting for the local engine.";
+      return "Starting Kronos…";
     case "ready":
-      return `Engine ready. Desktop ${DESKTOP_CLIENT_VERSION}. Engine ${state.version}.`;
+      return `Kronos ready. Desktop ${DESKTOP_CLIENT_VERSION}. Service ${state.version}.`;
     case "incompatible":
-      return `Incompatible engine version. Desktop ${state.clientVersion} cannot use engine ${state.engineVersion} on PATH. Install the matching engine.`;
+      return `Version mismatch. Desktop ${state.clientVersion} cannot use service ${state.engineVersion}. Install matching builds.`;
   }
 }
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { act, render, screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
+import { renderWithEngineConnection } from "../../engine/testUtils";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineClient, EngineConnectionState } from "../../engine/client";
@@ -64,22 +65,19 @@ function repos(listImpl?: RepositoriesClient["list"]): RepositoriesClient {
 describe("WorkspacesPage", () => {
   it("stays fail-closed when the engine is not ready", async () => {
     const list = vi.fn(async () => []);
-    render(
-      <WorkspacesPage
-        engineClient={engine("unavailable")}
-        repositoriesClient={repos(list)}
-      />,
-    );
+    renderWithEngineConnection(<WorkspacesPage
+repositoriesClient={repos(list)}
+      />, engine("unavailable"));
 
     expect(await screen.findByRole("heading", { level: 1, name: "Workspaces" })).toBeInTheDocument();
     expect(
       screen.getByText(/waiting for the engine/i),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /enable kronos/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /add workspace/i })).not.toBeInTheDocument();
     expect(list).not.toHaveBeenCalled();
   });
 
-  it("lists enrolled repositories and runs the Enable Kronos preview wizard", async () => {
+  it("lists enrolled repositories and runs the Add workspace preview wizard", async () => {
     const user = userEvent.setup();
     const enrolled = {
       id: "repo_alpha",
@@ -143,16 +141,13 @@ describe("WorkspacesPage", () => {
       cancelWorkspaceCommand: async () => ({ ok: true }),
     };
 
-    render(
-      <WorkspacesPage
-        engineClient={engine("ready")}
-        repositoriesClient={client}
+    renderWithEngineConnection(<WorkspacesPage
+repositoriesClient={client}
         pickFolder={async () => "C:/tmp/alpha"}
-      />,
-    );
+      />, engine("ready"));
 
     expect(await screen.findByText("alpha")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /enable kronos/i }));
+    await user.click(screen.getByRole("button", { name: /add workspace/i }));
     await user.click(screen.getByRole("button", { name: /choose folder/i }));
     expect(await screen.findByText(".kronos/config.yaml")).toBeInTheDocument();
     expect(screen.getByText(/preview only/i)).toBeInTheDocument();
@@ -167,27 +162,26 @@ describe("WorkspacesPage", () => {
     expect(await screen.findByText(/disabled/i)).toBeInTheDocument();
   });
 
-  it("shows Enable Kronos when the engine becomes ready without remounting", async () => {
+  it("shows Add workspace when the engine becomes ready without remounting", async () => {
     vi.useFakeTimers();
     try {
       let status: EngineConnectionState = { status: "unavailable" };
       const engineClient: EngineClient = {
         getState: async () => status,
       };
-      render(
-        <WorkspacesPage engineClient={engineClient} repositoriesClient={repos()} />,
-      );
+      renderWithEngineConnection(<WorkspacesPage
+repositoriesClient={repos()} />, engineClient);
       await act(async () => {
         await Promise.resolve();
       });
       expect(screen.getByText(/waiting for the engine/i)).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /enable kronos/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /add workspace/i })).not.toBeInTheDocument();
 
       status = { status: "ready", version: "0.1.0" };
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1500);
       });
-      expect(screen.getByRole("button", { name: /enable kronos/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /add workspace/i })).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -258,15 +252,16 @@ describe("WorkspacesPage", () => {
       cancelWorkspaceCommand: async () => ({ ok: true }),
     };
 
-    render(<WorkspacesPage engineClient={engine("ready")} repositoriesClient={client} />);
+    renderWithEngineConnection(<WorkspacesPage
+repositoriesClient={client} />, engine("ready"));
 
-    await user.click(await screen.findByRole("button", { name: /enable kronos/i }));
+    await user.click(await screen.findByRole("button", { name: /add workspace/i }));
     await user.type(screen.getByLabelText(/repository folder/i), "C:/tmp/typed");
     await user.click(screen.getByRole("button", { name: /preview/i }));
     expect(await screen.findByText(".kronos/config.yaml")).toBeInTheDocument();
     await user.type(screen.getByLabelText(/repository folder/i), "-edit");
     expect(screen.queryByText(".kronos/config.yaml")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /cancel/i }));
-    expect(screen.queryByRole("heading", { name: /enable kronos/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /add workspace/i })).not.toBeInTheDocument();
   });
 });

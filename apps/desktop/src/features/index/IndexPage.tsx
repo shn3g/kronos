@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useEffect, useRef, useState } from "react";
-import type { EngineClient } from "../../engine/client";
+import { useEngineConnection } from "../../engine/EngineConnectionProvider";
 import {
   createProductionRepositoriesClient,
   type EnrolledRepository,
@@ -21,7 +21,6 @@ export interface IndexPageClients extends IndexClient {
 }
 
 interface IndexPageProps {
-  engineClient: EngineClient;
   indexClient?: IndexPageClients;
   modelsClient?: Pick<ModelsClient, "snapshot">;
 }
@@ -34,10 +33,10 @@ const productionPageClient: IndexPageClients = {
   listRepositories: () => productionRepos.list(),
 };
 
-export function IndexPage({ engineClient, indexClient, modelsClient }: IndexPageProps) {
+export function IndexPage({ indexClient, modelsClient }: IndexPageProps) {
   const client = indexClient ?? productionPageClient;
   const models = modelsClient ?? productionModels;
-  const [ready, setReady] = useState(false);
+  const { engineReady: ready } = useEngineConnection();
   const [repositories, setRepositories] = useState<EnrolledRepository[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [status, setStatus] = useState<IndexStatus | null>(null);
@@ -48,23 +47,6 @@ export function IndexPage({ engineClient, indexClient, modelsClient }: IndexPage
   const selectedRef = useRef(selectedId);
   const requestGen = useRef(0);
   selectedRef.current = selectedId;
-
-  useEffect(() => {
-    let cancelled = false;
-    const apply = () => {
-      void engineClient.getState().then((state) => {
-        if (!cancelled) {
-          setReady(state.status === "ready");
-        }
-      });
-    };
-    apply();
-    const interval = window.setInterval(apply, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [engineClient]);
 
   useEffect(() => {
     if (!ready) {

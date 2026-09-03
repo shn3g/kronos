@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useEffect, useState } from "react";
-import type { EngineClient } from "../../engine/client";
+import { useEngineConnection } from "../../engine/EngineConnectionProvider";
 import {
   createProductionMemoryClient,
   type MemoryClient,
@@ -11,35 +11,17 @@ import {
 export type { MemoryClient } from "./client";
 
 interface MemoryPageProps {
-  engineClient: EngineClient;
   memoryClient?: MemoryClient;
 }
 
 const productionMemory = createProductionMemoryClient();
 
-export function MemoryPage({ engineClient, memoryClient }: MemoryPageProps) {
+export function MemoryPage({ memoryClient }: MemoryPageProps) {
   const client = memoryClient ?? productionMemory;
-  const [ready, setReady] = useState(false);
+  const { engineReady: ready } = useEngineConnection();
   const [records, setRecords] = useState<MemoryRecord[]>([]);
   const [yaml, setYaml] = useState("");
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const apply = () => {
-      void engineClient.getState().then((state) => {
-        if (!cancelled) {
-          setReady(state.status === "ready");
-        }
-      });
-    };
-    apply();
-    const interval = window.setInterval(apply, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [engineClient]);
 
   useEffect(() => {
     if (!ready) {

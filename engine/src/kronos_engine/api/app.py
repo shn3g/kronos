@@ -512,6 +512,7 @@ def create_app(
         export_sink=settings.paths.logs / "otel-export.jsonl",
         otel_export=ops_flags.otel_export,
         langfuse_export=ops_flags.langfuse_export,
+        persist_local=False,
     )
     app.state.metrics = metrics
     app.state.tracer = tracer

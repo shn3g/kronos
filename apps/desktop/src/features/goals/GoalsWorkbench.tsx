@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useEffect, useState } from "react";
-import type { EngineClient } from "../../engine/client";
+import { useEngineConnection } from "../../engine/EngineConnectionProvider";
 import { RunsPage } from "../runs/RunsPage";
 import { createProductionRunsClient, type RunsClient } from "../runs/client";
 import {
@@ -27,9 +27,6 @@ export interface GoalsWorkbenchClients extends GoalsClient {
 }
 
 interface GoalsWorkbenchProps {
-  engineClient: EngineClient;
-  /** When the shell already knows the engine is ready, skip the waiting flash on mount. */
-  engineReady?: boolean;
   goalsClient?: GoalsWorkbenchClients;
   repositoriesClient?: RepositoriesClient;
   runsClient?: RunsClient;
@@ -45,8 +42,6 @@ const productionWorkbenchClient: GoalsWorkbenchClients = {
 };
 
 export function GoalsWorkbench({
-  engineClient,
-  engineReady = false,
   goalsClient,
   repositoriesClient,
   runsClient,
@@ -55,7 +50,7 @@ export function GoalsWorkbench({
   const client = goalsClient ?? productionWorkbenchClient;
   const repos = repositoriesClient ?? productionRepos;
   const runs = runsClient ?? productionRuns;
-  const [ready, setReady] = useState(engineReady);
+  const { engineReady: ready } = useEngineConnection();
   const [goals, setGoals] = useState<GoalRecord[]>([]);
   const [repositories, setRepositories] = useState<EnrolledRepository[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -72,26 +67,6 @@ export function GoalsWorkbench({
     source: "desktop",
     maxAttempts: 3,
   });
-
-  useEffect(() => {
-    if (engineReady) {
-      setReady(true);
-    }
-    let cancelled = false;
-    const apply = () => {
-      void engineClient.getState().then((state) => {
-        if (!cancelled) {
-          setReady(state.status === "ready");
-        }
-      });
-    };
-    apply();
-    const interval = window.setInterval(apply, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [engineClient, engineReady]);
 
   useEffect(() => {
     if (!ready) {
@@ -320,8 +295,6 @@ export function GoalsWorkbench({
         </div>
       </div>
       <RunsPage
-        engineClient={engineClient}
-        engineReady={ready}
         runsClient={runs}
         {...(selected ? { goalId: selected.id } : {})}
       />

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useEffect, useState } from "react";
-import type { EngineClient } from "../../engine/client";
+import { useEngineConnection } from "../../engine/EngineConnectionProvider";
 import {
   createProductionRepositoriesClient,
   pickRepositoryFolder,
@@ -15,40 +15,21 @@ export type { RepositoriesClient } from "./client";
 const productionRepos = createProductionRepositoriesClient();
 
 interface WorkspacesPageProps {
-  engineClient: EngineClient;
   repositoriesClient?: RepositoriesClient;
   pickFolder?: () => Promise<string | null>;
 }
 
 export function WorkspacesPage({
-  engineClient,
   repositoriesClient,
   pickFolder,
 }: WorkspacesPageProps) {
+  const { engineReady: ready } = useEngineConnection();
   const client = repositoriesClient ?? productionRepos;
-  const [ready, setReady] = useState(false);
-  const [repositories, setRepositories] = useState<EnrolledRepository[]>([]);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [folderPath, setFolderPath] = useState("");
   const [inspection, setInspection] = useState<InspectResult | null>(null);
+  const [repositories, setRepositories] = useState<EnrolledRepository[]>([]);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const apply = () => {
-      void engineClient.getState().then((state) => {
-        if (!cancelled) {
-          setReady(state.status === "ready");
-        }
-      });
-    };
-    apply();
-    const interval = window.setInterval(apply, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [engineClient]);
 
   useEffect(() => {
     if (!ready) {
@@ -81,8 +62,8 @@ export function WorkspacesPage({
       const result = await client.inspect(path);
       setFolderPath(path);
       setInspection(result);
-    } catch {
-      setError("Could not inspect that folder.");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not inspect that folder.");
       setInspection(null);
     }
   }
@@ -136,10 +117,10 @@ export function WorkspacesPage({
     <section className="workspaces">
       <p className="page-kicker">Workspaces</p>
       <h1 className="page-title">Workspaces</h1>
-      <p className="page-body">Enrol git folders and enable Kronos on each workspace.</p>
+      <p className="page-body">Open git folders so Kronos can index them and run chat and Goals.</p>
       <div className="workspaces__toolbar">
         <button type="button" className="btn-primary" onClick={() => setWizardOpen(true)}>
-          Enable Kronos
+          Add workspace
         </button>
       </div>
       {repositories.length === 0 ? (
@@ -172,9 +153,10 @@ export function WorkspacesPage({
       )}
       {wizardOpen ? (
         <div className="wizard">
-          <h2 className="wizard__title">Enable Kronos</h2>
+          <h2 className="wizard__title">Add workspace</h2>
           <p className="wizard__copy">
-            Choose a git folder. Kronos proposes reviewable files and does not commit or push.
+            Choose a git folder. Kronos indexes it for chat and Goals. Policy files are preview-only
+            until you commit them yourself.
           </p>
           <label className="wizard__label" htmlFor="repo-folder">
             Repository folder

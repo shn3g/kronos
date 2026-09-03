@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { renderWithEngineConnection } from "../../engine/testUtils";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineClient } from "../../engine/client";
@@ -189,14 +190,11 @@ function runs(overrides: Partial<RunsClient> = {}): RunsClient {
 describe("GoalsWorkbench", () => {
   it("renders readiness checks; failed check has a fix link to the mapped Settings href", async () => {
     const user = userEvent.setup();
-    render(
-      <GoalsWorkbench
-        engineClient={engine("ready")}
-        goalsClient={clients()}
+    renderWithEngineConnection(<GoalsWorkbench
+goalsClient={clients()}
         repositoriesClient={repos()}
         runsClient={runs()}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("button", { name: /fix add/i }));
     expect(await screen.findByText("Models assigned")).toBeInTheDocument();
@@ -211,14 +209,11 @@ describe("GoalsWorkbench", () => {
       goal: goalRecord,
       tasks: [],
     }));
-    render(
-      <GoalsWorkbench
-        engineClient={engine("ready")}
-        goalsClient={clients({ plan })}
+    renderWithEngineConnection(<GoalsWorkbench
+goalsClient={clients({ plan })}
         repositoriesClient={repos()}
         runsClient={runs()}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("button", { name: /fix add/i }));
     await user.click(screen.getByRole("button", { name: /^plan$/i }));
@@ -227,14 +222,11 @@ describe("GoalsWorkbench", () => {
 
   it("shows run evidence for the selected goal", async () => {
     const user = userEvent.setup();
-    render(
-      <GoalsWorkbench
-        engineClient={engine("ready")}
-        goalsClient={clients()}
+    renderWithEngineConnection(<GoalsWorkbench
+goalsClient={clients()}
         repositoriesClient={repos()}
         runsClient={runs()}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("button", { name: /fix add/i }));
     expect(await screen.findByText("tests/test_repro.py")).toBeInTheDocument();
@@ -260,10 +252,8 @@ describe("GoalsWorkbench", () => {
     }>((resolve) => {
       releaseBeta = resolve;
     });
-    render(
-      <GoalsWorkbench
-        engineClient={engine("ready")}
-        goalsClient={clients({
+    renderWithEngineConnection(<GoalsWorkbench
+goalsClient={clients({
           list: async () => [goalRecord, goalTwo],
           get: async (id) =>
             id === "goal_2"
@@ -316,8 +306,7 @@ describe("GoalsWorkbench", () => {
         })}
         repositoriesClient={repos()}
         runsClient={runs()}
-      />,
-    );
+      />, engine("ready"));
 
     await user.click(await screen.findByRole("button", { name: /fix add/i }));
     expect(await screen.findByRole("link", { name: /fix models assigned/i })).toBeInTheDocument();
@@ -342,14 +331,11 @@ describe("GoalsWorkbench", () => {
 
   it("stays fail-closed when the engine is not ready", async () => {
     const list = vi.fn(async () => []);
-    render(
-      <GoalsWorkbench
-        engineClient={engine("unavailable")}
-        goalsClient={clients({ list })}
+    renderWithEngineConnection(<GoalsWorkbench
+goalsClient={clients({ list })}
         repositoriesClient={repos()}
         runsClient={runs()}
-      />,
-    );
+      />, engine("unavailable"));
 
     expect(await screen.findByRole("heading", { level: 1, name: "Goals" })).toBeInTheDocument();
     expect(
@@ -387,14 +373,11 @@ describe("GoalsWorkbench", () => {
       prUrl: null,
       terminal: false,
     }));
-    render(
-      <GoalsWorkbench
-        engineClient={engine("ready")}
-        goalsClient={clients({ create, plan, tick, list: async () => [] })}
+    renderWithEngineConnection(<GoalsWorkbench
+goalsClient={clients({ create, plan, tick, list: async () => [] })}
         repositoriesClient={repos()}
         runsClient={runs()}
-      />,
-    );
+      />, engine("ready"));
 
     await screen.findByRole("button", { name: /create goal/i });
     await user.click(screen.getByRole("button", { name: /create goal/i }));
@@ -404,17 +387,17 @@ describe("GoalsWorkbench", () => {
     expect(tick).toHaveBeenCalled();
   });
 
-  it("shows the workbench immediately when the shell already reports the engine ready", () => {
-    render(
+  it("shows the workbench immediately when the shared engine connection is already ready", async () => {
+    renderWithEngineConnection(
       <GoalsWorkbench
-        engineClient={{ getState: () => new Promise(() => undefined) }}
-        engineReady
         goalsClient={clients()}
         repositoriesClient={repos()}
         runsClient={runs()}
       />,
+      engine("ready"),
     );
 
+    expect(await screen.findByRole("button", { name: /create goal/i })).toBeInTheDocument();
     expect(screen.queryByText("Waiting for the engine.")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Goals" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /create goal/i })).toBeInTheDocument();
