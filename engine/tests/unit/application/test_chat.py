@@ -451,10 +451,13 @@ def test_secret_store_error_is_orchestrator_not_configured(tmp_path: Path) -> No
         chat.handle_message(conversation.id, "What is add?")
 
 
-def test_billed_cost_ceiling_is_orchestrator_not_configured(tmp_path: Path) -> None:
+def test_billed_orchestrator_with_key_is_not_blocked_by_cost_ceiling(tmp_path: Path) -> None:
+    seen: list[object] = []
+
     def complete(request: CompletionRequest, secret: object) -> CompletionResult:
-        _ = request, secret
-        raise AssertionError("must not call the model when the cost ceiling blocks billed use")
+        _ = request
+        seen.append(secret)
+        return CompletionResult(text="hello from a paid model", usage=TokenUsage(tokens=4))
 
     chat, _goals, _enrolled, conversation, _indexer, _conn = _harness(
         tmp_path,
@@ -463,8 +466,10 @@ def test_billed_cost_ceiling_is_orchestrator_not_configured(tmp_path: Path) -> N
         api_key="sk-paid",
         cost_ceiling=0.0,
     )
-    with pytest.raises(OrchestratorNotConfigured, match="Models page"):
-        chat.handle_message(conversation.id, "What is add?")
+    turn = chat.handle_message(conversation.id, "What is add?")
+    assert turn.content == "hello from a paid model"
+    assert len(seen) == 1
+    assert seen[0] is not None
 
 
 def test_json_answer_envelope_is_not_streamed_or_stored(tmp_path: Path) -> None:

@@ -1208,6 +1208,49 @@
   border-color: var(--hairline-strong);
   background: rgb(255 255 255 / 0.06);
 }
+
+.gate__details {
+  margin-top: 20px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--void-raised);
+}
+
+.gate__details > summary {
+  padding: 10px 14px;
+  color: var(--body);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.gate__details[open] > summary {
+  border-bottom: 1px solid var(--hairline);
+}
+
+.gate__log {
+  margin: 0;
+  padding: 12px 14px;
+  max-height: 240px;
+  overflow: auto;
+  color: var(--body);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.gate__details-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.gate__details-actions .gate__hint {
+  margin: 0;
+}
 /* Chat styles: apps/desktop/src/features/chat/chat.css */
 /* Workspaces styles: apps/desktop/src/features/workspaces/workspaces.css */
 

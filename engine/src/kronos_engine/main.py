@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import faulthandler
 import socket
 
 import uvicorn
@@ -15,6 +16,8 @@ from kronos_engine.state.database import Database
 
 
 def main() -> None:
+    # Native crashes then print a traceback to stderr, which the sidecar log captures.
+    faulthandler.enable()
     settings = load_settings()
     for directory in (
         settings.paths.data,

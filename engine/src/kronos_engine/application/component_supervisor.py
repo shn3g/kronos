@@ -134,7 +134,11 @@ class ComponentSupervisor:
                     )
                     if now - component.last_restart < backoff:
                         continue
-                component.stop()
+                try:
+                    component.stop()
+                except Exception:
+                    # A dead worker may fail to stop cleanly; still attempt the restart.
+                    pass
                 try:
                     component.start()
                 except Exception:

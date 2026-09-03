@@ -101,6 +101,29 @@ def test_supervise_once_counts_failed_starts_toward_restart_budget() -> None:
     assert supervisor.status("worker")[0].restarts == 2
 
 
+def test_supervise_once_survives_a_stop_that_raises() -> None:
+    class _Bad:
+        alive = False
+
+        def start(self) -> None:
+            self.alive = True
+
+        def stop(self) -> None:
+            raise RuntimeError("stop failed")
+
+        def is_alive(self) -> bool:
+            return self.alive
+
+    bad = _Bad()
+    supervisor = ComponentSupervisor(backoff_seconds=0.0)
+    supervisor.register("w", start=bad.start, stop=bad.stop, is_alive=bad.is_alive)
+    supervisor.start("w")
+    bad.alive = False
+    supervisor.supervise_once()  # must not raise
+    assert supervisor.status("w")[0].restarts == 1
+    assert bad.alive is True
+
+
 def test_stop_all_stops_everything() -> None:
     first = _Probe()
     second = _Probe()
