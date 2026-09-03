@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Chat no longer treats empty streams as success; engine errors show in the UI; Retry sits under the last reply instead of floating after every turn.
+- Tauri no longer emits a silent empty `done` when the SSE connection closes early.
+- Connect a model marks hosted presets as billed and gives billed providers a non-zero cost ceiling so chat is not blocked with a 409.
+
+### Changed
+
+- First run is a three-step gate: connect a model → install local embeddings (mandatory) → optional workspace.
+- Max tokens moved under Advanced on Settings → Models; `max_tokens` is omitted from provider requests when set to 0.
+- Chat stage and composer share a wider aligned column.
+
 ## [0.5.0] - 2026-09-02
 
 One-click install, agent chat, local embeddings, and signed in-app updates (fail-closed until the owner installs a publisher pubkey).

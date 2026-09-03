@@ -25,24 +25,54 @@ test("connects a mock model, enrols a folder, chats, and uses Files and Terminal
   execFileSync("git", ["add", "README.md"], { cwd: repo });
   execFileSync("git", ["commit", "-m", "init"], { cwd: repo });
 
-  await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Connect a model" })).toBeVisible({
-    timeout: 60_000,
+  await page.addInitScript(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
   });
-  await expect(page.getByText("Looking for a local model server.")).toHaveCount(0, {
+  await page.goto("/");
+  await expect(page.getByText("Engine ready")).toBeVisible({ timeout: 120_000 });
+  const connectGate = page.getByRole("heading", { name: "Connect a model" });
+  await expect(connectGate.or(page.getByRole("heading", { name: "Ask Kronos" }))).toBeVisible({
+    timeout: 30_000,
+  });
+  if (await connectGate.isVisible()) {
+    await expect(page.getByText("Looking for a local model server.")).toHaveCount(0, {
+      timeout: 15_000,
+    });
+    await page.getByLabel("API URL").fill(`http://127.0.0.1:${E2E_MOCK_PORT}/v1`);
+    await page.getByLabel(/model id/i).fill("mock");
+    await page.getByRole("button", { name: "Continue" }).click();
+  }
+
+  const embeddingsHeading = page.getByRole("heading", { name: /install local embeddings/i });
+  const workspaceStep = page.getByRole("heading", { name: "Open a workspace" });
+  const askHeading = page.getByRole("heading", { name: "Ask Kronos" });
+  await expect(workspaceStep.or(askHeading)).toBeVisible({ timeout: 60_000 });
+  if (await embeddingsHeading.isVisible()) {
+    await expect(page.getByText(/local embeddings are ready/i)).toBeVisible({ timeout: 30_000 });
+    await expect(workspaceStep.or(askHeading)).toBeVisible({ timeout: 30_000 });
+  }
+  if (await workspaceStep.isVisible()) {
+    await page.getByRole("button", { name: "Skip for now" }).click();
+  }
+  await expect(askHeading).toBeVisible({ timeout: 30_000 });
+
+  await page.getByRole("button", { name: "Workspaces" }).click();
+  const repoCard = page.locator(".workspace-card").filter({
+    has: page.locator(".workspace-card__meta", { hasText: repo }),
+  });
+  if ((await repoCard.count()) === 0) {
+    await page.getByRole("button", { name: "Enable Kronos" }).click();
+    await page.locator("#repo-folder").fill(repo);
+    await expect(page.locator("#repo-folder")).toHaveValue(repo);
+    await page.getByRole("button", { name: "Preview" }).click();
+    await expect(page.getByText(/preview only/i)).toBeVisible({ timeout: 60_000 });
+    await page.getByRole("button", { name: /^enrol$/i }).click();
+    await expect(repoCard).toBeVisible({ timeout: 30_000 });
+  }
+  await expect(repoCard.locator(".workspace-card__status")).toHaveText("active", {
     timeout: 15_000,
   });
-  await page.getByLabel("API URL").fill(`http://127.0.0.1:${E2E_MOCK_PORT}/v1`);
-  await page.getByLabel(/model id/i).fill("mock");
-  await page.getByRole("button", { name: "Continue" }).click();
-
-  await expect(page.getByRole("heading", { name: "Ask Kronos" })).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("button", { name: "Workspaces" }).click();
-  await page.getByRole("button", { name: "Enable Kronos" }).click();
-  await page.locator("#repo-folder").fill(repo);
-  await page.getByRole("button", { name: "Preview" }).click();
-  await page.getByRole("button", { name: /^enrol$/i }).click();
-  await expect(page.locator(".workspace-card__status")).toHaveText("active", { timeout: 30_000 });
 
   await page.getByRole("button", { name: "Chat" }).click();
   await expect(page.getByPlaceholder(/type @ to mention a file/i)).toBeVisible({ timeout: 15_000 });

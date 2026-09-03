@@ -15,8 +15,9 @@ Kronos is a locally installed desktop app (Tauri WebView, also previewable in a 
 ## First run
 
 1. Open Kronos. Installers start a bundled `kronos-engine` sidecar within seconds. If the engine is still starting, the gate shows "Starting Kronos". Development builds may use `python -m kronos_engine` on PATH instead; that engine should match the desktop version.
-2. Connect a model if no **orchestrator** is assigned. Presets include OpenAI, OpenRouter, OpenCode Zen, Ollama, and LM Studio, or any OpenAI-compatible URL. API keys are optional for local endpoints. Keys go to the OS secret store through the existing provider API.
-3. A workspace folder is not required to pass the gate. Chat can explain Kronos. Open a git folder from File or Workspaces when you want indexing, Files, Terminal, and inspector Changes. The same UI can run in a browser preview while the local engine is running (`pnpm --filter @kronos/desktop dev`). The page talks through a same-origin `/kronos-engine` proxy, so it never holds the engine token. `vite preview` stays engine-unavailable.
+2. Connect a model if no **orchestrator** is assigned (Step 1 of 3). Presets include OpenAI, OpenRouter, OpenCode Zen, Ollama, and LM Studio, or any OpenAI-compatible URL. API keys are optional for local endpoints. Keys go to the OS secret store through the existing provider API. Hosted presets register as billed with a non-zero cost ceiling.
+3. Install local embeddings (Step 2 of 3). MiniLM downloads once with SHA-256 verification. This gate is mandatory before the main shell. Sparse search alone is not enough to pass first run.
+4. Optionally open a workspace (Step 3 of 3), or skip and chat about Kronos. Open a git folder later from File or Workspaces for indexing, Files, Terminal, and inspector Changes. The same UI can run in a browser preview while the local engine is running (`pnpm --filter @kronos/desktop dev`). The page talks through a same-origin `/kronos-engine` proxy, so it never holds the engine token. `vite preview` stays engine-unavailable.
 
 ## Chat
 

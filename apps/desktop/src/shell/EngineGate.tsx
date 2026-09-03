@@ -24,11 +24,15 @@ export function EngineGate({ starting }: EngineGateProps) {
   );
 }
 
-export function CheckingModelGate() {
+export function CheckingModelGate({ label }: { label?: string }) {
   return (
     <section className="gate">
-      <h1 className="gate__title">Checking the model connection</h1>
-      <p className="gate__body">The local engine is ready. Looking up the assigned model.</p>
+      <h1 className="gate__title">{label ?? "Checking the model connection"}</h1>
+      <p className="gate__body">
+        {label
+          ? "Looking up local embedding install status."
+          : "The local engine is ready. Looking up the assigned model."}
+      </p>
     </section>
   );
 }

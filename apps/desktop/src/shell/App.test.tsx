@@ -5,7 +5,7 @@ import { DESKTOP_CLIENT_VERSION } from "../api/kronosClient";
 import { App } from "../shell/App";
 import type { EngineClient, EngineConnectionState } from "../engine/client";
 import type { EmbeddingBackend, ModelsClient, RoleAssignments } from "../features/models/client";
-import { embeddingInstallClientStubs } from "../features/models/client";
+import { embeddingInstallClientStubs, installedEmbeddingInstallSnapshot } from "../features/models/client";
 import type { ChatClient, ChatStreamHandlers } from "../features/chat/client";
 import type { RepositoriesClient } from "../features/workspaces/client";
 import type { HomeClient } from "../features/home/client";
@@ -89,6 +89,8 @@ function assignedModels(): ModelsClient {
       assignments: assignedRoles("prof_local"),
       embeddingBackend: embeddingBackend(),
     }),
+    embeddingInstall: async () => installedEmbeddingInstallSnapshot(),
+    startEmbeddingInstall: async () => installedEmbeddingInstallSnapshot(),
   };
 }
 
@@ -460,6 +462,51 @@ describe("App shell", () => {
 
     expect(await screen.findByRole("heading", { name: /connect a model/i })).toBeInTheDocument();
     expect(screen.queryByRole("menubar")).not.toBeInTheDocument();
+  });
+
+  it("shows Install local embeddings after an orchestrator is assigned without embeddings", async () => {
+    render(
+      <App
+        engineClient={clientOf({ status: "ready", version: ENGINE_VERSION })}
+        modelsClient={{
+          ...assignedModels(),
+          embeddingInstall: async () => ({
+            policy: "test",
+            catalog: [
+              {
+                key: "minilm-l6-v2",
+                dim: 384,
+                displayName: "MiniLM L6 v2",
+                installed: false,
+              },
+            ],
+            activeKey: null,
+            status: {
+              state: "idle",
+              bytesDone: 0,
+              bytesTotal: 0,
+              modelKey: null,
+              error: null,
+            },
+          }),
+        }}
+        chatClient={quietChat()}
+        repositoriesClient={quietRepos()}
+        homeClient={quietHome()}
+        goalsClient={quietGoals()}
+        settingsClient={quietSettings()}
+      />,
+    );
+
+    expect(await screen.findByRole("heading", { name: /install local embeddings/i })).toBeInTheDocument();
+    expect(screen.queryByRole("menubar")).not.toBeInTheDocument();
+  });
+
+  it("skips the embeddings gate when a local model is already installed", async () => {
+    render(<App {...readyFrame()} />);
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Ask Kronos" })).toBeInTheDocument();
+    expect(screen.getByRole("menubar")).toBeInTheDocument();
   });
 
   it("does not say the engine is starting while the model snapshot loads", async () => {

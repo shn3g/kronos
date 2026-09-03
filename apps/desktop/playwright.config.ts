@@ -10,7 +10,7 @@ export default defineConfig({
   workers: withEngine ? 1 : undefined,
   timeout: withEngine ? 240_000 : 30_000,
   forbidOnly: Boolean(process.env.CI),
-  retries: process.env.CI ? 2 : 0,
+  retries: process.env.CI ? (withEngine ? 0 : 2) : 0,
   reporter: process.env.CI ? "github" : "list",
   use: {
     baseURL: withEngine ? "http://127.0.0.1:1420" : "http://127.0.0.1:4173",

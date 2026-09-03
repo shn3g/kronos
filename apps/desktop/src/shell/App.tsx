@@ -41,12 +41,14 @@ import {
 import { ActivityBar, type ActivityId } from "./ActivityBar";
 import { ConnectModelGate } from "./ConnectModelGate";
 import { CheckingModelGate, EngineGate } from "./EngineGate";
+import { EmbeddingsGate } from "./EmbeddingsGate";
 import { InspectorDrawer, type InspectorTab } from "./InspectorDrawer";
 import { MenuBar } from "./MenuBar";
 import { hashFromRoute, routeFromHash, type SettingsSection, type ShellRoute } from "./routes";
 import { shellShortcutFromKeyboard } from "./shellShortcut";
 import { useSessionContext } from "./useSessionContext";
 import { setDesktopWindowTitle } from "./windowTitle";
+import { WorkspaceGate } from "./WorkspaceGate";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
 const productionEngine = createProductionEngineClient();
@@ -110,6 +112,10 @@ export function App({
   });
   const [modelReady, setModelReady] = useState(false);
   const [modelKnown, setModelKnown] = useState(false);
+  const [embeddingsReady, setEmbeddingsReady] = useState(false);
+  const [embeddingsKnown, setEmbeddingsKnown] = useState(false);
+  const [firstRun, setFirstRun] = useState(false);
+  const [workspaceStepDone, setWorkspaceStepDone] = useState(false);
   const [route, setRoute] = useState<ShellRoute>(() => routeFromHash(window.location.hash));
   const [historyOpen, setHistoryOpen] = useState(false);
   const [newChatRequest, setNewChatRequest] = useState(0);
@@ -170,6 +176,8 @@ export function App({
     if (!engineReady) {
       setModelReady(false);
       setModelKnown(false);
+      setEmbeddingsReady(false);
+      setEmbeddingsKnown(false);
       return;
     }
     let cancelled = false;
@@ -188,6 +196,36 @@ export function App({
     };
   }, [engineReady, engineState.status, models]);
 
+  useEffect(() => {
+    if (!engineReady || !modelReady) {
+      setEmbeddingsReady(false);
+      setEmbeddingsKnown(false);
+      return;
+    }
+    let cancelled = false;
+    void models.embeddingInstall().then(
+      (snapshot) => {
+        if (cancelled) {
+          return;
+        }
+        const installed =
+          snapshot.activeKey !== null || snapshot.catalog.some((item) => item.installed);
+        setEmbeddingsKnown(true);
+        if (installed) {
+          setEmbeddingsReady(true);
+        }
+      },
+      () => {
+        if (!cancelled) {
+          setEmbeddingsKnown(true);
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [engineReady, modelReady, models]);
+
   const session = useSessionContext({
     engineReady,
     modelReady,
@@ -196,6 +234,16 @@ export function App({
     goalsClient: goals,
     settingsClient: settings,
   });
+
+  const workspaceStepOpen =
+    firstRun && !workspaceStepDone && session.repositories.length === 0;
+  const shellReady =
+    engineReady &&
+    modelKnown &&
+    modelReady &&
+    embeddingsKnown &&
+    embeddingsReady &&
+    !workspaceStepOpen;
 
   async function revertChange(path: string): Promise<void> {
     if (!session.workspaceId || revertingRef.current) {
@@ -294,17 +342,17 @@ export function App({
   }
 
   useEffect(() => {
-    if (!engineReady || !modelKnown || !modelReady) {
+    if (!shellReady) {
       return;
     }
     const expected = hashFromRoute(route);
     if (window.location.hash !== expected) {
       window.location.hash = expected;
     }
-  }, [engineReady, modelKnown, modelReady, route]);
+  }, [shellReady, route]);
 
   useEffect(() => {
-    if (!engineReady || !modelKnown || !modelReady) {
+    if (!shellReady) {
       setNotificationCount(0);
       return;
     }
@@ -329,10 +377,10 @@ export function App({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [engineReady, modelKnown, modelReady, notifications]);
+  }, [shellReady, notifications]);
 
   useEffect(() => {
-    if (!engineReady || !modelKnown || !modelReady) {
+    if (!shellReady) {
       return;
     }
     const onKey = (event: KeyboardEvent) => {
@@ -381,16 +429,16 @@ export function App({
     return () => {
       window.removeEventListener("keydown", onKey, true);
     };
-  }, [engineReady, modelKnown, modelReady, route]);
+  }, [shellReady, route]);
 
   useEffect(() => {
-    if (!engineReady || !modelKnown || !modelReady) {
+    if (!shellReady) {
       return;
     }
     const repo = session.repositories.find((item) => item.id === session.workspaceId);
     const title = repo ? `Kronos — ${repo.displayName}` : "Kronos";
     void setDesktopWindowTitle(title);
-  }, [engineReady, modelKnown, modelReady, session.repositories, session.workspaceId]);
+  }, [shellReady, session.repositories, session.workspaceId]);
 
   if (engineState.status !== "ready") {
     return (
@@ -406,7 +454,21 @@ export function App({
     );
   }
 
-  if (modelKnown && !modelReady) {
+  if (!modelKnown) {
+    return (
+      <div className="app-shell app-shell--gate">
+        <a className="skip-link" href="#main">
+          Skip to main content
+        </a>
+        <EngineStatus state={engineState} />
+        <main id="main" tabIndex={-1}>
+          <CheckingModelGate />
+        </main>
+      </div>
+    );
+  }
+
+  if (!modelReady) {
     return (
       <div className="app-shell app-shell--gate">
         <a className="skip-link" href="#main">
@@ -418,6 +480,7 @@ export function App({
             modelsClient={models}
             onConnected={() => {
               setModelReady(true);
+              setFirstRun(true);
             }}
           />
         </main>
@@ -425,7 +488,7 @@ export function App({
     );
   }
 
-  if (!modelKnown) {
+  if (!embeddingsKnown) {
     return (
       <div className="app-shell app-shell--gate">
         <a className="skip-link" href="#main">
@@ -433,7 +496,49 @@ export function App({
         </a>
         <EngineStatus state={engineState} />
         <main id="main" tabIndex={-1}>
-          <CheckingModelGate />
+          <CheckingModelGate label="Checking local embeddings" />
+        </main>
+      </div>
+    );
+  }
+
+  if (!embeddingsReady) {
+    return (
+      <div className="app-shell app-shell--gate">
+        <a className="skip-link" href="#main">
+          Skip to main content
+        </a>
+        <EngineStatus state={engineState} />
+        <main id="main" tabIndex={-1}>
+          <EmbeddingsGate
+            modelsClient={models}
+            onReady={() => {
+              setEmbeddingsReady(true);
+            }}
+          />
+        </main>
+      </div>
+    );
+  }
+
+  if (workspaceStepOpen) {
+    return (
+      <div className="app-shell app-shell--gate">
+        <a className="skip-link" href="#main">
+          Skip to main content
+        </a>
+        <EngineStatus state={engineState} />
+        <main id="main" tabIndex={-1}>
+          <WorkspaceGate
+            onOpenWorkspace={() => {
+              setWorkspaceStepDone(true);
+              go({ activity: "workspaces" });
+            }}
+            onSkip={() => {
+              setWorkspaceStepDone(true);
+              go({ activity: "chat" });
+            }}
+          />
         </main>
       </div>
     );

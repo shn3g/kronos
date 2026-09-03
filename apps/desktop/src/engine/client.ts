@@ -39,7 +39,10 @@ export function createProductionEngineClient(
 
 async function readStateFromSidecar(): Promise<EngineConnectionState | null> {
   try {
-    const { invoke } = await import("@tauri-apps/api/core");
+    const { invoke, isTauri } = await import("@tauri-apps/api/core");
+    if (!isTauri()) {
+      throw new Error("web build");
+    }
     const result = await invoke<EngineConnectionState | null>("engine_state");
     if (result === null) {
       return null;

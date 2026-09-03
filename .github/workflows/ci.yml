@@ -1,12 +1,11 @@
 name: CI
 
-# Jobs run only when a pull request is marked ready for review.
-# Draft opened/synchronize events are not in `on`, so they never start a run.
-# converted_to_draft starts a skipped run so concurrency can cancel an in-flight matrix.
+# Jobs run when a pull request is marked ready for review or receives new commits.
+# Draft opened events are not in `on`. converted_to_draft starts a skipped run for concurrency cancel.
 # There is no `on.push`: merging to main does not re-run tests. Tags use release.yml.
 on:
   pull_request:
-    types: [ready_for_review, converted_to_draft]
+    types: [ready_for_review, converted_to_draft, synchronize]
 
 permissions:
   contents: read
@@ -32,7 +31,7 @@ jobs:
     if: github.event.pull_request.draft == false
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
@@ -77,7 +76,7 @@ jobs:
     if: github.event.pull_request.draft == false
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - os: ubuntu-latest
@@ -143,7 +142,7 @@ jobs:
 
       - name: Build desktop artifact
         working-directory: apps/desktop
-        run: pnpm tauri build --bundles ${{ matrix.bundle }}
+        run: pnpm tauri build --bundles ${{ matrix.bundle }} --config src-tauri/tauri.ci.json
 
       - name: Smoke bundled engine
         if: runner.os == 'Linux'
@@ -166,7 +165,7 @@ jobs:
     if: github.event.pull_request.draft == false
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
@@ -187,9 +186,11 @@ jobs:
         run: python -m pytest
 
       - name: Ruff
+        if: runner.os == 'Linux'
         working-directory: engine
         run: python -m ruff check src tests
 
       - name: Mypy
+        if: runner.os == 'Linux'
         working-directory: engine
         run: python -m mypy

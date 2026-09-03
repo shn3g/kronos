@@ -399,6 +399,35 @@ def test_unbilled_orchestrator_without_secret_can_complete(tmp_path: Path) -> No
     assert seen == [None]
 
 
+def test_unbilled_orchestrator_tolerates_unavailable_secret_store(tmp_path: Path) -> None:
+    class _UnavailableStore:
+        def put(self, name: str, value: str) -> None:
+            _ = name, value
+
+        def get(self, name: str) -> str | None:
+            _ = name
+            raise SecretStoreError("missing OS credential keyring backend")
+
+        def delete(self, name: str) -> None:
+            _ = name
+
+    def complete(request: CompletionRequest, secret: object) -> CompletionResult:
+        _ = request
+        assert secret is None
+        return CompletionResult(text="hello without keyring", usage=TokenUsage(tokens=2))
+
+    chat, goals, _enrolled, conversation, _indexer, _conn = _harness(
+        tmp_path,
+        complete=complete,
+        billed=False,
+        api_key=None,
+        secrets=_UnavailableStore(),  # type: ignore[arg-type]
+    )
+    turn = chat.handle_message(conversation.id, "What is add?")
+    assert list(goals.list()) == []
+    assert turn.content == "hello without keyring"
+
+
 def test_secret_store_error_is_orchestrator_not_configured(tmp_path: Path) -> None:
     class _BoomStore:
         def put(self, name: str, value: str) -> None:

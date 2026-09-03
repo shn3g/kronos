@@ -24,11 +24,12 @@ pnpm tauri build
 ## First run
 
 1. Open Kronos. Installers start a bundled `kronos-engine` sidecar within seconds. Development builds may use `python -m kronos_engine` on PATH instead; that engine should match the desktop version.
-2. Connect a model if no orchestrator is assigned. Presets or any OpenAI-compatible URL work; keys are optional for local endpoints. Keys go into the operating system secret store.
-3. Chat is the main stage without a folder. Open a git folder from File or Workspaces when you want indexing, the Files editor, Terminal (View menu), and inspector Changes (revert or local commit). Chat can search, read, write, and run capped commands inside that folder. `/goal` creates a draft and reports readiness. Goals workbench lists plans, Plan/Tick, and readiness with Settings fix links. Paste a screenshot into chat to ask about the UI.
-4. Browser preview: start the engine, then `pnpm --filter @kronos/desktop dev` and open `http://localhost:1420`. The page never sees the engine token. `vite preview` stays engine-unavailable.
-5. Kronos registers enrolled folders in local SQLite. It does not write `.kronos/` into the tree at enrol.
-6. Optional later: enable a committed `.kronos/config.yaml` (preview of config, `.github/workflows/kronos-pr.yml`, and CODEOWNERS; you commit those on your repo; CODEOWNERS must cover `.kronos/**`), GitHub Apps, and Telegram. Leave `freeze: true` and `mode: observe` or `shadow` until you want autonomous git writes.
+2. Connect a model if no orchestrator is assigned (Step 1). Presets or any OpenAI-compatible URL work; keys are optional for local endpoints. Keys go into the operating system secret store.
+3. Install local embeddings (Step 2, mandatory). MiniLM downloads once and is SHA-256 verified.
+4. Optionally open a git folder (Step 3), or skip and chat. Open a folder later from File or Workspaces for indexing, the Files editor, Terminal (View menu), and inspector Changes. Chat can search, read, write, and run capped commands inside that folder. `/goal` creates a draft and reports readiness. Goals workbench lists plans, Plan/Tick, and readiness with Settings fix links. Paste a screenshot into chat to ask about the UI.
+5. Browser preview: start the engine, then `pnpm --filter @kronos/desktop dev` and open `http://localhost:1420`. The page never sees the engine token. `vite preview` stays engine-unavailable.
+6. Kronos registers enrolled folders in local SQLite. It does not write `.kronos/` into the tree at enrol.
+7. Optional later: enable a committed `.kronos/config.yaml` (preview of config, `.github/workflows/kronos-pr.yml`, and CODEOWNERS; you commit those on your repo; CODEOWNERS must cover `.kronos/**`), GitHub Apps, and Telegram. Leave `freeze: true` and `mode: observe` or `shadow` until you want autonomous git writes.
 
 The integration branch comes from committed `.kronos/config.yaml`. The in-app template default is `main`. The protected default branch is `policy.branches.protected` (template default `main`).
 

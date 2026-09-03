@@ -685,7 +685,9 @@ class ChatService:
         try:
             raw = self._secrets.get(provider.secret_ref)
         except SecretStoreError as error:
-            raise OrchestratorNotConfigured() from error
+            if provider.billed or profile.billed:
+                raise OrchestratorNotConfigured() from error
+            raw = None
         if not raw and provider.billed:
             raise OrchestratorNotConfigured()
         secret = ScopedSecret(value=raw, ttl_seconds=_SECRET_TTL_SECONDS) if raw else None
@@ -1027,7 +1029,7 @@ def _trim_history(
     max_tokens: int,
     system: str,
 ) -> tuple[ConversationMessage, ...]:
-    room = window - budget - max_tokens - _char_tokens(system)
+    room = window - budget - (max_tokens or 4096) - _char_tokens(system)
     selected: list[ConversationMessage] = []
     used = 0
     for item in reversed(messages):

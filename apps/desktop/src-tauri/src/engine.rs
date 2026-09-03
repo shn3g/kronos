@@ -455,21 +455,17 @@ fn stream_loopback(
             }
         }
     }
+    if !sse_buf.is_empty() {
+        sse_buf.push('\n');
+        for event in drain_sse_events(&mut sse_buf) {
+            if matches!(event, SseDataEvent::Done { .. } | SseDataEvent::Error(_)) {
+                completed = true;
+            }
+            emit_sse(app, request_id, event);
+        }
+    }
     if !completed {
-        emit_stream(
-            app,
-            EngineStreamEvent {
-                request_id: request_id.to_string(),
-                delta: None,
-                done: true,
-                error: None,
-                content: None,
-                citations: None,
-                goal_refs: None,
-                tool: None,
-                goal: None,
-            },
-        );
+        return Err("The engine closed the reply before it finished.".to_string());
     }
     Ok(())
 }
@@ -1866,6 +1862,15 @@ mod tests {
         let events = super::drain_sse_events(&mut buf);
         assert_eq!(events, vec![super::SseDataEvent::Delta("a".into())]);
         assert!(buf.contains('b'));
+    }
+
+    #[test]
+    fn drain_sse_flushes_incomplete_line_after_newline() {
+        let mut buf = String::from(r#"data: {"delta": "tail"}"#);
+        buf.push('\n');
+        let events = super::drain_sse_events(&mut buf);
+        assert_eq!(events, vec![super::SseDataEvent::Delta("tail".into())]);
+        assert!(buf.is_empty());
     }
 
     #[test]

@@ -442,21 +442,25 @@ export function ModelsPage({ engineClient, modelsClient }: ModelsPageProps) {
                 }}
               />
             </label>
-            <label className="models__field" htmlFor={`profile-tokens-${profile.id}`}>
-              Max tokens
-              <input
-                id={`profile-tokens-${profile.id}`}
-                className="wizard__input"
-                type="number"
-                value={draft.maxTokens}
-                onChange={(event) => {
-                  setProfileDrafts((current) => ({
-                    ...current,
-                    [profile.id]: { ...draft, maxTokens: Number(event.target.value) },
-                  }));
-                }}
-              />
-            </label>
+            <details className="models__advanced">
+              <summary>Advanced</summary>
+              <p className="models__advanced-hint">0 lets the provider choose the reply length.</p>
+              <label className="models__field" htmlFor={`profile-tokens-${profile.id}`}>
+                Max tokens
+                <input
+                  id={`profile-tokens-${profile.id}`}
+                  className="wizard__input"
+                  type="number"
+                  value={draft.maxTokens}
+                  onChange={(event) => {
+                    setProfileDrafts((current) => ({
+                      ...current,
+                      [profile.id]: { ...draft, maxTokens: Number(event.target.value) },
+                    }));
+                  }}
+                />
+              </label>
+            </details>
             <button type="submit" className="btn-quiet">
               Save profile
             </button>
@@ -523,7 +527,7 @@ function assignmentsFromProfiles(
 function draftFromProfile(profile: ModelProfileOption, modelId = ""): ProfileDraft {
   return {
     modelId: modelId || profile.modelId || "",
-    maxTokens: profile.limits?.maxTokens ?? 4096,
+    maxTokens: profile.limits?.maxTokens ?? 0,
     costCeiling: profile.limits?.costCeiling ?? 0,
   };
 }

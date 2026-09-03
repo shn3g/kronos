@@ -956,12 +956,63 @@ describe("ChatPage", () => {
     await user.click(screen.getByRole("button", { name: /^send$/i }));
 
     expect(
-      await screen.findByText("Could not send that message. Check the model connection and try again."),
+      await screen.findByText("Could not stream the orchestrator reply."),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^try again$/i }));
 
     expect(streamMessage).toHaveBeenCalledTimes(2);
     expect(await screen.findByText("Staff is missing before the calendar route.")).toBeInTheDocument();
+  });
+
+  it("treats an empty done as a failure", async () => {
+    const user = userEvent.setup();
+    const streamMessage = vi.fn(async (_id: string, _content: string, handlers: ChatStreamHandlers) => {
+      handlers.onDone({ content: "", citations: [], goalRefs: [] });
+    });
+    render(
+      <ChatPage
+        chatClient={chatClient({ streamMessage })}
+        repositoryId={null}
+        historyOpen={false}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "hello");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    expect(await screen.findByText(/model returned an empty reply/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^retry$/i })).not.toBeInTheDocument();
+  });
+
+  it("does not show Retry until a reply has finished", async () => {
+    const user = userEvent.setup();
+    let resolveStream!: () => void;
+    const streamMessage = vi.fn(
+      (_id: string, _content: string, handlers: ChatStreamHandlers) =>
+        new Promise<void>((resolve) => {
+          resolveStream = () => {
+            handlers.onDone({ content: "Done.", citations: [], goalRefs: [] });
+            resolve();
+          };
+        }),
+    );
+    render(
+      <ChatPage
+        chatClient={chatClient({ streamMessage })}
+        repositoryId={null}
+        historyOpen={false}
+        onOpenWorkspace={() => undefined}
+      />,
+    );
+    const box = await screen.findByRole("textbox", { name: /ask kronos/i });
+    await user.type(box, "Go");
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    expect(screen.queryByRole("button", { name: /^retry$/i })).not.toBeInTheDocument();
+    await act(async () => {
+      resolveStream();
+    });
+    expect(await screen.findByText("Done.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^retry$/i })).toBeInTheDocument();
   });
 
   it("pastes a screenshot and sends it with the message", async () => {

@@ -12,10 +12,16 @@ from kronos_engine.ports.model_registry import ModelRegistry, ProviderConfig, Ro
 from kronos_engine.ports.secrets import ScopedSecret, SecretStore
 
 DEFAULT_LIMITS = ResourceLimits(
-    max_tokens=4096,
+    max_tokens=8192,
     max_attempts=3,
     timeout_seconds=120.0,
     cost_ceiling=0.0,
+)
+DEFAULT_BILLED_LIMITS = ResourceLimits(
+    max_tokens=8192,
+    max_attempts=3,
+    timeout_seconds=120.0,
+    cost_ceiling=5.0,
 )
 
 
@@ -54,6 +60,7 @@ class ModelProfileService:
         if draft.api_key:
             self._secrets.put(secret_ref, draft.api_key)
         model_id = draft.model_id or "default"
+        limits = DEFAULT_BILLED_LIMITS if draft.billed else DEFAULT_LIMITS
         for role in MODEL_ROLES:
             self._registry.save_profile(
                 ModelProfile(
@@ -64,7 +71,7 @@ class ModelProfileService:
                     model_id=model_id,
                     billed=draft.billed,
                     approved_fallbacks=(),
-                    limits=DEFAULT_LIMITS,
+                    limits=limits,
                 )
             )
         return provider
@@ -148,6 +155,7 @@ class ModelProfileService:
         for provider in providers:
             if (provider.id, "orchestrator") in have:
                 continue
+            limits = DEFAULT_BILLED_LIMITS if provider.billed else DEFAULT_LIMITS
             self._registry.save_profile(
                 ModelProfile(
                     id=f"prof_{provider.id}_orchestrator",
@@ -157,6 +165,6 @@ class ModelProfileService:
                     model_id="default",
                     billed=provider.billed,
                     approved_fallbacks=(),
-                    limits=DEFAULT_LIMITS,
+                    limits=limits,
                 )
             )

@@ -113,6 +113,24 @@ export function emptyEmbeddingInstallSnapshot(): EmbeddingInstallSnapshot {
   };
 }
 
+export function installedEmbeddingInstallSnapshot(): EmbeddingInstallSnapshot {
+  const base = emptyEmbeddingInstallSnapshot();
+  return {
+    ...base,
+    catalog: base.catalog.map((item) =>
+      item.key === "minilm-l6-v2" ? { ...item, installed: true } : item,
+    ),
+    activeKey: "minilm-l6-v2",
+    status: {
+      state: "ready",
+      bytesDone: 1,
+      bytesTotal: 1,
+      modelKey: "minilm-l6-v2",
+      error: null,
+    },
+  };
+}
+
 export const embeddingInstallClientStubs: Pick<
   ModelsClient,
   "embeddingInstall" | "startEmbeddingInstall" | "removeEmbeddingInstall"
