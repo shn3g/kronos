@@ -30,7 +30,7 @@ test("connects a mock model, enrols a folder, chats, and uses Files and Terminal
     window.sessionStorage.clear();
   });
   await page.goto("/");
-  await expect(page.getByText("Engine ready")).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByText("Kronos ready")).toBeVisible({ timeout: 120_000 });
   const connectGate = page.getByRole("heading", { name: "Connect a model" });
   await expect(connectGate.or(page.getByRole("heading", { name: "Ask Kronos" }))).toBeVisible({
     timeout: 30_000,

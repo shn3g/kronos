@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Local span tracing no longer rewrites `spans.jsonl` on every HTTP request (append-only, size-capped, off by default for request spans), which was thrashing disks while the app sat idle.
 - Engine log files rotate (`RotatingFileHandler` on `engine.log`). The Tauri sidecar captures child stdout/stderr to a separate `engine-sidecar.log` so rotation is not defeated by dual writers on one inode.
+- Desktop uses one shared engine connection poll (`EngineConnectionProvider`) instead of per-page 1.5s `getState` intervals; polling slows when the window is hidden.
 - Desktop respawns the local engine after a crash with backoff instead of staying permanently unavailable until a full app relaunch.
 - Workspace inspect/enrol errors surface the engine's detail (for example "not a git repository") instead of a generic failure string.
 

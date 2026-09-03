@@ -72,7 +72,9 @@ class Tracer:
     def _write_local(self, path: Path, record: Mapping[str, object]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         line = json.dumps(dict(record)) + "\n"
-        if path.is_file() and path.stat().st_size + len(line.encode("utf-8")) > self._max_local_bytes:
+        encoded = line.encode("utf-8")
+        too_large = path.is_file() and path.stat().st_size + len(encoded) > self._max_local_bytes
+        if too_large:
             path.write_text(line, encoding="utf-8")
             return
         with path.open("a", encoding="utf-8") as handle:
