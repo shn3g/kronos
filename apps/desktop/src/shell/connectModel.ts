@@ -10,6 +10,16 @@ export function cursorCliDetected(detected: DetectedTool[]): boolean {
   return detected.some((item) => item.kind === "cursor_cli" && item.present);
 }
 
+export function workerCliDetected(detected: DetectedTool[]): boolean {
+  return detected.some(
+    (item) =>
+      item.present &&
+      (item.kind === "cursor_cli" ||
+        item.kind === "opencode_cli" ||
+        item.kind === "claude_code_cli"),
+  );
+}
+
 export function displayNameFromEndpointLabel(label: string): string {
   if (label.includes(":11434")) {
     return "Ollama";

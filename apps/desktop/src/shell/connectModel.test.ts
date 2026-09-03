@@ -8,6 +8,7 @@ import {
   MODEL_URL_PRESETS,
   parseModelSetupLine,
   pickLocalOpenAiEndpoint,
+  workerCliDetected,
 } from "./connectModel";
 
 describe("pickLocalOpenAiEndpoint", () => {
@@ -32,6 +33,20 @@ describe("cursorCliDetected", () => {
       cursorCliDetected([{ kind: "cursor_cli", label: "cursor-agent", present: true }]),
     ).toBe(true);
     expect(cursorCliDetected([])).toBe(false);
+  });
+});
+
+describe("workerCliDetected", () => {
+  it("recognizes Cursor, OpenCode, and Claude Code workers", () => {
+    expect(
+      workerCliDetected([{ kind: "claude_code_cli", label: "claude", present: true }]),
+    ).toBe(true);
+    expect(
+      workerCliDetected([{ kind: "opencode_cli", label: "opencode", present: true }]),
+    ).toBe(true);
+    expect(
+      workerCliDetected([{ kind: "openai_compatible", label: "http://x", present: true }]),
+    ).toBe(false);
   });
 });
 
