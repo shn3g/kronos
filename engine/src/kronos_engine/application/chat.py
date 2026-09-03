@@ -409,6 +409,8 @@ class ChatService:
                     args=redact_tool_arguments(call.arguments),
                 )
                 result, summary, ok = self._execute_tool(call, conversation, cancel)
+                if ok:
+                    self._repeat_guard.remember_success(call)
                 clipped = _clip(result, TOOL_OUTPUT_CLIP)
                 self._store.add_message(
                     conversation.id,

@@ -6,7 +6,6 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
 
 from kronos_engine.domain.tasks import TaskRecord
 
@@ -29,21 +28,8 @@ class GoalJudge:
                 return GoalCompletionDecision(True, "goal completion evidence found")
             if VERIFICATION_PASSED_ARTIFACT in task.artifacts:
                 return GoalCompletionDecision(True, "goal completion evidence found")
-            if self._has_existing_changed_path(task):
-                return GoalCompletionDecision(True, "goal completion evidence found")
         return GoalCompletionDecision(False, "goal completion refused: no evidence artifacts")
 
     @staticmethod
     def _has_passing_gate_evidence(artifacts: Sequence[str]) -> bool:
         return any(_PASSING_GATE.search(artifact) is not None for artifact in artifacts)
-
-    @staticmethod
-    def _has_existing_changed_path(task: TaskRecord) -> bool:
-        if task.worktree_path is None:
-            return False
-        root = Path(task.worktree_path).resolve()
-        for artifact in task.artifacts:
-            candidate = (root / artifact).resolve()
-            if candidate.is_relative_to(root) and candidate.is_file():
-                return True
-        return False

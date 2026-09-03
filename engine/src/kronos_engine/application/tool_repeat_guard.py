@@ -11,7 +11,7 @@ from kronos_engine.application.chat_tools import ToolCall
 
 
 class ToolCallRepeatGuard:
-    """Reject exact tool calls already seen in a bounded recent window."""
+    """Reject exact tool calls already completed successfully in a recent window."""
 
     def __init__(self, *, window_size: int = 5) -> None:
         if window_size < 1:
@@ -19,11 +19,15 @@ class ToolCallRepeatGuard:
         self._hashes: deque[str] = deque(maxlen=window_size)
 
     def allow(self, call: ToolCall) -> bool:
+        """Return False when this exact call already succeeded recently."""
+        return self._fingerprint(call) not in self._hashes
+
+    def remember_success(self, call: ToolCall) -> None:
+        """Record a successful tool call so an identical retry is blocked."""
         fingerprint = self._fingerprint(call)
         if fingerprint in self._hashes:
-            return False
+            return
         self._hashes.append(fingerprint)
-        return True
 
     def reset(self) -> None:
         self._hashes.clear()

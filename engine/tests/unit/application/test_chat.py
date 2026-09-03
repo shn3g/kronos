@@ -808,6 +808,36 @@ def test_repeated_tool_call_is_blocked_and_requests_reflection(tmp_path: Path) -
     assert "Reflect" in turn.content
 
 
+def test_tool_call_may_retry_after_an_exception(tmp_path: Path) -> None:
+    fence = '```tool\n{"name": "list_files", "glob": "src/**/*.py"}\n```'
+    attempts = {"n": 0}
+    original_list = ChatService._list_files
+
+    def flaky(self: ChatService, repository_id: str, glob: str) -> str:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise RuntimeError("transient list failure")
+        return original_list(self, repository_id, glob)
+
+    chat, _goals, _enrolled, conversation, _indexer, _conn = _harness(
+        tmp_path, complete=_scripted([fence, fence, "Listed."])
+    )
+    ChatService._list_files = flaky  # type: ignore[method-assign]
+    try:
+        turn = chat.handle_message(conversation.id, "Inspect the source.")
+    finally:
+        ChatService._list_files = original_list  # type: ignore[method-assign]
+
+    tools = [
+        item for item in chat.get_conversation(conversation.id).messages if item.role == "tool"
+    ]
+    assert len(tools) == 2
+    assert tools[0].tool_status == "error"
+    assert tools[1].tool_status == "ok"
+    assert "Repeated tool call blocked" not in turn.content
+    assert turn.content == "Listed."
+
+
 def test_write_file_stays_inside_workspace_and_rejects_escape(tmp_path: Path) -> None:
     chat, _goals, enrolled, conversation, _indexer, _conn = _harness(
         tmp_path,

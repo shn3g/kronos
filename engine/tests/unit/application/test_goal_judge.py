@@ -45,3 +45,22 @@ def test_allows_completion_with_passing_gate_exit_code_evidence() -> None:
 
     assert decision.allowed
     assert decision.reason == "goal completion evidence found"
+
+
+def test_refuses_completion_when_artifact_is_only_an_existing_path(
+    tmp_path,
+) -> None:
+    from dataclasses import replace
+
+    existing = tmp_path / "src" / "math.py"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+    task = replace(
+        _task(artifacts=("src/math.py",)),
+        worktree_path=str(tmp_path),
+    )
+
+    decision = GoalJudge().decide((task,))
+
+    assert not decision.allowed
+    assert "evidence" in decision.reason
