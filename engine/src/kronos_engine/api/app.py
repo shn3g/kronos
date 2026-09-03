@@ -112,6 +112,7 @@ from kronos_engine.application.chat import (
     ToolEvent,
     request_cancel,
 )
+from kronos_engine.application.component_supervisor import ComponentSupervisor
 from kronos_engine.application.composition import (
     build_goal_engine,
     compose_llm_planner,
@@ -266,48 +267,25 @@ def create_app(
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         for hook in embedding_startup:
             hook()
-        stop_polling = threading.Event()
-        worker: threading.Thread | None = None
-        goal_worker: threading.Thread | None = None
-        watcher: IndexWatcher | None = None
-        try:
-            watcher = IndexWatcher(
-                list_repos=_list_watched_repos,
-                indexer=IndexingService(settings.paths),
-                indexer_factory=_live_indexer,
-            )
-            watcher.start()
-        except Exception:
-            logging.getLogger("kronos.engine").exception("index watcher failed to start")
-            watcher = None
-        _app.state.index_watcher = watcher
+        supervisor = getattr(_app.state, "component_supervisor", None)
+        if not isinstance(supervisor, ComponentSupervisor):
+            yield
+            return
+        stop_supervise = threading.Event()
+        supervisor.start_all()
 
-        def _goal_poll() -> None:
-            def _tick() -> None:
-                with goal_engine() as engine:
-                    engine.tick()
+        def _supervise_loop() -> None:
+            while not stop_supervise.wait(1.0):
+                supervisor.supervise_once()
 
-            run_goal_ticker(_tick, stop_polling, interval=GOAL_TICK_INTERVAL_SECONDS)
-
-        goal_worker = threading.Thread(target=_goal_poll, daemon=True, name="kronos-goals")
-        goal_worker.start()
-        if telegram_auto_poll:
-            poller = TelegramPoller(store, telegram_connector)
-
-            def _poll() -> None:
-                while not stop_polling.wait(1.5):
-                    poller.tick()
-
-            worker = threading.Thread(target=_poll, daemon=True, name="kronos-telegram")
-            worker.start()
+        supervise_worker = threading.Thread(
+            target=_supervise_loop, daemon=True, name="kronos-supervise"
+        )
+        supervise_worker.start()
         yield
-        stop_polling.set()
-        if worker is not None:
-            worker.join(timeout=2.0)
-        if goal_worker is not None:
-            goal_worker.join(timeout=2.0)
-        if watcher is not None:
-            watcher.stop()
+        stop_supervise.set()
+        supervise_worker.join(timeout=2.0)
+        supervisor.stop_all()
 
     app = FastAPI(title="Kronos Engine", version=settings.engine_version, lifespan=lifespan)
 
@@ -2090,11 +2068,39 @@ def create_app(
 
     @app.get("/ops/doctor")
     def ops_doctor(
+        request: Request,
         _: None = Depends(require_auth),
         x_kronos_client_version: Annotated[str | None, Header(alias=CLIENT_VERSION_HEADER)] = None,
     ) -> dict[str, object]:
         with doctor_service() as doctor:
             report = doctor.check(client_version=x_kronos_client_version or settings.engine_version)
+            checks: list[dict[str, object]] = [
+                {
+                    "id": item.id,
+                    "label": item.label,
+                    "ok": item.ok,
+                    "detail": item.detail,
+                }
+                for item in report.checks
+            ]
+            supervisor = getattr(request.app.state, "component_supervisor", None)
+            if isinstance(supervisor, ComponentSupervisor):
+                for status in supervisor.status():
+                    ok = (not status.running) or status.alive
+                    detail = status.detail or status.name
+                    if status.running and not status.alive:
+                        detail = (
+                            f"{detail} stopped "
+                            f"(failures={status.failures}, restarts={status.restarts})"
+                        )
+                    checks.append(
+                        {
+                            "id": f"background:{status.name}",
+                            "label": f"Background: {status.name}",
+                            "ok": ok,
+                            "detail": detail,
+                        }
+                    )
             return {
                 "ready": report.ready,
                 "health": report.health,
@@ -2102,15 +2108,7 @@ def create_app(
                 "model_degraded": report.model_degraded,
                 "index_degraded": report.index_degraded,
                 "findings": [item.detail for item in report.findings],
-                "checks": [
-                    {
-                        "id": item.id,
-                        "label": item.label,
-                        "ok": item.ok,
-                        "detail": item.detail,
-                    }
-                    for item in report.checks
-                ],
+                "checks": checks,
             }
 
     @app.post("/ops/backup")
@@ -2202,6 +2200,131 @@ def create_app(
         state = rollback_release(target)
         return {"version": state.version}
 
+    def _wire_component_supervisor(target: FastAPI) -> ComponentSupervisor:
+        supervisor = ComponentSupervisor()
+        target.state.component_supervisor = supervisor
+        target.state.index_watcher = None
+        index_holder: dict[str, IndexWatcher | None] = {"watcher": None}
+        goal_holder: dict[str, threading.Thread | threading.Event | None] = {
+            "thread": None,
+            "stop": None,
+        }
+        telegram_holder: dict[str, threading.Thread | threading.Event | None] = {
+            "thread": None,
+            "stop": None,
+        }
+
+        def _start_index() -> None:
+            watcher: IndexWatcher | None = None
+            try:
+                watcher = IndexWatcher(
+                    list_repos=_list_watched_repos,
+                    indexer=IndexingService(settings.paths),
+                    indexer_factory=_live_indexer,
+                )
+                watcher.start()
+            except Exception:
+                logging.getLogger("kronos.engine").exception("index watcher failed to start")
+                index_holder["watcher"] = None
+                target.state.index_watcher = None
+                return
+            index_holder["watcher"] = watcher
+            target.state.index_watcher = watcher
+
+        def _stop_index() -> None:
+            watcher = index_holder["watcher"]
+            if watcher is not None:
+                watcher.stop()
+            index_holder["watcher"] = None
+            target.state.index_watcher = None
+
+        def _index_alive() -> bool:
+            watcher = index_holder["watcher"]
+            return watcher is not None and watcher.is_alive()
+
+        def _start_goals() -> None:
+            stop = threading.Event()
+            goal_holder["stop"] = stop
+
+            def _goal_poll() -> None:
+                def _tick() -> None:
+                    with goal_engine() as engine:
+                        engine.tick()
+
+                run_goal_ticker(_tick, stop, interval=GOAL_TICK_INTERVAL_SECONDS)
+
+            worker = threading.Thread(target=_goal_poll, daemon=True, name="kronos-goals")
+            worker.start()
+            goal_holder["thread"] = worker
+
+        def _stop_goals() -> None:
+            stop = goal_holder["stop"]
+            if isinstance(stop, threading.Event):
+                stop.set()
+            worker = goal_holder["thread"]
+            if isinstance(worker, threading.Thread):
+                worker.join(timeout=2.0)
+            goal_holder["thread"] = None
+            goal_holder["stop"] = None
+
+        def _goals_alive() -> bool:
+            worker = goal_holder["thread"]
+            return isinstance(worker, threading.Thread) and worker.is_alive()
+
+        supervisor.register(
+            "index",
+            start=_start_index,
+            stop=_stop_index,
+            is_alive=_index_alive,
+            detail=lambda: "Index watcher thread",
+        )
+        supervisor.register(
+            "goals",
+            start=_start_goals,
+            stop=_stop_goals,
+            is_alive=_goals_alive,
+            detail=lambda: "Goal ticker thread",
+        )
+
+        if telegram_auto_poll:
+            poller = TelegramPoller(store, telegram_connector)
+
+            def _start_telegram() -> None:
+                stop = threading.Event()
+                telegram_holder["stop"] = stop
+
+                def _poll() -> None:
+                    while not stop.wait(1.5):
+                        poller.tick()
+
+                worker = threading.Thread(target=_poll, daemon=True, name="kronos-telegram")
+                worker.start()
+                telegram_holder["thread"] = worker
+
+            def _stop_telegram() -> None:
+                stop = telegram_holder["stop"]
+                if isinstance(stop, threading.Event):
+                    stop.set()
+                worker = telegram_holder["thread"]
+                if isinstance(worker, threading.Thread):
+                    worker.join(timeout=2.0)
+                telegram_holder["thread"] = None
+                telegram_holder["stop"] = None
+
+            def _telegram_alive() -> bool:
+                worker = telegram_holder["thread"]
+                return isinstance(worker, threading.Thread) and worker.is_alive()
+
+            supervisor.register(
+                "telegram",
+                start=_start_telegram,
+                stop=_stop_telegram,
+                is_alive=_telegram_alive,
+                detail=lambda: "Telegram poller thread",
+            )
+        return supervisor
+
+    _wire_component_supervisor(app)
     return app
 
 
