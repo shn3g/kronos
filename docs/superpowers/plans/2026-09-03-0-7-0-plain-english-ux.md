@@ -323,7 +323,7 @@ Expected: FAIL (500 body is not JSON detail; stop raising propagates).
 
 `chat.py` `_require_orchestrator`: delete the `assert_cost_allowed(...)` / `CostCeilingExceeded` block (keep the billed-without-secret check). Remove now-unused imports.
 
-`model_profiles.py`: `DEFAULT_BILLED_LIMITS` `cost_ceiling=0.0` (0 means no ceiling; nothing enforces it in chat anymore).
+`model_profiles.py`: leave `DEFAULT_BILLED_LIMITS.cost_ceiling = 5.0`. Decision (2026-09-03): `cost_ceiling == 0` is the fail-closed signal used by the model/planning/embedding adapters (`assert_cost_allowed`), so the internal default stays; the concept is removed from the UI only (Task 6) and chat no longer refuses on it.
 
 - [ ] **Step 4: Run engine checks**
 
