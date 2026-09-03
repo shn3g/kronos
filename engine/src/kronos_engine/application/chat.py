@@ -972,22 +972,24 @@ class ChatService:
             return "No matching memories."
         return "\n".join(item.text[:400] for item in records)
 
-    def _create_goal(self, repository_id: str, arguments: dict[str, str]) -> str:
-        title = arguments.get("title", "").strip()
-        criteria = arguments.get("success_criteria", "").strip() or title
+    def _create_goal(self, repository_id: str, arguments: Mapping[str, object]) -> str:
+        title = _tool_string(arguments, "title").strip()
+        criteria = _tool_string(arguments, "success_criteria").strip() or title
         if title == "" or criteria == "":
             return "create_goal needs title and success_criteria."
         try:
             repo = self._repos.get(RepositoryId(repository_id))
         except (RepositoryNotFound, LookupError, ValueError):
             return "Workspace was not found."
+        non_goals = _tool_string(arguments, "non_goals").strip() or DEFAULT_NON_GOALS
+        risk_ceiling = _tool_string(arguments, "risk_ceiling").strip() or "low"
         goal = self._goals.create(
             GoalSpec(
                 repository_id=repo.id,
                 title=title,
                 success_criteria=criteria,
-                non_goals=arguments.get("non_goals", "").strip() or DEFAULT_NON_GOALS,
-                risk_ceiling=arguments.get("risk_ceiling", "low") or "low",
+                non_goals=non_goals,
+                risk_ceiling=risk_ceiling,
                 source=GoalSource.CHAT,
                 max_attempts=repo.policy.budgets.max_attempts_per_issue,
             )
