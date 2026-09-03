@@ -26,6 +26,13 @@ def _task(*, artifacts: tuple[str, ...] = ()) -> TaskRecord:
     )
 
 
+def test_allows_completion_with_verification_passed_artifact() -> None:
+    decision = GoalJudge().decide((_task(artifacts=("verification:gates-passed",)),))
+
+    assert decision.allowed
+    assert decision.reason == "goal completion evidence found"
+
+
 def test_refuses_completion_when_all_tasks_have_empty_evidence() -> None:
     decision = GoalJudge().decide((_task(),))
 

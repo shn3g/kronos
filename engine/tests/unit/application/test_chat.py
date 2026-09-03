@@ -1099,16 +1099,18 @@ def test_run_command_caps_per_turn(tmp_path: Path) -> None:
 
     def complete(request: CompletionRequest, secret: object) -> CompletionResult:
         _ = request, secret
+        remaining = getattr(complete, "left")
+        # Vary the command so the anti-drift repeat guard does not fire; the
+        # per-turn run_command cap remains the unit under test.
         command = _python_script(
             root_holder[0],
-            "tick.py",
+            f"tick_{remaining}.py",
             "from pathlib import Path\n"
             "p = Path('ticks.txt')\n"
             "prior = p.read_text(encoding='utf-8') if p.exists() else ''\n"
             "p.write_text(prior + 'x', encoding='utf-8')\n",
         )
         fence = "```tool\n" + json.dumps({"name": "run_command", "command": command}) + "\n```"
-        remaining = getattr(complete, "left")
         if remaining <= 1:
             complete.left = remaining - 1  # type: ignore[attr-defined]
             return CompletionResult(text="Done.", usage=TokenUsage(tokens=1))
