@@ -686,14 +686,15 @@ export function ChatPage({
       <section className="chat-stage">
         {messages.length === 0 ? (
           <div className="chat-empty">
+            <p className="chat-empty__brand">Kronos</p>
             <h1 className="chat-empty__title">Ask Kronos</h1>
-            <p>
+            <p className="chat-empty__lede">
               {repositoryId
                 ? "Ask about this workspace, paste a screenshot, or type /goal for unattended work."
-                : "Ask how Kronos works, or open a git folder to index code."}
+                : "Open a git folder to index code, or ask how Kronos works."}
             </p>
             {repositoryId ? null : (
-              <button type="button" className="btn-quiet" onClick={onOpenWorkspace}>
+              <button type="button" className="btn-primary chat-empty__cta" onClick={onOpenWorkspace}>
                 Open folder
               </button>
             )}

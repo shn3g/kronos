@@ -79,6 +79,7 @@ export function ConnectModelGate({ modelsClient, onConnected }: ConnectModelGate
 
   return (
     <section className="gate">
+      <p className="gate__brand">Kronos</p>
       <p className="gate__step">Step 1 of 3 · Connect a model</p>
       <h1 className="gate__title">Connect a model</h1>
       <p className="gate__body">
