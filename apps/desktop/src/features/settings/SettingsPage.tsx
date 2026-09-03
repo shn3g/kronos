@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useEffect, useState } from "react";
-import type { EngineClient } from "../../engine/client";
+import { useEngineConnection } from "../../engine/EngineConnectionProvider";
 import {
   createProductionSettingsClient,
   type OpsSettingsView,
@@ -11,38 +11,20 @@ import {
 export type { SettingsPageClients } from "./client";
 
 interface SettingsPageProps {
-  engineClient: EngineClient;
   settingsClient?: SettingsPageClients;
 }
 
 const productionSettings = createProductionSettingsClient();
 
-export function SettingsPage({ engineClient, settingsClient }: SettingsPageProps) {
+export function SettingsPage({ settingsClient }: SettingsPageProps) {
   const client = settingsClient ?? productionSettings;
-  const [ready, setReady] = useState(false);
+  const { engineReady: ready } = useEngineConnection();
   const [settings, setSettings] = useState<OpsSettingsView>({
     otelExport: false,
     langfuseExport: false,
   });
   const [findings, setFindings] = useState<string[]>([]);
   const [backupPath, setBackupPath] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const apply = () => {
-      void engineClient.getState().then((state) => {
-        if (!cancelled) {
-          setReady(state.status === "ready");
-        }
-      });
-    };
-    apply();
-    const interval = window.setInterval(apply, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [engineClient]);
 
   useEffect(() => {
     if (!ready) {

@@ -1171,7 +1171,7 @@ fn spawn_engine(app: &AppHandle) -> Result<(Child, EngineConnection), String> {
     paths.create()?;
     let token = load_or_create_token(&paths.config.join("install.json"))?;
     let (program, args) = engine_command(app)?;
-    let log_path = paths.logs.join("engine.log");
+    let log_path = paths.logs.join("engine-sidecar.log");
     let log_file = OpenOptions::new()
         .create(true)
         .append(true)

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { renderWithEngineConnection } from "../../../engine/testUtils";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineClient } from "../../../engine/client";
@@ -74,9 +75,8 @@ function githubClient(overrides: Partial<GitHubClient> = {}): GitHubClient {
 describe("GitHubPage", () => {
   it("stays fail-closed when the engine is not ready", async () => {
     const status = vi.fn(async () => githubClient().status());
-    render(
-      <GitHubPage engineClient={engine("unavailable")} githubClient={githubClient({ status })} />,
-    );
+    renderWithEngineConnection(<GitHubPage
+githubClient={githubClient({ status })} />, engine("unavailable"));
 
     expect(await screen.findByRole("heading", { level: 1, name: "Connections" })).toBeInTheDocument();
     expect(
@@ -108,12 +108,9 @@ describe("GitHubPage", () => {
         installUrl: "https://github.com/apps/kronos-controller/installations/new",
       },
     }));
-    render(
-      <GitHubPage
-        engineClient={engine("ready")}
-        githubClient={githubClient({ convertManifest, recordInstallation, verify, status })}
-      />,
-    );
+    renderWithEngineConnection(<GitHubPage
+githubClient={githubClient({ convertManifest, recordInstallation, verify, status })}
+      />, engine("ready"));
 
     expect(await screen.findByRole("heading", { name: /controller app/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /reviewer app/i })).toBeInTheDocument();
@@ -143,12 +140,9 @@ describe("GitHubPage", () => {
       requiredChecks: [{ context: "kronos-review (kronos-reviewer)", integrationId: 9001 }],
     }));
     const applyRuleset = vi.fn(async () => ({ applied: true }));
-    render(
-      <GitHubPage
-        engineClient={engine("ready")}
-        githubClient={githubClient({ proposeRuleset, applyRuleset })}
-      />,
-    );
+    renderWithEngineConnection(<GitHubPage
+githubClient={githubClient({ proposeRuleset, applyRuleset })}
+      />, engine("ready"));
 
     expect(await screen.findByText(/widgets\/shop/i)).toBeInTheDocument();
     expect((await screen.findAllByText(/kronos-review \(kronos-reviewer\)/i)).length).toBeGreaterThan(
@@ -185,9 +179,8 @@ describe("GitHubPage", () => {
         { id: "reviewer_app", ok: false, detail: "reviewer is not verified" },
       ],
     }));
-    render(
-      <GitHubPage engineClient={engine("ready")} githubClient={githubClient({ safety })} />,
-    );
+    renderWithEngineConnection(<GitHubPage
+githubClient={githubClient({ safety })} />, engine("ready"));
 
     expect(await screen.findByText(/widgets\/shop/i)).toBeInTheDocument();
     expect(await screen.findByText(/ruleset_strict/i)).toBeInTheDocument();
@@ -202,9 +195,8 @@ describe("GitHubPage", () => {
     const safety = vi.fn(async () => {
       throw new Error("engine request failed: 0");
     });
-    render(
-      <GitHubPage engineClient={engine("ready")} githubClient={githubClient({ safety })} />,
-    );
+    renderWithEngineConnection(<GitHubPage
+githubClient={githubClient({ safety })} />, engine("ready"));
 
     expect(await screen.findByText(/widgets\/shop/i)).toBeInTheDocument();
     expect(await screen.findByText(/elevation is blocked/i)).toBeInTheDocument();

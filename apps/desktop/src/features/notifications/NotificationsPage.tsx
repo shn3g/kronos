@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useEffect, useState } from "react";
-import type { EngineClient } from "../../engine/client";
+import { useEngineConnection } from "../../engine/EngineConnectionProvider";
 import {
   createProductionNotificationsClient,
   type AlertView,
@@ -11,36 +11,17 @@ import {
 export type { NotificationsPageClients } from "./client";
 
 interface NotificationsPageProps {
-  engineClient: EngineClient;
   notificationsClient?: NotificationsPageClients;
 }
 
 const productionNotifications = createProductionNotificationsClient();
 
 export function NotificationsPage({
-  engineClient,
   notificationsClient,
 }: NotificationsPageProps) {
   const client = notificationsClient ?? productionNotifications;
-  const [ready, setReady] = useState(false);
+  const { engineReady: ready } = useEngineConnection();
   const [items, setItems] = useState<AlertView[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const apply = () => {
-      void engineClient.getState().then((state) => {
-        if (!cancelled) {
-          setReady(state.status === "ready");
-        }
-      });
-    };
-    apply();
-    const interval = window.setInterval(apply, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [engineClient]);
 
   useEffect(() => {
     if (!ready) {

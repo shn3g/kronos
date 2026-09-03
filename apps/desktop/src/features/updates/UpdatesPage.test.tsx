@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import { renderWithEngineConnection } from "../../engine/testUtils";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DESKTOP_CLIENT_VERSION } from "../../api/kronosClient";
@@ -45,9 +46,8 @@ function clients(overrides: Partial<UpdatesPageClients> = {}): UpdatesPageClient
 describe("UpdatesPage", () => {
   it("stays fail-closed when the engine is not ready", async () => {
     const status = vi.fn(async () => clients().status());
-    render(
-      <UpdatesPage engineClient={engine("unavailable")} updatesClient={clients({ status })} />,
-    );
+    renderWithEngineConnection(<UpdatesPage
+updatesClient={clients({ status })} />, engine("unavailable"));
     expect(await screen.findByRole("heading", { level: 1, name: "Updates" })).toBeInTheDocument();
     expect(
       screen.getByText(/waiting for the engine/i),
@@ -56,14 +56,16 @@ describe("UpdatesPage", () => {
   });
 
   it("refuses incompatible versions and does not claim a signed build", async () => {
-    render(<UpdatesPage engineClient={engine("incompatible")} updatesClient={clients()} />);
+    renderWithEngineConnection(<UpdatesPage
+updatesClient={clients()} />, engine("incompatible"));
     expect(await screen.findByRole("heading", { level: 1, name: "Updates" })).toBeInTheDocument();
     expect(screen.getByText(/incompatible/i)).toBeInTheDocument();
     expect(screen.queryByText(/^signed$/i)).not.toBeInTheDocument();
   });
 
   it("shows checksums, provenance warning, and rollback when ready", async () => {
-    render(<UpdatesPage engineClient={engine("ready")} updatesClient={clients()} />);
+    renderWithEngineConnection(<UpdatesPage
+updatesClient={clients()} />, engine("ready"));
     expect(
       await screen.findByText(
         `Engine ${DESKTOP_CLIENT_VERSION}. Desktop ${DESKTOP_CLIENT_VERSION}.`,
@@ -75,12 +77,9 @@ describe("UpdatesPage", () => {
   });
 
   it("disables check for updates when signing is not configured", async () => {
-    render(
-      <UpdatesPage
-        engineClient={engine("ready")}
-        updatesClient={clients({ updaterSigningConfigured: () => false })}
-      />,
-    );
+    renderWithEngineConnection(<UpdatesPage
+updatesClient={clients({ updaterSigningConfigured: () => false })}
+      />, engine("ready"));
     expect(await screen.findByText(/updates are not signed yet/i)).toBeInTheDocument();
     const button = screen.getByRole("button", { name: /check for updates/i });
     expect(button).toBeDisabled();
@@ -92,12 +91,9 @@ describe("UpdatesPage", () => {
       status: "up-to-date" as const,
       currentVersion: DESKTOP_CLIENT_VERSION,
     }));
-    render(
-      <UpdatesPage
-        engineClient={engine("ready")}
-        updatesClient={clients({ checkForUpdates })}
-      />,
-    );
+    renderWithEngineConnection(<UpdatesPage
+updatesClient={clients({ checkForUpdates })}
+      />, engine("ready"));
     await user.click(await screen.findByRole("button", { name: /check for updates/i }));
     await waitFor(() => expect(checkForUpdates).toHaveBeenCalled());
     expect(await screen.findByText(/you are on the latest version/i)).toBeInTheDocument();
@@ -111,12 +107,9 @@ describe("UpdatesPage", () => {
       notes: "One-click install and signed updates.",
     }));
     const installAndRestart = vi.fn(async () => undefined);
-    render(
-      <UpdatesPage
-        engineClient={engine("ready")}
-        updatesClient={clients({ checkForUpdates, installAndRestart })}
-      />,
-    );
+    renderWithEngineConnection(<UpdatesPage
+updatesClient={clients({ checkForUpdates, installAndRestart })}
+      />, engine("ready"));
     await user.click(await screen.findByRole("button", { name: /check for updates/i }));
     expect(await screen.findByText(/0\.5\.0 is available/i)).toBeInTheDocument();
     expect(screen.getByText(/one-click install and signed updates/i)).toBeInTheDocument();
@@ -134,12 +127,9 @@ describe("UpdatesPage", () => {
     const installAndRestart = vi.fn(async () => {
       throw new Error("signature verification failed");
     });
-    render(
-      <UpdatesPage
-        engineClient={engine("ready")}
-        updatesClient={clients({ checkForUpdates, installAndRestart })}
-      />,
-    );
+    renderWithEngineConnection(<UpdatesPage
+updatesClient={clients({ checkForUpdates, installAndRestart })}
+      />, engine("ready"));
     await user.click(await screen.findByRole("button", { name: /check for updates/i }));
     await user.click(await screen.findByRole("button", { name: /install and restart/i }));
     expect(await screen.findByText(/signature verification failed/i)).toBeInTheDocument();

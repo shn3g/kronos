@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { DESKTOP_CLIENT_VERSION } from "../../api/kronosClient";
-import type { EngineClient } from "../../engine/client";
+import { useEngineConnection } from "../../engine/EngineConnectionProvider";
 import {
   createProductionUpdatesClient,
   type UpdateStatusView,
@@ -13,17 +13,15 @@ import type { UpdateCheckResult } from "./appUpdater";
 export type { UpdatesPageClients } from "./client";
 
 interface UpdatesPageProps {
-  engineClient: EngineClient;
   updatesClient?: UpdatesPageClients;
 }
 
 const productionUpdates = createProductionUpdatesClient();
 
-export function UpdatesPage({ engineClient, updatesClient }: UpdatesPageProps) {
+export function UpdatesPage({ updatesClient }: UpdatesPageProps) {
   const client = updatesClient ?? productionUpdates;
-  const [engineStatus, setEngineStatus] = useState<"unavailable" | "starting" | "ready" | "incompatible">(
-    "unavailable",
-  );
+  const { state } = useEngineConnection();
+  const engineStatus = state.status;
   const [status, setStatus] = useState<UpdateStatusView | null>(null);
   const [rolled, setRolled] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
@@ -31,23 +29,6 @@ export function UpdatesPage({ engineClient, updatesClient }: UpdatesPageProps) {
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | null>(null);
   const [installError, setInstallError] = useState<string | null>(null);
   const signingConfigured = client.updaterSigningConfigured();
-
-  useEffect(() => {
-    let cancelled = false;
-    const apply = () => {
-      void engineClient.getState().then((state) => {
-        if (!cancelled) {
-          setEngineStatus(state.status);
-        }
-      });
-    };
-    apply();
-    const interval = window.setInterval(apply, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [engineClient]);
 
   useEffect(() => {
     if (engineStatus !== "ready") {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { act, render, screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
+import { renderWithEngineConnection } from "../../engine/testUtils";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineClient } from "../../engine/client";
@@ -66,7 +67,8 @@ function clients(overrides: Partial<IndexPageClients> = {}): IndexPageClients {
 describe("IndexPage", () => {
   it("stays fail-closed when the engine is not ready", async () => {
     const status = vi.fn(async () => clients().status("repo_alpha"));
-    render(<IndexPage engineClient={engine("unavailable")} indexClient={clients({ status })} />);
+    renderWithEngineConnection(<IndexPage
+indexClient={clients({ status })} />, engine("unavailable"));
 
     expect(await screen.findByRole("heading", { level: 1, name: "Index" })).toBeInTheDocument();
     expect(
@@ -91,7 +93,8 @@ describe("IndexPage", () => {
         text: "def connect",
       },
     ]);
-    render(<IndexPage engineClient={engine("ready")} indexClient={clients({ search })} />);
+    renderWithEngineConnection(<IndexPage
+indexClient={clients({ search })} />, engine("ready"));
 
     expect(await screen.findByText(/chunk count/i)).toBeInTheDocument();
     expect(screen.getByText(/dense unavailable/i)).toBeInTheDocument();
@@ -128,10 +131,8 @@ describe("IndexPage", () => {
           finishWatch = resolve;
         }),
     );
-    render(
-      <IndexPage
-        engineClient={engine("ready")}
-        indexClient={clients({
+    renderWithEngineConnection(<IndexPage
+indexClient={clients({
           listRepositories: async () => [
             {
               id: "repo_alpha",
@@ -151,8 +152,7 @@ describe("IndexPage", () => {
           status: statusFn,
           setWatch,
         })}
-      />,
-    );
+      />, engine("ready"));
 
     expect(await screen.findByText("alpha-commit")).toBeInTheDocument();
     await user.click(screen.getByLabelText(/watch working tree/i));
@@ -211,10 +211,8 @@ describe("IndexPage", () => {
       }
       return [];
     });
-    render(
-      <IndexPage
-        engineClient={engine("ready")}
-        indexClient={clients({
+    renderWithEngineConnection(<IndexPage
+indexClient={clients({
           listRepositories: async () => [
             {
               id: "repo_alpha",
@@ -233,8 +231,7 @@ describe("IndexPage", () => {
           ],
           search,
         })}
-      />,
-    );
+      />, engine("ready"));
 
     expect(await screen.findByRole("searchbox", { name: /search index/i })).toBeInTheDocument();
     await user.type(screen.getByRole("searchbox", { name: /search index/i }), "alpha");
@@ -251,10 +248,8 @@ describe("IndexPage", () => {
   });
 
   it("shows the dense backend name when dense is available", async () => {
-    render(
-      <IndexPage
-        engineClient={engine("ready")}
-        indexClient={clients({
+    renderWithEngineConnection(<IndexPage
+indexClient={clients({
           status: async () => status({ denseAvailable: true }),
         })}
         modelsClient={{
@@ -275,8 +270,7 @@ describe("IndexPage", () => {
             },
           }),
         }}
-      />,
-    );
+      />, engine("ready"));
     expect(await screen.findByText(/bge-small-en-v1.5 \(ready\)/i)).toBeInTheDocument();
   });
 
@@ -285,9 +279,8 @@ describe("IndexPage", () => {
     const setWatch = vi.fn(async (_id: string, enabled: boolean) =>
       status({ watchEnabled: enabled }),
     );
-    render(
-      <IndexPage engineClient={engine("ready")} indexClient={clients({ setWatch })} />,
-    );
+    renderWithEngineConnection(<IndexPage
+indexClient={clients({ setWatch })} />, engine("ready"));
     const toggle = await screen.findByLabelText(/watch working tree/i);
     await user.click(toggle);
     expect(setWatch).toHaveBeenCalledWith("repo_alpha", false);

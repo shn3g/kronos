@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { renderWithEngineConnection } from "../../engine/testUtils";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineClient } from "../../engine/client";
 import { RunsPage, type RunsClient } from "./RunsPage";
@@ -15,16 +16,17 @@ function engine(status: "unavailable" | "starting" | "ready"): EngineClient {
 describe("RunsPage", () => {
   it("stays fail-closed when the engine is not ready", async () => {
     const list = vi.fn(async () => []);
-    render(<RunsPage engineClient={engine("unavailable")} runsClient={{ list, pollEvents: async () => ({ events: [], headSeq: 0 }) }} />);
+    renderWithEngineConnection(
+      <RunsPage runsClient={{ list, pollEvents: async () => ({ events: [], headSeq: 0 }) }} />,
+      engine("unavailable"),
+    );
 
     expect(await screen.findByRole("heading", { level: 1, name: "Runs" })).toBeInTheDocument();
-    expect(
-      screen.getByText(/waiting for the engine/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/waiting for the engine/i)).toBeInTheDocument();
     expect(list).not.toHaveBeenCalled();
   });
 
-  it("shows runs immediately when the parent already reports the engine ready", async () => {
+  it("shows runs immediately when the shared engine connection is already ready", async () => {
     const list = vi.fn(async () => [
       {
         id: "run_1",
@@ -35,16 +37,13 @@ describe("RunsPage", () => {
         prUrl: null,
       },
     ]);
-    render(
-      <RunsPage
-        engineClient={{ getState: () => new Promise(() => undefined) }}
-        engineReady
-        runsClient={{ list, pollEvents: async () => ({ events: [], headSeq: 0 }) }}
-      />,
+    renderWithEngineConnection(
+      <RunsPage runsClient={{ list, pollEvents: async () => ({ events: [], headSeq: 0 }) }} />,
+      engine("ready"),
     );
 
-    expect(screen.queryByText(/waiting for the engine/i)).not.toBeInTheDocument();
     expect(await screen.findByText(/task_add/)).toBeInTheDocument();
+    expect(screen.queryByText(/waiting for the engine/i)).not.toBeInTheDocument();
   });
 
   it("shows run evidence when the engine is ready", async () => {
@@ -58,14 +57,14 @@ describe("RunsPage", () => {
         prUrl: "https://github.com/acme/app/pull/1",
       },
     ];
-    render(
+    renderWithEngineConnection(
       <RunsPage
-        engineClient={engine("ready")}
         runsClient={{
           list,
           pollEvents: async () => ({ events: [], headSeq: 0 }),
         }}
       />,
+      engine("ready"),
     );
 
     expect(await screen.findByText(/task_add/)).toBeInTheDocument();

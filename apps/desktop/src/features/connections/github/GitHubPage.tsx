@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useEffect, useState } from "react";
-import type { EngineClient } from "../../../engine/client";
+import { useEngineConnection } from "../../../engine/EngineConnectionProvider";
 import {
   createProductionGitHubClient,
   type GitHubAppRole,
@@ -18,36 +18,18 @@ export type { GitHubClient } from "./client";
 const productionGitHub = createProductionGitHubClient();
 
 interface GitHubPageProps {
-  engineClient: EngineClient;
   githubClient?: GitHubClient;
 }
 
-export function GitHubPage({ engineClient, githubClient }: GitHubPageProps) {
+export function GitHubPage({ githubClient }: GitHubPageProps) {
   const client = githubClient ?? productionGitHub;
-  const [ready, setReady] = useState(false);
+  const { engineReady: ready } = useEngineConnection();
   const [status, setStatus] = useState<GitHubConnectionStatus | null>(null);
   const [manifests, setManifests] = useState<GitHubManifests | null>(null);
   const [proposal, setProposal] = useState<RulesetProposalView | null>(null);
   const [safety, setSafety] = useState<RepositorySafety | null>(null);
   const [confirmRuleset, setConfirmRuleset] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const apply = () => {
-      void engineClient.getState().then((state) => {
-        if (!cancelled) {
-          setReady(state.status === "ready");
-        }
-      });
-    };
-    apply();
-    const interval = window.setInterval(apply, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [engineClient]);
 
   useEffect(() => {
     if (!ready) {

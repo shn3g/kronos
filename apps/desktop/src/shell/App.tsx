@@ -4,8 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import {
   createProductionEngineClient,
   type EngineClient,
-  type EngineConnectionState,
 } from "../engine/client";
+import {
+  EngineConnectionProvider,
+  useEngineConnection,
+} from "../engine/EngineConnectionProvider";
 import { EngineStatus } from "../engine/EngineStatus";
 import { ChatPage, type ChatMentionRequest } from "../features/chat/ChatPage";
 import { createProductionChatClient, type ChatClient } from "../features/chat/client";
@@ -87,8 +90,16 @@ interface AppProps {
   notificationsClient?: NotificationsPageClients;
 }
 
-export function App({
-  engineClient,
+export function App(props: AppProps) {
+  const engine = props.engineClient ?? productionEngine;
+  return (
+    <EngineConnectionProvider engineClient={engine}>
+      <AppShell {...props} />
+    </EngineConnectionProvider>
+  );
+}
+
+function AppShell({
   modelsClient,
   chatClient,
   repositoriesClient,
@@ -98,7 +109,6 @@ export function App({
   indexClient,
   notificationsClient,
 }: AppProps) {
-  const engine = engineClient ?? productionEngine;
   const models = modelsClient ?? productionModels;
   const chat = chatClient ?? productionChat;
   const repos = repositoriesClient ?? productionRepos;
@@ -107,9 +117,7 @@ export function App({
   const settings = settingsClient ?? productionSettings;
   const index = indexClient ?? productionIndex;
   const notifications = notificationsClient ?? productionNotifications;
-  const [engineState, setEngineState] = useState<EngineConnectionState>({
-    status: "starting",
-  });
+  const { state: engineState, engineReady } = useEngineConnection();
   const [modelReady, setModelReady] = useState(false);
   const [modelKnown, setModelKnown] = useState(false);
   const [embeddingsReady, setEmbeddingsReady] = useState(false);
@@ -145,32 +153,6 @@ export function App({
   const [committing, setCommitting] = useState(false);
   const committingRef = useRef(false);
   const [notificationCount, setNotificationCount] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    const apply = () => {
-      void engine.getState().then(
-        (next) => {
-          if (!cancelled) {
-            setEngineState(next);
-          }
-        },
-        () => {
-          if (!cancelled) {
-            setEngineState({ status: "unavailable" });
-          }
-        },
-      );
-    };
-    apply();
-    const interval = window.setInterval(apply, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [engine]);
-
-  const engineReady = engineState.status === "ready";
 
   useEffect(() => {
     if (!engineReady) {
@@ -658,7 +640,6 @@ export function App({
               </div>
               <div hidden={activity !== "files"} className="app-main__panel app-main__panel--files">
                 <FilesPage
-                  engineClient={engine}
                   repositoryId={workspaceId}
                   repositoriesClient={repos}
                   indexClient={index}
@@ -684,8 +665,6 @@ export function App({
               {activity === "goals" ? (
                 <div className="app-main__panel">
                   <GoalsWorkbench
-                    engineClient={engine}
-                    engineReady={engineReady}
                     goalsClient={goalsPageClient}
                     repositoriesClient={repos}
                     runsClient={productionRuns}
@@ -696,7 +675,6 @@ export function App({
               {activity === "workspaces" ? (
                 <div className="app-main__panel">
                   <WorkspacesPage
-                    engineClient={engine}
                     repositoriesClient={repos}
                     pickFolder={pickRepositoryFolder}
                   />
@@ -705,7 +683,6 @@ export function App({
               {activity === "settings" ? (
                 <div className="app-main__panel app-main__panel--settings">
                   <SettingsHub
-                    engineClient={engine}
                     section={route.settingsSection}
                     onSection={(section: SettingsSection) => {
                       go({ activity: "settings", settingsSection: section });
@@ -748,7 +725,6 @@ export function App({
             aria-label="Terminal"
           >
             <TerminalPage
-              engineClient={engine}
               repositoryId={workspaceId}
               repositoriesClient={repos}
               onOpenWorkspace={() => {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { renderWithEngineConnection } from "../../engine/testUtils";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineClient } from "../../engine/client";
@@ -61,14 +62,11 @@ function repos(overrides: Partial<RepositoriesClient> = {}): RepositoriesClient 
 describe("TerminalPage", () => {
   it("stays closed when the engine is not ready", async () => {
     const startWorkspaceShell = vi.fn();
-    render(
-      <TerminalPage
-        engineClient={engine("unavailable")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<TerminalPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({ startWorkspaceShell })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("unavailable"));
 
     expect(await screen.findByRole("heading", { level: 2, name: "Terminal" })).toBeInTheDocument();
     expect(screen.getByText(/local engine is not connected/i)).toBeInTheDocument();
@@ -78,14 +76,11 @@ describe("TerminalPage", () => {
   it("asks for a git folder when no workspace is selected", async () => {
     const startWorkspaceShell = vi.fn();
     const onOpenWorkspace = vi.fn();
-    render(
-      <TerminalPage
-        engineClient={engine("ready")}
-        repositoryId={null}
+    renderWithEngineConnection(<TerminalPage
+repositoryId={null}
         repositoriesClient={repos({ startWorkspaceShell })}
         onOpenWorkspace={onOpenWorkspace}
-      />,
-    );
+      />, engine("ready"));
 
     expect(
       await screen.findByText(/open a workspace to run commands here/i),
@@ -112,14 +107,11 @@ describe("TerminalPage", () => {
       running: true,
       output: live,
     }));
-    render(
-      <TerminalPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<TerminalPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({ writeWorkspaceShell, watchWorkspaceCommand })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     const terminal = await screen.findByRole("textbox", { name: /^terminal$/i });
     await user.type(terminal, "echo hello-shell{Enter}");
@@ -146,14 +138,11 @@ describe("TerminalPage", () => {
       running: true,
       output: live,
     }));
-    render(
-      <TerminalPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<TerminalPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({ writeWorkspaceShell, watchWorkspaceCommand })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     const terminal = await screen.findByRole("textbox", { name: /^terminal$/i });
     await user.type(terminal, "echo hello-shell{Enter}");
@@ -178,14 +167,11 @@ describe("TerminalPage", () => {
       running,
       output: "",
     }));
-    render(
-      <TerminalPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<TerminalPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({ cancelWorkspaceCommand, watchWorkspaceCommand })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await screen.findByText("Shell is open.");
     await user.click(await screen.findByRole("button", { name: /^stop$/i }));
@@ -196,18 +182,15 @@ describe("TerminalPage", () => {
 
   it("says so when stop cannot reach the engine", async () => {
     const user = userEvent.setup();
-    render(
-      <TerminalPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<TerminalPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({
           cancelWorkspaceCommand: async () => {
             throw new Error("engine request failed: 500");
           },
         })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     await screen.findByText("Shell is open.");
     await user.click(await screen.findByRole("button", { name: /^stop$/i }));
@@ -218,18 +201,15 @@ describe("TerminalPage", () => {
 
   it("says so when the shell cannot start or a line cannot be sent", async () => {
     const user = userEvent.setup();
-    const { rerender } = render(
-      <TerminalPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    const { rerender } = renderWithEngineConnection(<TerminalPage
+repositoryId="repo_alpha"
         repositoriesClient={repos({
           startWorkspaceShell: async () => {
             throw new Error("engine request failed: 500");
           },
         })}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     expect(
       await screen.findByText(
@@ -239,7 +219,6 @@ describe("TerminalPage", () => {
 
     rerender(
       <TerminalPage
-        engineClient={engine("ready")}
         repositoryId="repo_alpha"
         repositoriesClient={repos({
           writeWorkspaceShell: async () => {
@@ -258,14 +237,11 @@ describe("TerminalPage", () => {
   });
 
   it("keeps the terminal ready for typing while the shell is open", async () => {
-    render(
-      <TerminalPage
-        engineClient={engine("ready")}
-        repositoryId="repo_alpha"
+    renderWithEngineConnection(<TerminalPage
+repositoryId="repo_alpha"
         repositoriesClient={repos()}
         onOpenWorkspace={() => undefined}
-      />,
-    );
+      />, engine("ready"));
 
     expect(await screen.findByRole("textbox", { name: /^terminal$/i })).toBeEnabled();
     expect(screen.queryByRole("button", { name: /^send$/i })).not.toBeInTheDocument();

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { renderWithEngineConnection } from "../../engine/testUtils";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineClient } from "../../engine/client";
 import { MemoryPage, type MemoryClient } from "./MemoryPage";
@@ -15,12 +16,9 @@ function engine(status: "unavailable" | "starting" | "ready"): EngineClient {
 describe("MemoryPage", () => {
   it("stays fail-closed when the engine is not ready", async () => {
     const list = vi.fn(async () => []);
-    render(
-      <MemoryPage
-        engineClient={engine("unavailable")}
-        memoryClient={{ list, importLessons: async () => [] }}
-      />,
-    );
+    renderWithEngineConnection(<MemoryPage
+memoryClient={{ list, importLessons: async () => [] }}
+      />, engine("unavailable"));
 
     expect(await screen.findByRole("heading", { level: 1, name: "Memory" })).toBeInTheDocument();
     expect(
@@ -47,9 +45,8 @@ describe("MemoryPage", () => {
         skillId: null,
       },
     ];
-    render(
-      <MemoryPage engineClient={engine("ready")} memoryClient={{ list, importLessons: async () => [] }} />,
-    );
+    renderWithEngineConnection(<MemoryPage
+memoryClient={{ list, importLessons: async () => [] }} />, engine("ready"));
 
     expect(await screen.findByText(/disabled_candidate/)).toBeInTheDocument();
     expect(screen.getByText(/Convert event times/)).toBeInTheDocument();

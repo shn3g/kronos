@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { render, screen } from "@testing-library/react";
+import { EngineConnectionProvider } from "../../engine/EngineConnectionProvider";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { DESKTOP_CLIENT_VERSION } from "../../api/kronosClient";
@@ -76,13 +77,14 @@ function quietSettings(): SettingsPageClients {
 function Harness({ initial = "general" }: { initial?: SettingsSection }) {
   const [section, setSection] = useState<SettingsSection>(initial);
   return (
-    <SettingsHub
-      engineClient={readyEngine()}
-      section={section}
-      onSection={setSection}
-      modelsClient={assignedModels()}
-      settingsClient={quietSettings()}
-    />
+    <EngineConnectionProvider engineClient={readyEngine()}>
+      <SettingsHub
+        section={section}
+        onSection={setSection}
+        modelsClient={assignedModels()}
+        settingsClient={quietSettings()}
+      />
+    </EngineConnectionProvider>
   );
 }
 

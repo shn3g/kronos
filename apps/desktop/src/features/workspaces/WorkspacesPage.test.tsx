@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { act, render, screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
+import { renderWithEngineConnection } from "../../engine/testUtils";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineClient, EngineConnectionState } from "../../engine/client";
@@ -64,12 +65,9 @@ function repos(listImpl?: RepositoriesClient["list"]): RepositoriesClient {
 describe("WorkspacesPage", () => {
   it("stays fail-closed when the engine is not ready", async () => {
     const list = vi.fn(async () => []);
-    render(
-      <WorkspacesPage
-        engineClient={engine("unavailable")}
-        repositoriesClient={repos(list)}
-      />,
-    );
+    renderWithEngineConnection(<WorkspacesPage
+repositoriesClient={repos(list)}
+      />, engine("unavailable"));
 
     expect(await screen.findByRole("heading", { level: 1, name: "Workspaces" })).toBeInTheDocument();
     expect(
@@ -143,13 +141,10 @@ describe("WorkspacesPage", () => {
       cancelWorkspaceCommand: async () => ({ ok: true }),
     };
 
-    render(
-      <WorkspacesPage
-        engineClient={engine("ready")}
-        repositoriesClient={client}
+    renderWithEngineConnection(<WorkspacesPage
+repositoriesClient={client}
         pickFolder={async () => "C:/tmp/alpha"}
-      />,
-    );
+      />, engine("ready"));
 
     expect(await screen.findByText("alpha")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /add workspace/i }));
@@ -174,9 +169,8 @@ describe("WorkspacesPage", () => {
       const engineClient: EngineClient = {
         getState: async () => status,
       };
-      render(
-        <WorkspacesPage engineClient={engineClient} repositoriesClient={repos()} />,
-      );
+      renderWithEngineConnection(<WorkspacesPage
+repositoriesClient={repos()} />, engineClient);
       await act(async () => {
         await Promise.resolve();
       });
@@ -258,7 +252,8 @@ describe("WorkspacesPage", () => {
       cancelWorkspaceCommand: async () => ({ ok: true }),
     };
 
-    render(<WorkspacesPage engineClient={engine("ready")} repositoriesClient={client} />);
+    renderWithEngineConnection(<WorkspacesPage
+repositoriesClient={client} />, engine("ready"));
 
     await user.click(await screen.findByRole("button", { name: /add workspace/i }));
     await user.type(screen.getByLabelText(/repository folder/i), "C:/tmp/typed");

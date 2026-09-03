@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { renderWithEngineConnection } from "../../engine/testUtils";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineClient } from "../../engine/client";
@@ -106,12 +107,9 @@ function modelsClient(overrides: Partial<ModelsClient> = {}): ModelsClient {
 describe("ModelsPage", () => {
   it("stays fail-closed when the engine is not ready", async () => {
     const snapshot = vi.fn(async () => modelsClient().snapshot());
-    render(
-      <ModelsPage
-        engineClient={engine("unavailable")}
-        modelsClient={modelsClient({ snapshot })}
-      />,
-    );
+    renderWithEngineConnection(<ModelsPage
+modelsClient={modelsClient({ snapshot })}
+      />, engine("unavailable"));
 
     expect(await screen.findByRole("heading", { level: 1, name: "Models" })).toBeInTheDocument();
     expect(
@@ -124,12 +122,9 @@ describe("ModelsPage", () => {
   it("assigns orchestrator planner coder reviewer and embedding profiles", async () => {
     const user = userEvent.setup();
     const assign = vi.fn(async (assignments: Record<ModelRole, string>) => assignments);
-    render(
-      <ModelsPage
-        engineClient={engine("ready")}
-        modelsClient={modelsClient({ assign })}
-      />,
-    );
+    renderWithEngineConnection(<ModelsPage
+modelsClient={modelsClient({ assign })}
+      />, engine("ready"));
 
     expect(await screen.findByLabelText(/^orchestrator$/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/^planner$/i)).toBeInTheDocument();
@@ -170,10 +165,8 @@ describe("ModelsPage", () => {
       };
     });
     const assign = vi.fn(async (assignments: Record<ModelRole, string>) => assignments);
-    render(
-      <ModelsPage
-        engineClient={engine("ready")}
-        modelsClient={modelsClient({
+    renderWithEngineConnection(<ModelsPage
+modelsClient={modelsClient({
           snapshot: async () => ({
             detected: [
               {
@@ -195,8 +188,7 @@ describe("ModelsPage", () => {
           createProvider,
           assign,
         })}
-      />,
-    );
+      />, engine("ready"));
 
     expect(
       await screen.findByRole("button", { name: /register as provider/i }),
@@ -220,9 +212,8 @@ describe("ModelsPage", () => {
   });
 
   it("shows which embedding backend is in use", async () => {
-    render(
-      <ModelsPage engineClient={engine("ready")} modelsClient={modelsClient()} />,
-    );
+    renderWithEngineConnection(<ModelsPage
+modelsClient={modelsClient()} />, engine("ready"));
 
     expect(await screen.findByText(/embedding backend/i)).toBeInTheDocument();
     expect(screen.getByText(/local onnx/i)).toBeInTheDocument();
@@ -266,12 +257,9 @@ describe("ModelsPage", () => {
         embedding: assignments.embedding,
       };
     });
-    render(
-      <ModelsPage
-        engineClient={engine("ready")}
-        modelsClient={modelsClient({ snapshot, assign })}
-      />,
-    );
+    renderWithEngineConnection(<ModelsPage
+modelsClient={modelsClient({ snapshot, assign })}
+      />, engine("ready"));
 
     expect(await screen.findByText(/local onnx/i)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /save assignments/i }));
@@ -291,12 +279,9 @@ describe("ModelsPage", () => {
       },
       profiles: [],
     }));
-    render(
-      <ModelsPage
-        engineClient={engine("ready")}
-        modelsClient={modelsClient({ createProvider })}
-      />,
-    );
+    renderWithEngineConnection(<ModelsPage
+modelsClient={modelsClient({ createProvider })}
+      />, engine("ready"));
 
     expect(await screen.findByRole("button", { name: /^openai$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^openrouter$/i })).toBeInTheDocument();
@@ -343,10 +328,8 @@ describe("ModelsPage", () => {
         limits: patch.limits,
       }),
     );
-    render(
-      <ModelsPage
-        engineClient={engine("ready")}
-        modelsClient={modelsClient({
+    renderWithEngineConnection(<ModelsPage
+modelsClient={modelsClient({
           snapshot: async () => ({
             detected: [],
             profiles: [
@@ -376,8 +359,7 @@ describe("ModelsPage", () => {
           }),
           updateProfile,
         })}
-      />,
-    );
+      />, engine("ready"));
 
     expect(await screen.findByLabelText(/cost ceiling/i)).toHaveValue(0);
     expect(screen.getByLabelText(/max tokens/i)).toHaveValue(4096);
@@ -394,10 +376,8 @@ describe("ModelsPage", () => {
   });
 
   it("renders install progress with a text percentage", async () => {
-    render(
-      <ModelsPage
-        engineClient={engine("ready")}
-        modelsClient={modelsClient({
+    renderWithEngineConnection(<ModelsPage
+modelsClient={modelsClient({
           embeddingInstall: async () => ({
             ...emptyEmbeddingInstallSnapshot(),
             status: {
@@ -409,8 +389,7 @@ describe("ModelsPage", () => {
             },
           }),
         })}
-      />,
-    );
+      />, engine("ready"));
     expect(await screen.findByText("50%")).toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toBeInTheDocument();
   });

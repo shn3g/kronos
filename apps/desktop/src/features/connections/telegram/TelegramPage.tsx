@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useEffect, useState } from "react";
-import type { EngineClient } from "../../../engine/client";
+import { useEngineConnection } from "../../../engine/EngineConnectionProvider";
 import {
   createProductionTelegramClient,
   type TelegramClient,
@@ -13,35 +13,17 @@ export type { TelegramClient } from "./client";
 const productionTelegram = createProductionTelegramClient();
 
 interface TelegramPageProps {
-  engineClient: EngineClient;
   telegramClient?: TelegramClient;
 }
 
-export function TelegramPage({ engineClient, telegramClient }: TelegramPageProps) {
+export function TelegramPage({ telegramClient }: TelegramPageProps) {
   const client = telegramClient ?? productionTelegram;
-  const [ready, setReady] = useState(false);
+  const { engineReady: ready } = useEngineConnection();
   const [status, setStatus] = useState<TelegramStatus | null>(null);
   const [userIds, setUserIds] = useState("");
   const [chatIds, setChatIds] = useState("");
   const [defaultRepo, setDefaultRepo] = useState("");
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const apply = () => {
-      void engineClient.getState().then((state) => {
-        if (!cancelled) {
-          setReady(state.status === "ready");
-        }
-      });
-    };
-    apply();
-    const interval = window.setInterval(apply, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [engineClient]);
 
   useEffect(() => {
     if (!ready) {

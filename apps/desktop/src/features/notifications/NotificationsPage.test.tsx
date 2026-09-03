@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { renderWithEngineConnection } from "../../engine/testUtils";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineClient } from "../../engine/client";
 import { NotificationsPage, type NotificationsPageClients } from "./NotificationsPage";
@@ -24,12 +25,9 @@ function clients(overrides: Partial<NotificationsPageClients> = {}): Notificatio
 describe("NotificationsPage", () => {
   it("stays fail-closed when the engine is not ready", async () => {
     const list = vi.fn(async () => clients().list());
-    render(
-      <NotificationsPage
-        engineClient={engine("unavailable")}
-        notificationsClient={clients({ list })}
-      />,
-    );
+    renderWithEngineConnection(<NotificationsPage
+notificationsClient={clients({ list })}
+      />, engine("unavailable"));
     expect(
       await screen.findByRole("heading", { level: 1, name: "Notifications" }),
     ).toBeInTheDocument();
@@ -40,9 +38,8 @@ describe("NotificationsPage", () => {
   });
 
   it("lists pause alerts when the engine is ready", async () => {
-    render(
-      <NotificationsPage engineClient={engine("ready")} notificationsClient={clients()} />,
-    );
+    renderWithEngineConnection(<NotificationsPage
+notificationsClient={clients()} />, engine("ready"));
     expect(await screen.findByText("Index degraded")).toBeInTheDocument();
     expect(screen.getByText(/corrupt cache/i)).toBeInTheDocument();
   });

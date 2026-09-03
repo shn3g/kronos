@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { renderWithEngineConnection } from "../../../engine/testUtils";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineClient } from "../../../engine/client";
@@ -36,9 +37,8 @@ function telegramClient(overrides: Partial<TelegramClient> = {}): TelegramClient
 describe("TelegramPage", () => {
   it("stays fail-closed when the engine is not ready", async () => {
     const status = vi.fn(async () => telegramClient().status());
-    render(
-      <TelegramPage engineClient={engine("unavailable")} telegramClient={telegramClient({ status })} />,
-    );
+    renderWithEngineConnection(<TelegramPage
+telegramClient={telegramClient({ status })} />, engine("unavailable"));
 
     expect(await screen.findByRole("heading", { name: "Telegram" })).toBeInTheDocument();
     expect(
@@ -58,12 +58,9 @@ describe("TelegramPage", () => {
       allowedUserIds: [4242],
       allowedChatIds: [9001],
     }));
-    render(
-      <TelegramPage
-        engineClient={engine("ready")}
-        telegramClient={telegramClient({ saveAllowlist, importBotToken, status })}
-      />,
-    );
+    renderWithEngineConnection(<TelegramPage
+telegramClient={telegramClient({ saveAllowlist, importBotToken, status })}
+      />, engine("ready"));
 
     expect(await screen.findByRole("heading", { name: "Telegram" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /botfather/i })).toHaveAttribute(
@@ -93,12 +90,9 @@ describe("TelegramPage", () => {
   it("saves negative group chat ids on PUT allowlist and keeps user ids positive", async () => {
     const user = userEvent.setup();
     const saveAllowlist = vi.fn(async () => ({ tokenPresent: true }));
-    render(
-      <TelegramPage
-        engineClient={engine("ready")}
-        telegramClient={telegramClient({ saveAllowlist })}
-      />,
-    );
+    renderWithEngineConnection(<TelegramPage
+telegramClient={telegramClient({ saveAllowlist })}
+      />, engine("ready"));
 
     expect(await screen.findByRole("heading", { name: "Telegram" })).toBeInTheDocument();
     await user.type(screen.getByLabelText(/allowed user ids/i), "4242, -7");

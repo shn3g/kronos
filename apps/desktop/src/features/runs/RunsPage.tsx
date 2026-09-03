@@ -1,46 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useEffect, useState } from "react";
-import type { EngineClient } from "../../engine/client";
+import { useEngineConnection } from "../../engine/EngineConnectionProvider";
 import { createProductionRunsClient, type RunRecord, type RunsClient } from "./client";
 
 export type { RunsClient } from "./client";
 
 interface RunsPageProps {
-  engineClient: EngineClient;
-  /** When the parent already knows the engine is ready, skip the waiting flash on mount. */
-  engineReady?: boolean;
   runsClient?: RunsClient;
   goalId?: string;
 }
 
 const productionRuns = createProductionRunsClient();
 
-export function RunsPage({ engineClient, engineReady = false, runsClient, goalId }: RunsPageProps) {
+export function RunsPage({ runsClient, goalId }: RunsPageProps) {
   const client = runsClient ?? productionRuns;
-  const [ready, setReady] = useState(engineReady);
+  const { engineReady: ready } = useEngineConnection();
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (engineReady) {
-      setReady(true);
-    }
-    let cancelled = false;
-    const apply = () => {
-      void engineClient.getState().then((state) => {
-        if (!cancelled) {
-          setReady(state.status === "ready");
-        }
-      });
-    };
-    apply();
-    const interval = window.setInterval(apply, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [engineClient, engineReady]);
 
   useEffect(() => {
     if (!ready) {

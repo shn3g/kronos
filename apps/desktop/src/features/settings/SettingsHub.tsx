@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import type { EngineClient } from "../../engine/client";
 import { GitHubPage } from "../connections/github/GitHubPage";
 import { TelegramPage } from "../connections/telegram/TelegramPage";
 import { IndexPage } from "../index/IndexPage";
@@ -13,7 +12,6 @@ import { SETTINGS_SECTIONS, type SettingsSection } from "../../shell/routes";
 import { SettingsPage, type SettingsPageClients } from "./SettingsPage";
 
 interface SettingsHubProps {
-  engineClient: EngineClient;
   section: SettingsSection;
   onSection: (section: SettingsSection) => void;
   modelsClient?: ModelsClient;
@@ -21,7 +19,6 @@ interface SettingsHubProps {
 }
 
 export function SettingsHub({
-  engineClient,
   section,
   onSection,
   modelsClient,
@@ -45,25 +42,22 @@ export function SettingsHub({
       </nav>
       <div className="settings-hub__panel">
         {section === "general" ? (
-          <SettingsPage
-            engineClient={engineClient}
-            {...(settingsClient ? { settingsClient } : {})}
-          />
+          <SettingsPage {...(settingsClient ? { settingsClient } : {})} />
         ) : null}
         {section === "models" ? (
-          <ModelsPage engineClient={engineClient} {...(modelsClient ? { modelsClient } : {})} />
+          <ModelsPage {...(modelsClient ? { modelsClient } : {})} />
         ) : null}
-        {section === "index" ? <IndexPage engineClient={engineClient} /> : null}
+        {section === "index" ? <IndexPage /> : null}
         {section === "connections" ? (
           <>
-            <GitHubPage engineClient={engineClient} />
-            <TelegramPage engineClient={engineClient} />
+            <GitHubPage />
+            <TelegramPage />
           </>
         ) : null}
-        {section === "skills" ? <SkillsPage engineClient={engineClient} /> : null}
-        {section === "memory" ? <MemoryPage engineClient={engineClient} /> : null}
-        {section === "updates" ? <UpdatesPage engineClient={engineClient} /> : null}
-        {section === "notifications" ? <NotificationsPage engineClient={engineClient} /> : null}
+        {section === "skills" ? <SkillsPage /> : null}
+        {section === "memory" ? <MemoryPage /> : null}
+        {section === "updates" ? <UpdatesPage /> : null}
+        {section === "notifications" ? <NotificationsPage /> : null}
       </div>
     </div>
   );

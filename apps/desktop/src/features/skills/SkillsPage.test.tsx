@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { renderWithEngineConnection } from "../../engine/testUtils";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineClient } from "../../engine/client";
@@ -64,9 +65,8 @@ function skillsClient(overrides: Partial<SkillsClient> = {}): SkillsClient {
 describe("SkillsPage", () => {
   it("stays fail-closed when the engine is not ready", async () => {
     const list = vi.fn(async () => [quarantined]);
-    render(
-      <SkillsPage engineClient={engine("unavailable")} skillsClient={skillsClient({ list })} />,
-    );
+    renderWithEngineConnection(<SkillsPage
+skillsClient={skillsClient({ list })} />, engine("unavailable"));
 
     expect(await screen.findByRole("heading", { level: 1, name: "Skills" })).toBeInTheDocument();
     expect(
@@ -79,12 +79,9 @@ describe("SkillsPage", () => {
   it("shows quarantine status and can approve an evaluated skill", async () => {
     const user = userEvent.setup();
     const approve = vi.fn(async () => ({ ...quarantined, status: "approved" }));
-    render(
-      <SkillsPage
-        engineClient={engine("ready")}
-        skillsClient={skillsClient({ approve })}
-      />,
-    );
+    renderWithEngineConnection(<SkillsPage
+skillsClient={skillsClient({ approve })}
+      />, engine("ready"));
 
     expect(await screen.findByText("useful-tdd")).toBeInTheDocument();
     expect(screen.getByText(/^quarantined/)).toBeInTheDocument();
@@ -98,12 +95,9 @@ describe("SkillsPage", () => {
   });
 
   it("keeps Activate disabled for a malicious quarantined pack", async () => {
-    render(
-      <SkillsPage
-        engineClient={engine("ready")}
-        skillsClient={skillsClient({ list: async () => [malicious] })}
-      />,
-    );
+    renderWithEngineConnection(<SkillsPage
+skillsClient={skillsClient({ list: async () => [malicious] })}
+      />, engine("ready"));
 
     expect(await screen.findByText("malicious-exfil")).toBeInTheDocument();
     expect(screen.getByText(/Findings: secrets/i)).toBeInTheDocument();

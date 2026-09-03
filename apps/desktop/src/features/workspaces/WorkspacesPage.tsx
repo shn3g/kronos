@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useEffect, useState } from "react";
-import type { EngineClient } from "../../engine/client";
+import { useEngineConnection } from "../../engine/EngineConnectionProvider";
 import {
   createProductionRepositoriesClient,
   pickRepositoryFolder,
@@ -15,40 +15,21 @@ export type { RepositoriesClient } from "./client";
 const productionRepos = createProductionRepositoriesClient();
 
 interface WorkspacesPageProps {
-  engineClient: EngineClient;
   repositoriesClient?: RepositoriesClient;
   pickFolder?: () => Promise<string | null>;
 }
 
 export function WorkspacesPage({
-  engineClient,
   repositoriesClient,
   pickFolder,
 }: WorkspacesPageProps) {
+  const { engineReady: ready } = useEngineConnection();
   const client = repositoriesClient ?? productionRepos;
-  const [ready, setReady] = useState(false);
-  const [repositories, setRepositories] = useState<EnrolledRepository[]>([]);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [folderPath, setFolderPath] = useState("");
   const [inspection, setInspection] = useState<InspectResult | null>(null);
+  const [repositories, setRepositories] = useState<EnrolledRepository[]>([]);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const apply = () => {
-      void engineClient.getState().then((state) => {
-        if (!cancelled) {
-          setReady(state.status === "ready");
-        }
-      });
-    };
-    apply();
-    const interval = window.setInterval(apply, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [engineClient]);
 
   useEffect(() => {
     if (!ready) {
