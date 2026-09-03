@@ -10,6 +10,7 @@ from tests.retrieval.support import write_local_embedding_fixtures
 from tests.support.secrets import InMemorySecretStore
 
 from kronos_engine.adapters.embeddings.local import DOCUMENT_MODEL_ID, LocalEmbeddingAdapter
+from kronos_engine.adapters.secrets.os_store import SecretStoreError
 from kronos_engine.application.embeddings import resolve_embedder
 from kronos_engine.application.model_profiles import ModelProfileService, ProviderDraft
 from kronos_engine.domain.models import MODEL_ROLES, ResourceLimits
@@ -116,6 +117,33 @@ def test_malformed_assigned_embedding_url_does_not_raise(tmp_path: Path) -> None
     assert resolved.backend.kind == "none"
     assert available is False
     assert vectors is None
+
+
+def test_resolver_falls_back_to_local_onnx_when_secret_store_unavailable(
+    tmp_path: Path,
+) -> None:
+    service, _secrets, models_dir = _service(tmp_path)
+    write_local_embedding_fixtures(models_dir)
+    service.register_provider(
+        ProviderDraft(
+            kind="openai_compatible",
+            display_name="Remote embed",
+            base_url="https://api.openai.com/v1",
+            billed=True,
+            api_key="sk-embed",
+        )
+    )
+    profiles = {item.role: item for item in service.list_profiles()}
+    service.assign({role: profiles[role].id for role in MODEL_ROLES})
+
+    class _UnavailableSecretStore:
+        def get(self, name: str) -> str | None:
+            _ = name
+            raise SecretStoreError("refusing plaintext file or missing OS credential keyring backend")
+
+    resolved = resolve_embedder(service._registry, _UnavailableSecretStore(), models_dir)
+    assert resolved.backend.kind in {"onnx", "none"}
+    assert resolved.backend.kind != "openai_compatible"
 
 
 def test_billed_assigned_embedder_with_zero_ceiling_does_not_post(tmp_path: Path) -> None:

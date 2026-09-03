@@ -42,7 +42,10 @@ async function invokeSidecar(
     }
   }
   try {
-    const { invoke } = await import("@tauri-apps/api/core");
+    const { invoke, isTauri } = await import("@tauri-apps/api/core");
+    if (!isTauri()) {
+      return null;
+    }
     return await invoke<EngineJsonResponse>("engine_json", { method, path, body: body ?? null });
   } catch {
     return null;

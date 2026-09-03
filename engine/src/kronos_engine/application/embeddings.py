@@ -10,6 +10,7 @@ from pathlib import Path
 from kronos_engine.adapters.embeddings.local import CODE_MODEL_ID, LocalEmbeddingAdapter
 from kronos_engine.adapters.embeddings.openai_compatible import OpenAICompatibleEmbeddingAdapter
 from kronos_engine.adapters.models.openai_compatible import HttpTransport
+from kronos_engine.adapters.secrets.os_store import SecretStoreError
 from kronos_engine.application.embedding_install import (
     default_catalog,
     local_adapter_for,
@@ -100,7 +101,10 @@ def _from_assignment(
     provider = providers.get(profile.provider_id)
     if provider is None or not provider.base_url:
         return None
-    raw = secrets.get(provider.secret_ref)
+    try:
+        raw = secrets.get(provider.secret_ref) if provider.secret_ref else None
+    except SecretStoreError:
+        return None
     secret = ScopedSecret(value=raw, ttl_seconds=_SECRET_TTL_SECONDS) if raw else None
     adapter = OpenAICompatibleEmbeddingAdapter(
         base_url=provider.base_url,

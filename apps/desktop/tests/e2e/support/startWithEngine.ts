@@ -93,6 +93,7 @@ async function main(): Promise<void> {
   const engineEnv = {
     ...process.env,
     ...sharedPath,
+    PYTHONPATH: [join(engineRoot, "src"), process.env.PYTHONPATH].filter(Boolean).join(":"),
     KRONOS_DATA_HOME: join(home, "data"),
     KRONOS_CONFIG_HOME: join(home, "config"),
     KRONOS_CACHE_HOME: join(home, "cache"),
