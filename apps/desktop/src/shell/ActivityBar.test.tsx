@@ -31,4 +31,11 @@ describe("ActivityBar", () => {
     await user.click(screen.getByRole("button", { name: /^files$/i }));
     expect(onSelect).toHaveBeenCalledWith("files");
   });
+
+  it("does not promote Index as a primary activity", () => {
+    render(<ActivityBar active="chat" onSelect={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: /index/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^settings$/i })).toBeInTheDocument();
+  });
 });

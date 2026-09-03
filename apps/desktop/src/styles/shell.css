@@ -822,6 +822,22 @@
   padding: 4px 8px;
   font-size: 12px;
 }
+
+.title-bar__index-status {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.title-bar__folder-error {
+  margin: 0;
+  max-width: 24rem;
+  overflow: hidden;
+  color: #f08a8a;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .inspector {
   display: flex;
   min-width: 0;
@@ -1975,7 +1991,24 @@ button.chat-composer__model:focus-visible {
 
 
 .workspaces__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 28px;
+}
+
+.workspaces__empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.workspaces__error {
+  margin: 12px 0 0;
+  color: #f08a8a;
+  font-size: 13px;
 }
 
 .workspaces__empty,

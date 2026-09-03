@@ -47,6 +47,7 @@ import { CheckingModelGate, EngineGate } from "./EngineGate";
 import { EmbeddingsGate } from "./EmbeddingsGate";
 import { InspectorDrawer, type InspectorTab } from "./InspectorDrawer";
 import { MenuBar } from "./MenuBar";
+import { openRepositoryFolder } from "./openFolder";
 import { hashFromRoute, routeFromHash, type SettingsSection, type ShellRoute } from "./routes";
 import { shellShortcutFromKeyboard } from "./shellShortcut";
 import { useSessionContext } from "./useSessionContext";
@@ -153,6 +154,7 @@ function AppShell({
   const [committing, setCommitting] = useState(false);
   const committingRef = useRef(false);
   const [notificationCount, setNotificationCount] = useState(0);
+  const [folderError, setFolderError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!engineReady) {
@@ -322,6 +324,31 @@ function AppShell({
 
   function toggleTerminal(): void {
     setTerminalOpen((open) => !open);
+  }
+
+  async function handleOpenFolder(): Promise<void> {
+    setFolderError(null);
+    try {
+      const result = await openRepositoryFolder(repos, {
+        repositories: session.repositories,
+      });
+      if (!result) {
+        return;
+      }
+      session.setWorkspaceId(result.repository.id);
+      await session.refresh();
+      setWorkspaceStepDone(true);
+      go({ activity: "files" });
+    } catch (error) {
+      setFolderError(error instanceof Error ? error.message : "Could not open that folder.");
+    }
+  }
+
+  function onFolderOpened(repository: { id: string }): void {
+    session.setWorkspaceId(repository.id);
+    void session.refresh();
+    setWorkspaceStepDone(true);
+    go({ activity: "files" });
   }
 
   useEffect(() => {
@@ -514,8 +541,7 @@ function AppShell({
         <main id="main" tabIndex={-1}>
           <WorkspaceGate
             onOpenWorkspace={() => {
-              setWorkspaceStepDone(true);
-              go({ activity: "workspaces" });
+              void handleOpenFolder();
             }}
             onSkip={() => {
               setWorkspaceStepDone(true);
@@ -545,8 +571,8 @@ function AppShell({
         inspectorCollapsed={inspectorCollapsed}
         terminalOpen={terminalOpen}
         onNewChat={startNewChat}
-        onOpenWorkspace={() => {
-          go({ activity: "workspaces" });
+        onOpenFolder={() => {
+          void handleOpenFolder();
         }}
         onGoToFile={() => {
           setGoToFileOpen(true);
@@ -598,11 +624,17 @@ function AppShell({
             <WorkspaceSwitcher
               repositories={session.repositories}
               workspaceId={session.workspaceId}
+              indexReady={session.indexReady}
               onChange={session.setWorkspaceId}
               onOpenFolder={() => {
-                go({ activity: "workspaces" });
+                void handleOpenFolder();
               }}
             />
+            {folderError ? (
+              <p className="title-bar__folder-error" role="alert">
+                {folderError}
+              </p>
+            ) : null}
             <EngineStatus state={engineState} />
           </header>
           <div
@@ -621,7 +653,7 @@ function AppShell({
                   indexClient={index}
                   modelsClient={models}
                   onOpenWorkspace={() => {
-                    go({ activity: "workspaces" });
+                    void handleOpenFolder();
                   }}
                   onOpenModels={() => {
                     go({ activity: "settings", settingsSection: "models" });
@@ -645,7 +677,7 @@ function AppShell({
                   repositoriesClient={repos}
                   indexClient={index}
                   onOpenWorkspace={() => {
-                    go({ activity: "workspaces" });
+                    void handleOpenFolder();
                   }}
                   onAskInChat={(path, selection) => {
                     setMentionRequest((current) => ({
@@ -678,6 +710,7 @@ function AppShell({
                   <WorkspacesPage
                     repositoriesClient={repos}
                     pickFolder={pickRepositoryFolder}
+                    onFolderOpened={onFolderOpened}
                   />
                 </div>
               ) : null}
@@ -729,7 +762,7 @@ function AppShell({
               repositoryId={workspaceId}
               repositoriesClient={repos}
               onOpenWorkspace={() => {
-                go({ activity: "workspaces" });
+                void handleOpenFolder();
               }}
             />
           </section>
@@ -743,7 +776,7 @@ function AppShell({
           setGoToFileOpen(false);
         }}
         onOpenWorkspace={() => {
-          go({ activity: "workspaces" });
+          void handleOpenFolder();
         }}
         onSelect={revealWorkspaceFile}
       />

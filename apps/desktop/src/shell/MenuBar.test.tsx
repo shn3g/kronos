@@ -16,7 +16,7 @@ function renderMenuBar() {
       inspectorCollapsed={false}
       terminalOpen={false}
       onNewChat={noop}
-      onOpenWorkspace={noop}
+      onOpenFolder={noop}
       onGoToFile={noop}
       onFindInFile={noop}
       onFindInFiles={noop}

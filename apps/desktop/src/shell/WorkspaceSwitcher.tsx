@@ -5,6 +5,7 @@ import type { EnrolledRepository } from "../features/workspaces/client";
 interface WorkspaceSwitcherProps {
   repositories: EnrolledRepository[];
   workspaceId: string | null;
+  indexReady?: boolean;
   onChange: (id: string | null) => void;
   onOpenFolder: () => void;
 }
@@ -12,6 +13,7 @@ interface WorkspaceSwitcherProps {
 export function WorkspaceSwitcher({
   repositories,
   workspaceId,
+  indexReady = false,
   onChange,
   onOpenFolder,
 }: WorkspaceSwitcherProps) {
@@ -39,6 +41,11 @@ export function WorkspaceSwitcher({
       <button type="button" className="btn-quiet" onClick={onOpenFolder}>
         Open folder
       </button>
+      {workspaceId ? (
+        <span className="title-bar__index-status" aria-live="polite">
+          {indexReady ? "Indexed" : "Indexing…"}
+        </span>
+      ) : null}
     </div>
   );
 }

@@ -6,6 +6,7 @@ import {
   billedFromBaseUrl,
   localOpenAiProviderDraft,
   MODEL_URL_PRESETS,
+  parseModelSetupLine,
   pickLocalOpenAiEndpoint,
 } from "./connectModel";
 
@@ -100,5 +101,31 @@ describe("assignmentsFromCreatedProfiles", () => {
 
   it("returns null when the provider created no profiles", () => {
     expect(assignmentsFromCreatedProfiles([])).toBeNull();
+  });
+});
+
+describe("parseModelSetupLine", () => {
+  it("parses OpenAI with model and key", () => {
+    const draft = parseModelSetupLine("openai gpt-4o key sk-test1234567890");
+    expect(draft).toEqual({
+      kind: "openai_compatible",
+      displayName: "OpenAI",
+      baseUrl: "https://api.openai.com/v1",
+      billed: true,
+      apiKey: "sk-test1234567890",
+      modelId: "gpt-4o",
+    });
+  });
+
+  it("parses Ollama without a key", () => {
+    const draft = parseModelSetupLine("use ollama llama3");
+    expect(draft?.displayName).toBe("Ollama");
+    expect(draft?.baseUrl).toContain("11434");
+    expect(draft?.apiKey).toBeNull();
+    expect(draft?.modelId).toBe("llama3");
+  });
+
+  it("returns null for empty noise", () => {
+    expect(parseModelSetupLine("hello")).toBeNull();
   });
 });

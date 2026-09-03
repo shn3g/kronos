@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Background workers (index watcher, goal ticker, telegram) run under a `ComponentSupervisor` with restart-on-death; doctor lists `background:*` checks.
+- File → **Open Folder** enrols or selects a git workspace without the old Enable Kronos ceremony; title bar shows Indexing… / Indexed.
+- Connect-a-model accepts a chat-like one-liner (`openai gpt-4o-mini key sk-…`) plus the existing form.
+
+### Changed
+
 - Workspaces primary action is **Add workspace** with copy that matches indexing, chat, and Goals (not "proposes reviewable files only").
 - Engine status and gate copy talk about Kronos starting/stopping, not an exposed "engine" server metaphor.
 

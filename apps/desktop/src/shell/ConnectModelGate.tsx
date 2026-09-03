@@ -10,6 +10,7 @@ import {
   hostedApiNeedsKey,
   localOpenAiProviderDraft,
   MODEL_URL_PRESETS,
+  parseModelSetupLine,
   pickLocalOpenAiEndpoint,
 } from "./connectModel";
 
@@ -23,6 +24,7 @@ export function ConnectModelGate({ modelsClient, onConnected }: ConnectModelGate
   const [baseUrl, setBaseUrl] = useState("http://127.0.0.1:11434/v1");
   const [apiKey, setApiKey] = useState("");
   const [modelId, setModelId] = useState("");
+  const [quickLine, setQuickLine] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [detected, setDetected] = useState<DetectedTool[] | null>(null);
@@ -80,9 +82,44 @@ export function ConnectModelGate({ modelsClient, onConnected }: ConnectModelGate
       <p className="gate__step">Step 1 of 3 · Connect a model</p>
       <h1 className="gate__title">Connect a model</h1>
       <p className="gate__body">
-        Kronos needs one model before it can chat. The key is stored by the operating system, not
-        in this window.
+        Kronos needs one model before it can chat. Type a one-liner like{" "}
+        <code>openai gpt-4o-mini key sk-…</code>, use a preset, or fill the form. The key is stored
+        by the operating system, not in this window.
       </p>
+      <form
+        className="gate__form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const draft = parseModelSetupLine(quickLine);
+          if (!draft) {
+            setError("Could not parse that. Try: openai gpt-4o-mini key sk-…");
+            return;
+          }
+          if (hostedApiNeedsKey(draft.baseUrl ?? "", draft.apiKey ?? "")) {
+            setError("A hosted API needs a key.");
+            return;
+          }
+          void registerProvider(draft);
+        }}
+      >
+        <label className="wizard__label" htmlFor="model-quick">
+          Quick setup
+          <input
+            id="model-quick"
+            className="wizard__input"
+            value={quickLine}
+            placeholder="openai gpt-4o-mini key sk-…"
+            disabled={busy}
+            onChange={(event) => {
+              setQuickLine(event.target.value);
+              setError(null);
+            }}
+          />
+        </label>
+        <button type="submit" className="btn-primary" disabled={busy || !quickLine.trim()}>
+          Connect from line
+        </button>
+      </form>
       {detected === null ? (
         <p className="gate__hint">Looking for a local model server.</p>
       ) : null}

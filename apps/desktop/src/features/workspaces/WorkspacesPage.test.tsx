@@ -147,7 +147,7 @@ repositoriesClient={client}
       />, engine("ready"));
 
     expect(await screen.findByText("alpha")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /add workspace/i }));
+    await user.click(screen.getByRole("button", { name: /^add workspace$/i }));
     await user.click(screen.getByRole("button", { name: /choose folder/i }));
     expect(await screen.findByText(".kronos/config.yaml")).toBeInTheDocument();
     expect(screen.getByText(/preview only/i)).toBeInTheDocument();
@@ -162,7 +162,57 @@ repositoriesClient={client}
     expect(await screen.findByText(/disabled/i)).toBeInTheDocument();
   });
 
-  it("shows Add workspace when the engine becomes ready without remounting", async () => {
+  it("opens a folder from the empty state", async () => {
+    const user = userEvent.setup();
+    const enrolled = {
+      id: "repo_alpha",
+      displayName: "alpha",
+      realpath: "C:/tmp/alpha",
+      origin: null,
+      status: "active" as const,
+    };
+    const onFolderOpened = vi.fn();
+    const client: RepositoriesClient = {
+      ...repos(),
+      enrol: async () => enrolled,
+    };
+
+    renderWithEngineConnection(
+      <WorkspacesPage
+        repositoriesClient={client}
+        pickFolder={async () => "C:/tmp/alpha"}
+        onFolderOpened={onFolderOpened}
+      />,
+      engine("ready"),
+    );
+
+    await user.click(await screen.findByRole("button", { name: /^open a folder$/i }));
+    expect(onFolderOpened).toHaveBeenCalledWith(enrolled);
+    expect(await screen.findByText("alpha")).toBeInTheDocument();
+  });
+
+  it("shows structured errors when opening a folder fails", async () => {
+    const user = userEvent.setup();
+    const client: RepositoriesClient = {
+      ...repos(),
+      enrol: async () => {
+        throw new Error("not a git repository");
+      },
+    };
+
+    renderWithEngineConnection(
+      <WorkspacesPage
+        repositoriesClient={client}
+        pickFolder={async () => "C:/tmp/plain"}
+      />,
+      engine("ready"),
+    );
+
+    await user.click(await screen.findByRole("button", { name: /^open a folder$/i }));
+    expect(await screen.findByText("not a git repository")).toBeInTheDocument();
+  });
+
+  it("shows Open a folder when the engine becomes ready without remounting", async () => {
     vi.useFakeTimers();
     try {
       let status: EngineConnectionState = { status: "unavailable" };
@@ -175,13 +225,13 @@ repositoriesClient={repos()} />, engineClient);
         await Promise.resolve();
       });
       expect(screen.getByText(/waiting for the engine/i)).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /add workspace/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /open a folder/i })).not.toBeInTheDocument();
 
       status = { status: "ready", version: "0.1.0" };
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1500);
       });
-      expect(screen.getByRole("button", { name: /add workspace/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^open a folder$/i })).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -255,7 +305,7 @@ repositoriesClient={repos()} />, engineClient);
     renderWithEngineConnection(<WorkspacesPage
 repositoriesClient={client} />, engine("ready"));
 
-    await user.click(await screen.findByRole("button", { name: /add workspace/i }));
+    await user.click(await screen.findByRole("button", { name: /^add workspace$/i }));
     await user.type(screen.getByLabelText(/repository folder/i), "C:/tmp/typed");
     await user.click(screen.getByRole("button", { name: /preview/i }));
     expect(await screen.findByText(".kronos/config.yaml")).toBeInTheDocument();
