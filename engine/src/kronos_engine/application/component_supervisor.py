@@ -138,7 +138,9 @@ class ComponentSupervisor:
                 try:
                     component.start()
                 except Exception:
-                    continue
+                    # Count failed starts toward the restart budget so a broken
+                    # starter cannot spin forever without tripping max_restarts.
+                    pass
                 component.restarts += 1
                 component.last_restart = now
 
