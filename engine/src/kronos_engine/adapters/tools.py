@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from kronos_engine.adapters.executors.claude_code import detect_claude_code_cli
 from kronos_engine.adapters.executors.cursor import detect_cursor_cli
 from kronos_engine.adapters.executors.opencode import detect_opencode_cli
 from kronos_engine.adapters.models.openai_compatible import detect_openai_compatible_endpoints
@@ -18,6 +19,9 @@ class DefaultToolDetector:
         opencode = detect_opencode_cli()
         if opencode is not None:
             found.append(DetectedTool(kind="opencode_cli", label=opencode.name, present=True))
+        claude = detect_claude_code_cli()
+        if claude is not None:
+            found.append(DetectedTool(kind="claude_code_cli", label=claude.name, present=True))
         for endpoint in detect_openai_compatible_endpoints():
             found.append(
                 DetectedTool(kind="openai_compatible", label=endpoint.base_url, present=True)

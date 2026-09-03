@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from kronos_engine.adapters.executors.claude_code import detect_claude_code_cli
 from kronos_engine.adapters.executors.cursor import detect_cursor_cli
 from kronos_engine.adapters.executors.opencode import detect_opencode_cli
 from kronos_engine.adapters.models.openai_compatible import detect_openai_compatible_endpoints
@@ -83,6 +84,26 @@ def test_default_detector_reports_opencode_on_path(
     monkeypatch.setenv("PATH", str(bin_dir))
     kinds = {item.kind for item in DefaultToolDetector().detect()}
     assert "opencode_cli" in kinds
+
+
+def test_default_detector_reports_claude_code_on_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    binary = bin_dir / ("claude.exe" if os.name == "nt" else "claude")
+    binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    if os.name != "nt":
+        binary.chmod(0o755)
+    monkeypatch.chdir(cwd)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    kinds = {item.kind for item in DefaultToolDetector().detect()}
+    assert "claude_code_cli" in kinds
+    found = detect_claude_code_cli()
+    assert found is not None
+    assert found.name == "claude"
 
 
 def test_openai_compatible_probe_does_not_execute_repository_code(tmp_path: Path) -> None:
