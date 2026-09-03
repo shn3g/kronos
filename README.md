@@ -6,9 +6,9 @@ Windows, macOS, and Linux. Licensed under the [GNU Affero General Public License
 
 ## Install
 
-Download a Windows NSIS installer, Linux `.deb` or AppImage, or macOS `.app` from a [GitHub Release](https://github.com/shn3g/kronos/releases) (`v0.5.1` is the current preview). Or build with `pnpm tauri build`.
+Download a Windows NSIS installer, Linux `.deb` or AppImage, or macOS `.app` from a [GitHub Release](https://github.com/shn3g/kronos/releases) (`v0.6.0` is the current preview). Or build with `pnpm tauri build`.
 
-**If you are on 0.5.0:** that build cannot self-update (empty updater pubkey). Download and install `v0.5.1` or newer manually once; later updates can use Settings → Updates.
+**If you are on 0.5.0:** that build cannot self-update (empty updater pubkey). Download and install `v0.6.0` or newer manually once; later updates can use Settings → Updates.
 Signing is not present. Windows SmartScreen and macOS Gatekeeper will warn. That is the OS. Use "Run anyway" or right-click Open for the unsigned path.
 
 Installers bundle the local engine. You do not need Python on PATH to run them. Download, run Kronos, and connect a model (presets or any OpenAI-compatible URL; API key optional for local endpoints).

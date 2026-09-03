@@ -7,32 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-03
+
+Recovery direction: stable local engine, quieter shell, Open Folder workspaces, and goals that prove done.
+
+### Added
+
+- `ComponentSupervisor` restarts index / goals / telegram workers; doctor reports `background:*` checks.
+- Goal completion evidence gate (`GoalJudge` + `verification:gates-passed`); refuse silent COMPLETED.
+- Chat tool-call repeat guard (successful calls only) to stop identical tool loops.
+- Claude Code / Cursor / OpenCode detection as swappable goal executors.
+- Chaos coverage for component restart and mid-stream chat recovery.
+- Engine API route coverage matrix (happy-path per route group).
+
 ### Fixed
 
-- Chat tool-call repeat guard records fingerprints only after a successful tool result, so failed calls can be retried.
-- Goal completion evidence no longer treats “path exists in the worktree” as proof of done; require verification artifacts or a passing exit-code signal.
 - Local span tracing no longer rewrites `spans.jsonl` on every HTTP request (append-only, size-capped, off by default for request spans), which was thrashing disks while the app sat idle.
 - Engine log files rotate (`RotatingFileHandler` on `engine.log`). The Tauri sidecar captures child stdout/stderr to a separate `engine-sidecar.log` so rotation is not defeated by dual writers on one inode.
 - Desktop uses one shared engine connection poll (`EngineConnectionProvider`) instead of per-page 1.5s `getState` intervals; polling slows when the window is hidden.
 - Desktop respawns the local engine after a crash with backoff instead of staying permanently unavailable until a full app relaunch.
 - Workspace inspect/enrol errors surface the engine's detail (for example "not a git repository") instead of a generic failure string.
+- Chat tool-call repeat guard records fingerprints only after a successful tool result, so failed calls can be retried.
+- Goal completion evidence no longer treats “path exists in the worktree” as proof of done.
 
 ### Changed
 
-- Background workers (index watcher, goal ticker, telegram) run under a `ComponentSupervisor` with restart-on-death; doctor lists `background:*` checks.
 - File → **Open Folder** enrols or selects a git workspace without the old Enable Kronos ceremony; title bar shows Indexing… / Indexed.
 - Connect-a-model accepts a chat-like one-liner (`openai gpt-4o-mini key sk-…`) plus the existing form.
 - Chat `configure_model` is guidance-only (points to Settings / Connect a model); it does not register providers or assign roles. Tool argument redaction covers alternate secret field names.
 - Desktop CSS: chat and workspaces styles live in feature packages; shell.css keeps chrome only.
-
-### Changed
-
-- Workspaces primary action is **Add workspace** with copy that matches indexing, chat, and Goals (not "proposes reviewable files only").
+- Workspaces primary action is **Add workspace** with copy that matches indexing, chat, and Goals.
 - Engine status and gate copy talk about Kronos starting/stopping, not an exposed "engine" server metaphor.
+- Chat empty hero and first-run gates get a clearer brand/spacing pass.
 
 ### Notes
 
-- **0.5.0 cannot self-update to 0.5.1.** Builds shipped with an empty updater pubkey, so Check for updates stayed disabled. Install 0.5.1 (or newer) manually from GitHub Releases once, then in-app updates work.
+- **0.5.0 cannot self-update.** Install `v0.5.1` or newer manually once; from there in-app updates work when the publisher pubkey is configured.
+- CI and Security run on ready-for-review PRs; full installer builds run from `release.yml` on `v*` tags.
 
 ## [0.5.1] - 2026-09-03
 
@@ -138,7 +149,8 @@ Developed as 0.1.1–0.1.6 on this branch; tagged together as 0.2.0.
 
 First public desktop preview (`v0.1.0`). Enrol a git folder, leave freeze and observe/shadow until you want writes, unsigned Windows/Linux/macOS installers.
 
-[unreleased]: https://github.com/shn3g/kronos/compare/v0.5.1...HEAD
+[unreleased]: https://github.com/shn3g/kronos/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/shn3g/kronos/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/shn3g/kronos/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/shn3g/kronos/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/shn3g/kronos/compare/v0.3.0...v0.4.0
