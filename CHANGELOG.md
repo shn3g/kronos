@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Background workers (index watcher, goal ticker, telegram) run under a `ComponentSupervisor` with restart-on-death; doctor lists `background:*` checks.
 - File → **Open Folder** enrols or selects a git workspace without the old Enable Kronos ceremony; title bar shows Indexing… / Indexed.
 - Connect-a-model accepts a chat-like one-liner (`openai gpt-4o-mini key sk-…`) plus the existing form.
-- Chat can configure providers/models via the `configure_model` tool (API keys stay in the secret store; confirm before replacing an orchestrator).
+- Chat `configure_model` is guidance-only (points to Settings / Connect a model); it does not register providers or assign roles. Tool argument redaction covers alternate secret field names.
 - Desktop CSS: chat and workspaces styles live in feature packages; shell.css keeps chrome only.
 
 ### Changed

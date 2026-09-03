@@ -34,12 +34,12 @@ from kronos_engine.application.chat_tools import (
     ToolCall,
     ToolParseError,
     parse_tool_call,
+    redact_secrets_in_text,
     redact_tool_arguments,
 )
 from kronos_engine.application.chat_workspace_instructions import workspace_instruction_text
 from kronos_engine.application.goal_readiness import GoalReadiness, evaluate_goal_readiness
 from kronos_engine.application.goals import GoalService
-from kronos_engine.application.model_profiles import ModelProfileService, ProviderDraft
 from kronos_engine.application.planning import PlanningService
 from kronos_engine.application.repositories import RepositoryNotFound, RepositoryService
 from kronos_engine.application.safety import evaluate_repository_safety
@@ -55,7 +55,6 @@ from kronos_engine.application.workspace_writes import (
 from kronos_engine.domain.entities import EnrolledRepository, EventId, RepositoryId
 from kronos_engine.domain.goals import GoalRecord, GoalSource, GoalSpec
 from kronos_engine.domain.models import (
-    MODEL_ROLES,
     CostCeilingExceeded,
     ModelProfile,
     assert_cost_allowed,
@@ -99,10 +98,9 @@ When you need a tool, emit only a fenced JSON block:
 
 Tools: search_index (query), list_files (glob), read_file (path), write_file (path, content),
 run_command (command), search_memory (query), create_goal (title, success_criteria),
-list_goals, configure_model (provider, display_name, base_url, model, api_key, billed, roles).
-configure_model registers a provider and assigns the requested roles. roles is an optional JSON
-array of orchestrator, planner, coder, reviewer, and embedding. Always include confirm_replace:
-true before changing an existing orchestrator assignment. Never repeat an API key after using it.
+list_goals, configure_model (never mutates — tell the user to use Settings or Connect a model).
+configure_model does not register providers or assign roles from chat. Never ask for or
+repeat an API key in chat; model setup happens only through Settings / Connect a model.
 Stay inside the current workspace. Do not claim you edited files unless write_file succeeded.
 When you show a file in a fenced block, put the path on the fence line, like ts src/app.ts.
 run_command runs in the workspace folder. Prefer tests and local tools. Do not push.
@@ -847,50 +845,13 @@ class ChatService:
         return "unknown tool"
 
     def _configure_model(self, arguments: dict[str, object]) -> str:
-        kind = _tool_string(arguments, "provider") or _tool_string(arguments, "kind")
-        model_id = _tool_string(arguments, "model") or _tool_string(arguments, "model_id")
-        if kind == "" or model_id == "":
-            return "configure_model needs provider and model."
-        roles = _model_roles(arguments.get("roles"))
-        service = ModelProfileService(self._registry, self._secrets)
-        current = service.assignments().as_dict()
-        replaces_orchestrator = (
-            "orchestrator" in roles and current["orchestrator"] is not None
-        )
-        if replaces_orchestrator and not _tool_bool(arguments.get("confirm_replace")):
-            return (
-                "An orchestrator is already assigned. Confirm replacement by rerunning "
-                "configure_model with confirm_replace: true."
-            )
-        provider = service.register_provider(
-            ProviderDraft(
-                kind=kind,
-                display_name=_tool_string(arguments, "display_name") or kind,
-                base_url=_tool_optional_string(arguments, "base_url"),
-                billed=_tool_bool(arguments.get("billed")),
-                api_key=_tool_optional_string(arguments, "api_key"),
-                model_id=model_id,
-            )
-        )
-        profiles = {
-            profile.role: profile.id
-            for profile in service.list_profiles()
-            if profile.provider_id == provider.id
-        }
-        next_assignments = dict(current)
-        for role in MODEL_ROLES:
-            if role in roles or next_assignments[role] is None:
-                next_assignments[role] = profiles[role]
-        service.assign({role: next_assignments[role] or "" for role in MODEL_ROLES})
-        changed = [role for role in MODEL_ROLES if next_assignments[role] != current[role]]
-        detail = (
-            " Replaced existing model assignments for: " + ", ".join(changed) + "."
-            if changed
-            else ""
-        )
+        # Chat must not register providers or assign roles: prompt injection could
+        # redirect completions (and secrets) to an attacker-controlled base_url.
+        # Setup stays in Settings / Connect a model (authenticated HTTP APIs).
+        _ = arguments
         return (
-            f"Configured {provider.display_name} with model {model_id}. "
-            f"Assigned roles: {', '.join(roles)}.{detail}"
+            "Chat cannot configure or replace models. "
+            "Use Settings → Models, or the Connect a model gate on first run."
         )
 
     def _search_index(self, repository_id: str, query: str) -> str:
@@ -1251,39 +1212,8 @@ def _tool_string(arguments: Mapping[str, object], key: str) -> str:
     return value if isinstance(value, str) else str(value)
 
 
-def _tool_optional_string(arguments: Mapping[str, object], key: str) -> str | None:
-    value = _tool_string(arguments, key).strip()
-    return value or None
-
-
-def _tool_bool(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    return isinstance(value, str) and value.casefold() in {"1", "true", "yes"}
-
-
-def _model_roles(value: object) -> tuple[str, ...]:
-    if value is None:
-        return MODEL_ROLES
-    if isinstance(value, str):
-        requested = [item.strip() for item in value.split(",") if item.strip()]
-    elif isinstance(value, list) and all(isinstance(item, str) for item in value):
-        requested = [item.strip() for item in value if item.strip()]
-    else:
-        raise ValueError("roles must be a JSON array of model role names")
-    unknown = sorted(set(requested) - set(MODEL_ROLES))
-    if unknown:
-        raise ValueError(f"unknown roles: {', '.join(unknown)}")
-    if not requested:
-        raise ValueError("at least one role is required")
-    return tuple(role for role in MODEL_ROLES if role in requested)
-
-
 def _redact_tool_text(text: str, arguments: Mapping[str, object]) -> str:
-    api_key = arguments.get("api_key")
-    if isinstance(api_key, str) and api_key:
-        return text.replace(api_key, "[REDACTED]")
-    return text
+    return redact_secrets_in_text(text, dict(arguments))
 
 
 def _glob_matches(path: str, pattern: str) -> bool:

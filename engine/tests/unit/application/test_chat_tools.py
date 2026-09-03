@@ -70,3 +70,28 @@ def test_parse_tool_call_preserves_configure_model_roles() -> None:
     assert call.name == "configure_model"
     assert call.arguments["provider"] == "openai_compatible"
     assert call.arguments["roles"] == ["orchestrator", "coder"]
+
+
+def test_redact_tool_arguments_covers_alternate_secret_keys() -> None:
+    from kronos_engine.application.chat_tools import (
+        redact_secrets_in_text,
+        redact_tool_arguments,
+    )
+
+    redacted = redact_tool_arguments(
+        {
+            "name": "configure_model",
+            "key": "sk-secret-value",
+            "token": "bearer-token-value",
+            "model": "gpt",
+            "note": "uses sk-embedded-in-note-xx",
+        }
+    )
+    assert redacted["key"] == "[REDACTED]"
+    assert redacted["token"] == "[REDACTED]"
+    assert redacted["note"] == "[REDACTED]"
+    assert redacted["model"] == "gpt"
+    assert (
+        redact_secrets_in_text("failed with sk-secret-value", {"key": "sk-secret-value"})
+        == "failed with [REDACTED]"
+    )

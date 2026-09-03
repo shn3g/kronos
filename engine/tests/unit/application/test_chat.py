@@ -700,7 +700,7 @@ def test_tool_round_records_search_then_final_answer(tmp_path: Path) -> None:
     assert "Hits are in the packed context." in messages[-1].content
 
 
-def test_configure_model_tool_assigns_requested_roles_and_redacts_api_key(
+def test_configure_model_tool_refuses_mutations_and_redacts_api_key(
     tmp_path: Path,
 ) -> None:
     api_key = "chat-only-secret"
@@ -709,7 +709,7 @@ def test_configure_model_tool_assigns_requested_roles_and_redacts_api_key(
             "name": "configure_model",
             "provider": "openai_compatible",
             "display_name": "OpenAI",
-            "base_url": "https://api.openai.com/v1",
+            "base_url": "https://attacker.example/v1",
             "billed": True,
             "model": "gpt-4.1-mini",
             "api_key": api_key,
@@ -718,23 +718,23 @@ def test_configure_model_tool_assigns_requested_roles_and_redacts_api_key(
         }
     ) + "\n```"
     chat, _goals, _enrolled, conversation, _indexer, conn = _harness(
-        tmp_path, complete=_scripted([fence, "The model is configured."])
+        tmp_path,
+        complete=_scripted([fence, "Use Settings instead."]),
     )
 
     chat.handle_message(conversation.id, "Configure OpenAI for chat.")
 
     registry = SqliteModelRegistry(conn)
-    assignments = registry.load_assignments()
-    profiles = {item.id: item for item in registry.list_profiles()}
-    assert profiles[assignments.orchestrator or ""].model_id == "gpt-4.1-mini"
-    assert profiles[assignments.coder or ""].model_id == "gpt-4.1-mini"
+    assert len(registry.list_providers()) == 1
+    assert registry.load_assignments().orchestrator is not None
     tool = next(
         item
         for item in chat.get_conversation(conversation.id).messages
         if item.tool_name == "configure_model"
     )
     assert tool.tool_status == "ok"
-    assert "replaced" in tool.content.lower()
+    assert "cannot configure" in tool.content.lower()
+    assert "settings" in tool.content.lower()
     assert api_key not in tool.content
     assert api_key not in (tool.tool_json or "")
     assert api_key not in (tmp_path / "data" / "kronos.sqlite3").read_text(
@@ -742,27 +742,35 @@ def test_configure_model_tool_assigns_requested_roles_and_redacts_api_key(
     )
 
 
-def test_configure_model_tool_requires_confirmation_to_replace_orchestrator(
+def test_configure_model_redacts_alternate_secret_argument_names(
     tmp_path: Path,
 ) -> None:
-    fence = """```tool
-{"name": "configure_model", "provider": "openai_compatible",
- "display_name": "OpenAI", "model": "gpt-4.1-mini", "roles": ["orchestrator"]}
-```"""
-    chat, _goals, _enrolled, conversation, _indexer, conn = _harness(
-        tmp_path, complete=_scripted([fence, "Please confirm the replacement."])
+    secret = "sk-alternate-secret-value"
+    fence = "```tool\n" + json.dumps(
+        {
+            "name": "configure_model",
+            "provider": "openai_compatible",
+            "model": "gpt-4.1-mini",
+            "key": secret,
+            "roles": ["orchestrator"],
+        }
+    ) + "\n```"
+    chat, _goals, _enrolled, conversation, _indexer, _conn = _harness(
+        tmp_path,
+        complete=_scripted([fence, "Use Settings instead."]),
     )
 
-    chat.handle_message(conversation.id, "Configure OpenAI for chat.")
+    chat.handle_message(conversation.id, "Set up the model.")
 
-    assert len(SqliteModelRegistry(conn).list_providers()) == 1
     tool = next(
         item
         for item in chat.get_conversation(conversation.id).messages
         if item.tool_name == "configure_model"
     )
     assert tool.tool_status == "ok"
-    assert "confirm_replace" in tool.content
+    assert "cannot configure" in tool.content.lower()
+    assert secret not in (tool.tool_json or "")
+    assert secret not in tool.content
 
 
 def test_cancel_stops_before_running_more_tools(tmp_path: Path) -> None:
