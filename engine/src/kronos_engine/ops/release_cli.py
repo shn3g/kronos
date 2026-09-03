@@ -28,8 +28,8 @@ def main(argv: list[str] | None = None) -> int:
     write_sbom(
         artifacts / "sbom.cdx.json",
         packages=(
-            {"name": "kronos-engine", "version": "0.5.0", "license": "AGPL-3.0-or-later"},
-            {"name": "@kronos/desktop", "version": "0.5.0", "license": "AGPL-3.0-or-later"},
+            {"name": "kronos-engine", "version": "0.5.1", "license": "AGPL-3.0-or-later"},
+            {"name": "@kronos/desktop", "version": "0.5.1", "license": "AGPL-3.0-or-later"},
         ),
     )
     write_provenance(artifacts / "provenance.json", git_sha=args.git_sha, builder=args.builder)

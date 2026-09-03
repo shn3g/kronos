@@ -1,6 +1,6 @@
 [project]
 name = "kronos-engine"
-version = "0.5.0"
+version = "0.5.1"
 description = "Kronos local control-plane engine: loopback API, SQLite state, and sidecar lifecycle."
 readme = "README.md"
 requires-python = ">=3.11"
