@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useEngineConnection } from "../../engine/EngineConnectionProvider";
+import "../workspaces/workspaces.css";
 import {
   createProductionSettingsClient,
   type OpsSettingsView,
