@@ -62,7 +62,7 @@ test("connects a mock model, enrols a folder, chats, and uses Files and Terminal
     has: page.locator(".workspace-card__meta", { hasText: repo }),
   });
   if ((await repoCard.count()) === 0) {
-    await page.getByRole("button", { name: "Enable Kronos" }).click();
+    await page.getByRole("button", { name: "Add workspace" }).click();
     await page.locator("#repo-folder").fill(repo);
     await expect(page.locator("#repo-folder")).toHaveValue(repo);
     await page.getByRole("button", { name: "Preview" }).click();

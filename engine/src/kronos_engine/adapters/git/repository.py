@@ -53,10 +53,18 @@ class FilesystemGitInspector:
 def inspect_git(path: Path) -> GitSnapshot:
     start = path.expanduser()
     if not start.exists():
-        raise GitError("path does not exist")
-    root = Path(
-        _git(start, "rev-parse", "--show-toplevel").strip()
-    ).resolve()
+        raise GitError("That folder does not exist.")
+    try:
+        root = Path(
+            _git(start, "rev-parse", "--show-toplevel").strip()
+        ).resolve()
+    except GitError as error:
+        message = str(error).strip() or "not a git repository"
+        if "not a git" in message.lower() or "not a git repository" in message.lower():
+            raise GitError(
+                "That folder is not a git repository. Open a folder that contains a .git directory."
+            ) from error
+        raise GitError(f"Could not read that git folder: {message}") from error
     origin = _optional_git(root, "remote", "get-url", "origin")
     current = _git(root, "branch", "--show-current").strip() or "main"
     default = _default_branch(root) or current

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Local span tracing no longer rewrites `spans.jsonl` on every HTTP request (append-only, size-capped, off by default for request spans), which was thrashing disks while the app sat idle.
+- Engine log files rotate (`RotatingFileHandler`) instead of growing without bound.
+- Desktop respawns the local engine after a crash with backoff instead of staying permanently unavailable until a full app relaunch.
+- Workspace inspect/enrol errors surface the engine's detail (for example "not a git repository") instead of a generic failure string.
+
+### Changed
+
+- Workspaces primary action is **Add workspace** with copy that matches indexing, chat, and Goals (not "proposes reviewable files only").
+- Engine status and gate copy talk about Kronos starting/stopping, not an exposed "engine" server metaphor.
+
+### Notes
+
+- **0.5.0 cannot self-update to 0.5.1.** Builds shipped with an empty updater pubkey, so Check for updates stayed disabled. Install 0.5.1 (or newer) manually from GitHub Releases once, then in-app updates work.
+
 ## [0.5.1] - 2026-09-03
 
 First-run gates, reliable chat replies, and headless-safe local model secrets.

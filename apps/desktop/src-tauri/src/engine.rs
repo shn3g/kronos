@@ -51,6 +51,7 @@ struct EngineInner {
     child: Option<Child>,
     connection: Option<EngineConnection>,
     ui_state: EngineUiState,
+    shutdown: bool,
 }
 
 #[derive(Clone)]
@@ -64,6 +65,7 @@ impl EngineSupervisor {
             child: None,
             connection: None,
             ui_state: EngineUiState::Starting,
+            shutdown: false,
         }));
         let supervisor = Self {
             inner: Arc::clone(&inner),
@@ -106,6 +108,7 @@ impl EngineSupervisor {
 impl Drop for EngineSupervisor {
     fn drop(&mut self) {
         if let Ok(mut inner) = self.inner.lock() {
+            inner.shutdown = true;
             if let Some(child) = inner.child.as_mut() {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -1070,39 +1073,93 @@ fn engine_path_allowed(method: &str, path: &str) -> bool {
 }
 
 fn run_sidecar(app: AppHandle, inner: Arc<Mutex<EngineInner>>) {
-    match spawn_engine(&app) {
-        Ok((child, connection)) => {
-            if let Ok(mut guard) = inner.lock() {
-                guard.child = Some(child);
-                guard.connection = Some(connection);
-            }
-            monitor_child(inner);
+    let mut attempt: u32 = 0;
+    loop {
+        if shutdown_requested(&inner) {
+            break;
         }
-        Err(error) => {
-            eprintln!("Kronos engine sidecar did not start: {error}");
-            if let Ok(mut guard) = inner.lock() {
-                guard.ui_state = EngineUiState::Unavailable;
+        if let Ok(mut guard) = inner.lock() {
+            guard.ui_state = EngineUiState::Starting;
+        }
+        match spawn_engine(&app) {
+            Ok((child, connection)) => {
+                attempt = 0;
+                if let Ok(mut guard) = inner.lock() {
+                    guard.child = Some(child);
+                    guard.connection = Some(connection);
+                }
+                let should_respawn = monitor_child(Arc::clone(&inner));
+                if !should_respawn || shutdown_requested(&inner) {
+                    break;
+                }
+                attempt = attempt.saturating_add(1);
+                if let Ok(mut guard) = inner.lock() {
+                    guard.ui_state = EngineUiState::Unavailable;
+                }
+                sleep_backoff(attempt, &inner);
+            }
+            Err(error) => {
+                eprintln!("Kronos engine sidecar did not start: {error}");
+                attempt = attempt.saturating_add(1);
+                if let Ok(mut guard) = inner.lock() {
+                    guard.ui_state = EngineUiState::Unavailable;
+                }
+                if shutdown_requested(&inner) {
+                    break;
+                }
+                sleep_backoff(attempt, &inner);
             }
         }
     }
 }
 
-fn monitor_child(inner: Arc<Mutex<EngineInner>>) {
+fn shutdown_requested(inner: &Arc<Mutex<EngineInner>>) -> bool {
+    inner
+        .lock()
+        .map(|guard| guard.shutdown)
+        .unwrap_or(true)
+}
+
+fn sleep_backoff(attempt: u32, inner: &Arc<Mutex<EngineInner>>) {
+    let secs = engine_restart_backoff_secs(attempt);
+    let deadline = Instant::now() + Duration::from_secs(secs);
+    while Instant::now() < deadline {
+        if shutdown_requested(inner) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+}
+
+fn engine_restart_backoff_secs(attempt: u32) -> u64 {
+    match attempt {
+        0 | 1 => 1,
+        2 => 3,
+        3 => 5,
+        _ => 10,
+    }
+}
+
+/// Watch the child until it exits. Returns true when the supervisor should respawn.
+fn monitor_child(inner: Arc<Mutex<EngineInner>>) -> bool {
     loop {
         thread::sleep(Duration::from_millis(250));
         let mut guard = match inner.lock() {
             Ok(guard) => guard,
-            Err(_) => break,
+            Err(_) => return false,
         };
+        if guard.shutdown {
+            return false;
+        }
         let Some(child) = guard.child.as_mut() else {
-            break;
+            return !guard.shutdown;
         };
         match child.try_wait() {
             Ok(Some(_)) | Err(_) => {
                 guard.child = None;
                 guard.connection = None;
                 guard.ui_state = EngineUiState::Unavailable;
-                break;
+                return !guard.shutdown;
             }
             Ok(None) => {}
         }
@@ -1618,8 +1675,17 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::engine_path_allowed;
+    use super::{engine_path_allowed, engine_restart_backoff_secs};
     use std::path::PathBuf;
+
+    #[test]
+    fn restart_backoff_grows_then_caps() {
+        assert_eq!(engine_restart_backoff_secs(1), 1);
+        assert_eq!(engine_restart_backoff_secs(2), 3);
+        assert_eq!(engine_restart_backoff_secs(3), 5);
+        assert_eq!(engine_restart_backoff_secs(4), 10);
+        assert_eq!(engine_restart_backoff_secs(99), 10);
+    }
 
     #[test]
     fn allowlist_includes_models_and_repositories() {

@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from kronos_engine.observability.redaction import redact_text
 
 _LOGGER_NAME = "kronos"
+_DEFAULT_MAX_BYTES = 5_000_000
+_DEFAULT_BACKUP_COUNT = 5
 
 
 class RedactingFilter(logging.Filter):
@@ -28,13 +31,23 @@ class RedactingFilter(logging.Filter):
         return True
 
 
-def configure_logging(log_dir: Path) -> None:
+def configure_logging(
+    log_dir: Path,
+    *,
+    max_bytes: int = _DEFAULT_MAX_BYTES,
+    backup_count: int = _DEFAULT_BACKUP_COUNT,
+) -> None:
     log_dir.mkdir(parents=True, exist_ok=True)
     path = log_dir / "engine.log"
     logger = logging.getLogger(_LOGGER_NAME)
     logger.setLevel(logging.INFO)
     logger.handlers.clear()
-    handler = logging.FileHandler(path, encoding="utf-8")
+    handler = RotatingFileHandler(
+        path,
+        maxBytes=max(1024, max_bytes),
+        backupCount=max(1, backup_count),
+        encoding="utf-8",
+    )
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     handler.addFilter(RedactingFilter())
     logger.addHandler(handler)

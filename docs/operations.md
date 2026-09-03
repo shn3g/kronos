@@ -37,7 +37,9 @@ Do not mass-delete those fallbacks in the same change that enables Kronos policy
 
 See `docs/architecture/engine.md` and `deploy/`. Doctor backup excludes the OS secret store. Restore fails closed on missing or corrupt archives. Unsigned releases still ship checksums, SBOM, and provenance. Claiming a signed release without `release.sig` fails closed.
 
-Windows NSIS installers use per-user (`currentUser`) install mode so in-app updates can upgrade the existing install without elevation. Linux updater bundles use the signed AppImage artifact; the `.deb` remains the manual download for package-manager installs. In-app updates stay fail-closed until `plugins.updater.pubkey` in `tauri.conf.json` (and the matching `UPDATER_PUBKEY` constant) is replaced with the publisher public key and GitHub Actions secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` are set. Do not leave a public key whose private half is missing: `pnpm tauri build` then fails on every CI desktop job. End users never generate minisign keys.
+Windows NSIS installers use per-user (`currentUser`) install mode so in-app updates can upgrade the existing install without elevation. Linux updater bundles use the signed AppImage artifact; the `.deb` remains the manual download for package-manager installs. **v0.5.0 cannot self-update** because it shipped with an empty publisher pubkey; operators must install `v0.5.1` or newer from GitHub Releases once. From 0.5.1 onward, in-app updates verify `latest.json` with the publisher minisign public key. Do not leave a public key whose private half is missing: `pnpm tauri build` then fails on every CI desktop job. End users never generate minisign keys.
+
+CI and Security workflows run when a pull request is marked **ready for review** (draft PRs do not burn Actions minutes). Merging to `main` does not re-run those jobs. Full installer builds run from `release.yml` on `v*` tags.
 
 Local embeddings install only on explicit click from Settings → Models, using pinned URLs and SHA-256 verification (see `docs/security/threat-model.md`).
 
