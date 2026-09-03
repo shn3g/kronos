@@ -7,11 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-03
+
+First-run gates, reliable chat replies, and headless-safe local model secrets.
+
 ### Fixed
 
 - Chat no longer treats empty streams as success; engine errors show in the UI; Retry sits under the last reply instead of floating after every turn.
 - Tauri no longer emits a silent empty `done` when the SSE connection closes early.
 - Connect a model marks hosted presets as billed and gives billed providers a non-zero cost ceiling so chat is not blocked with a 409.
+- Local (unbilled) models and repo inspect no longer fail when the OS credential store is missing (headless CI and some Linux installs).
 
 ### Changed
 
@@ -106,7 +111,8 @@ Developed as 0.1.1–0.1.6 on this branch; tagged together as 0.2.0.
 
 First public desktop preview (`v0.1.0`). Enrol a git folder, leave freeze and observe/shadow until you want writes, unsigned Windows/Linux/macOS installers.
 
-[unreleased]: https://github.com/shn3g/kronos/compare/v0.5.0...HEAD
+[unreleased]: https://github.com/shn3g/kronos/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/shn3g/kronos/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/shn3g/kronos/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/shn3g/kronos/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/shn3g/kronos/compare/v0.2.0...v0.3.0
