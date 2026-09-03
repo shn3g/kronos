@@ -30,10 +30,16 @@ from kronos_engine.application.chat_images import (
     user_message_content_parts,
 )
 from kronos_engine.application.chat_mentions import mentioned_workspace_paths
-from kronos_engine.application.chat_tools import ToolCall, ToolParseError, parse_tool_call
+from kronos_engine.application.chat_tools import (
+    ToolCall,
+    ToolParseError,
+    parse_tool_call,
+    redact_tool_arguments,
+)
 from kronos_engine.application.chat_workspace_instructions import workspace_instruction_text
 from kronos_engine.application.goal_readiness import GoalReadiness, evaluate_goal_readiness
 from kronos_engine.application.goals import GoalService
+from kronos_engine.application.model_profiles import ModelProfileService, ProviderDraft
 from kronos_engine.application.planning import PlanningService
 from kronos_engine.application.repositories import RepositoryNotFound, RepositoryService
 from kronos_engine.application.safety import evaluate_repository_safety
@@ -48,7 +54,12 @@ from kronos_engine.application.workspace_writes import (
 )
 from kronos_engine.domain.entities import EnrolledRepository, EventId, RepositoryId
 from kronos_engine.domain.goals import GoalRecord, GoalSource, GoalSpec
-from kronos_engine.domain.models import CostCeilingExceeded, ModelProfile, assert_cost_allowed
+from kronos_engine.domain.models import (
+    MODEL_ROLES,
+    CostCeilingExceeded,
+    ModelProfile,
+    assert_cost_allowed,
+)
 from kronos_engine.indexing.context import ContextPack, assemble_context, estimate_tokens
 from kronos_engine.memory.procedural import retrieve_records
 from kronos_engine.memory.records import MemoryRecord
@@ -88,7 +99,10 @@ When you need a tool, emit only a fenced JSON block:
 
 Tools: search_index (query), list_files (glob), read_file (path), write_file (path, content),
 run_command (command), search_memory (query), create_goal (title, success_criteria),
-list_goals.
+list_goals, configure_model (provider, display_name, base_url, model, api_key, billed, roles).
+configure_model registers a provider and assigns the requested roles. roles is an optional JSON
+array of orchestrator, planner, coder, reviewer, and embedding. Always include confirm_replace:
+true before changing an existing orchestrator assignment. Never repeat an API key after using it.
 Stay inside the current workspace. Do not claim you edited files unless write_file succeeded.
 When you show a file in a fenced block, put the path on the fence line, like ts src/app.ts.
 run_command runs in the workspace folder. Prefer tests and local tools. Do not push.
@@ -134,7 +148,7 @@ class ToolEvent:
     id: str
     name: str
     status: str
-    args: dict[str, str] | None = None
+    args: dict[str, object] | None = None
     summary: str | None = None
     output: str | None = None
 
@@ -377,7 +391,7 @@ class ChatService:
                     id=tool_id,
                     name=call.name,
                     status="running",
-                    args=dict(call.arguments),
+                    args=redact_tool_arguments(call.arguments),
                 )
                 result, summary, ok = self._execute_tool(call, conversation, cancel)
                 clipped = _clip(result, TOOL_OUTPUT_CLIP)
@@ -389,7 +403,7 @@ class ChatService:
                     tool_status="ok" if ok else "error",
                     tool_json=json.dumps(
                         {
-                            "args": call.arguments,
+                            "args": redact_tool_arguments(call.arguments),
                             "summary": summary,
                             "output": clipped,
                         }
@@ -799,7 +813,7 @@ class ChatService:
             summary = _tool_summary(call.name, result)
             return result, summary, True
         except Exception as error:  # noqa: BLE001 — tool errors stay in the thread
-            text = str(error)
+            text = _redact_tool_text(str(error), call.arguments)
             return text, text, False
 
     def _run_tool(
@@ -808,27 +822,76 @@ class ChatService:
         if call.name == "list_goals":
             return self._list_goals()
         if call.name == "search_memory":
-            return self._search_memory(call.arguments.get("query", ""))
+            return self._search_memory(_tool_string(call.arguments, "query"))
+        if call.name == "configure_model":
+            return self._configure_model(call.arguments)
         repo_id = conversation.repository_id
         if repo_id is None or repo_id == "":
             return NO_WORKSPACE
         if call.name == "search_index":
-            return self._search_index(repo_id, call.arguments.get("query", ""))
+            return self._search_index(repo_id, _tool_string(call.arguments, "query"))
         if call.name == "list_files":
-            return self._list_files(repo_id, call.arguments.get("glob", ""))
+            return self._list_files(repo_id, _tool_string(call.arguments, "glob"))
         if call.name == "read_file":
-            return self._read_file(repo_id, call.arguments.get("path", ""))
+            return self._read_file(repo_id, _tool_string(call.arguments, "path"))
         if call.name == "write_file":
             return self._write_file(
                 repo_id,
-                call.arguments.get("path", ""),
-                call.arguments.get("content", ""),
+                _tool_string(call.arguments, "path"),
+                _tool_string(call.arguments, "content"),
             )
         if call.name == "run_command":
-            return self._run_command(repo_id, call.arguments.get("command", ""), cancel)
+            return self._run_command(repo_id, _tool_string(call.arguments, "command"), cancel)
         if call.name == "create_goal":
             return self._create_goal(repo_id, call.arguments)
         return "unknown tool"
+
+    def _configure_model(self, arguments: dict[str, object]) -> str:
+        kind = _tool_string(arguments, "provider") or _tool_string(arguments, "kind")
+        model_id = _tool_string(arguments, "model") or _tool_string(arguments, "model_id")
+        if kind == "" or model_id == "":
+            return "configure_model needs provider and model."
+        roles = _model_roles(arguments.get("roles"))
+        service = ModelProfileService(self._registry, self._secrets)
+        current = service.assignments().as_dict()
+        replaces_orchestrator = (
+            "orchestrator" in roles and current["orchestrator"] is not None
+        )
+        if replaces_orchestrator and not _tool_bool(arguments.get("confirm_replace")):
+            return (
+                "An orchestrator is already assigned. Confirm replacement by rerunning "
+                "configure_model with confirm_replace: true."
+            )
+        provider = service.register_provider(
+            ProviderDraft(
+                kind=kind,
+                display_name=_tool_string(arguments, "display_name") or kind,
+                base_url=_tool_optional_string(arguments, "base_url"),
+                billed=_tool_bool(arguments.get("billed")),
+                api_key=_tool_optional_string(arguments, "api_key"),
+                model_id=model_id,
+            )
+        )
+        profiles = {
+            profile.role: profile.id
+            for profile in service.list_profiles()
+            if profile.provider_id == provider.id
+        }
+        next_assignments = dict(current)
+        for role in MODEL_ROLES:
+            if role in roles or next_assignments[role] is None:
+                next_assignments[role] = profiles[role]
+        service.assign({role: next_assignments[role] or "" for role in MODEL_ROLES})
+        changed = [role for role in MODEL_ROLES if next_assignments[role] != current[role]]
+        detail = (
+            " Replaced existing model assignments for: " + ", ".join(changed) + "."
+            if changed
+            else ""
+        )
+        return (
+            f"Configured {provider.display_name} with model {model_id}. "
+            f"Assigned roles: {', '.join(roles)}.{detail}"
+        )
 
     def _search_index(self, repository_id: str, query: str) -> str:
         pack = self._indexer.search(repository_id, query)
@@ -1179,6 +1242,48 @@ def _clip(text: str, limit: int) -> str:
 def _tool_summary(name: str, result: str) -> str:
     first = result.strip().splitlines()[0] if result.strip() else name
     return first[:240]
+
+
+def _tool_string(arguments: Mapping[str, object], key: str) -> str:
+    value = arguments.get(key)
+    if value is None:
+        return ""
+    return value if isinstance(value, str) else str(value)
+
+
+def _tool_optional_string(arguments: Mapping[str, object], key: str) -> str | None:
+    value = _tool_string(arguments, key).strip()
+    return value or None
+
+
+def _tool_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return isinstance(value, str) and value.casefold() in {"1", "true", "yes"}
+
+
+def _model_roles(value: object) -> tuple[str, ...]:
+    if value is None:
+        return MODEL_ROLES
+    if isinstance(value, str):
+        requested = [item.strip() for item in value.split(",") if item.strip()]
+    elif isinstance(value, list) and all(isinstance(item, str) for item in value):
+        requested = [item.strip() for item in value if item.strip()]
+    else:
+        raise ValueError("roles must be a JSON array of model role names")
+    unknown = sorted(set(requested) - set(MODEL_ROLES))
+    if unknown:
+        raise ValueError(f"unknown roles: {', '.join(unknown)}")
+    if not requested:
+        raise ValueError("at least one role is required")
+    return tuple(role for role in MODEL_ROLES if role in requested)
+
+
+def _redact_tool_text(text: str, arguments: Mapping[str, object]) -> str:
+    api_key = arguments.get("api_key")
+    if isinstance(api_key, str) and api_key:
+        return text.replace(api_key, "[REDACTED]")
+    return text
 
 
 def _glob_matches(path: str, pattern: str) -> bool:

@@ -57,3 +57,16 @@ def test_parse_tool_call_allows_list_files() -> None:
     bare = parse_tool_call('```tool\n{"name": "list_files"}\n```')
     assert bare is not None
     assert bare.name == "list_files"
+
+
+def test_parse_tool_call_preserves_configure_model_roles() -> None:
+    call = parse_tool_call(
+        """```tool
+{"name": "configure_model", "provider": "openai_compatible",
+ "model": "gpt-4.1-mini", "roles": ["orchestrator", "coder"]}
+```"""
+    )
+    assert call is not None
+    assert call.name == "configure_model"
+    assert call.arguments["provider"] == "openai_compatible"
+    assert call.arguments["roles"] == ["orchestrator", "coder"]

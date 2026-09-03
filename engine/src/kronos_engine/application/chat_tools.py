@@ -16,6 +16,7 @@ ALLOWED_TOOLS = frozenset(
         "list_files",
         "read_file",
         "write_file",
+        "configure_model",
         "create_goal",
         "list_goals",
         "search_memory",
@@ -27,7 +28,7 @@ ALLOWED_TOOLS = frozenset(
 @dataclass(frozen=True, slots=True)
 class ToolCall:
     name: str
-    arguments: dict[str, str]
+    arguments: dict[str, object]
 
 
 class ToolParseError(ValueError):
@@ -47,16 +48,21 @@ def parse_tool_call(text: str) -> ToolCall | None:
     name = payload.get("name")
     if not isinstance(name, str) or name not in ALLOWED_TOOLS:
         raise ToolParseError("unknown tool")
-    arguments: dict[str, str] = {}
+    arguments: dict[str, object] = {}
     for key, value in payload.items():
         if key == "name":
             continue
-        if isinstance(value, str):
-            arguments[key] = value
-        elif value is not None:
-            arguments[key] = str(value)
+        arguments[key] = value
     return ToolCall(name=name, arguments=arguments)
 
 
 def strip_tool_fence(text: str) -> str:
     return TOOL_FENCE.sub("", text).strip()
+
+
+def redact_tool_arguments(arguments: dict[str, object]) -> dict[str, object]:
+    """Return tool arguments safe to retain in conversation history."""
+    return {
+        key: "[REDACTED]" if key.casefold() in {"api_key", "apikey"} else value
+        for key, value in arguments.items()
+    }
