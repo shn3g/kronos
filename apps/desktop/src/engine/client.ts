@@ -37,6 +37,26 @@ export function createProductionEngineClient(
   };
 }
 
+/**
+ * Tail of the sidecar and engine log files, for the "stopped unexpectedly" gate.
+ * Resolves to null in the browser preview or when no log text is available.
+ */
+export async function engineCrashLog(): Promise<string | null> {
+  try {
+    const { invoke, isTauri } = await import("@tauri-apps/api/core");
+    if (!isTauri()) {
+      return null;
+    }
+    const text = await invoke<string | null>("engine_crash_log");
+    if (typeof text !== "string" || text.trim() === "") {
+      return null;
+    }
+    return text;
+  } catch {
+    return null;
+  }
+}
+
 async function readStateFromSidecar(): Promise<EngineConnectionState | null> {
   try {
     const { invoke, isTauri } = await import("@tauri-apps/api/core");

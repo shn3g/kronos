@@ -6,7 +6,7 @@
 use serde::Serialize;
 use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Seek, SeekFrom, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -27,6 +27,8 @@ const TERMINAL_RUN_TIMEOUT: Duration = Duration::from_secs(90);
 const STREAM_READ_POLL: Duration = Duration::from_millis(200);
 const STREAM_MAX_IDLE: Duration = Duration::from_secs(300);
 const ENGINE_STREAM_EVENT: &str = "engine-stream";
+const CRASH_LOG_LINES: usize = 40;
+const CRASH_LOG_TAIL_BYTES: u64 = 64 * 1024;
 
 #[derive(Clone, Serialize)]
 #[serde(tag = "status", rename_all = "camelCase")]
@@ -811,6 +813,48 @@ pub async fn pick_repository_folder(app: AppHandle) -> Option<String> {
         .map(|path| path.simplified().to_string())
 }
 
+/// Tail of the sidecar and engine logs so the gate can show why Kronos stopped.
+/// Returns an empty string when neither log file has any content.
+#[tauri::command]
+pub fn engine_crash_log(app: AppHandle) -> Result<String, String> {
+    let paths = EngineDirs::resolve(&app)?;
+    let token = read_token(&paths.config.join("install.json"));
+    Ok(read_crash_log(&paths.logs, token.as_deref()))
+}
+
+fn read_crash_log(logs: &Path, token: Option<&str>) -> String {
+    let mut out = String::new();
+    for name in ["engine-sidecar.log", "engine.log"] {
+        let Some(text) = tail_text(&logs.join(name), CRASH_LOG_TAIL_BYTES) else {
+            continue;
+        };
+        let lines: Vec<&str> = text.lines().collect();
+        if lines.is_empty() {
+            continue;
+        }
+        let start = lines.len().saturating_sub(CRASH_LOG_LINES);
+        out.push_str(&format!("== {name} ==\n"));
+        out.push_str(&lines[start..].join("\n"));
+        out.push('\n');
+    }
+    // The WebView must never see the install bearer token, even via a log dump.
+    match token {
+        Some(token) if !token.is_empty() => out.replace(token, "[redacted]"),
+        _ => out,
+    }
+}
+
+fn tail_text(path: &Path, max_bytes: u64) -> Option<String> {
+    let mut file = File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    if len > max_bytes {
+        file.seek(SeekFrom::Start(len - max_bytes)).ok()?;
+    }
+    let mut raw = Vec::new();
+    file.read_to_end(&mut raw).ok()?;
+    Some(String::from_utf8_lossy(&raw).into_owned())
+}
+
 #[tauri::command]
 pub fn import_telegram_bot_token(
     app: AppHandle,
@@ -1378,15 +1422,19 @@ fn python_executable() -> &'static str {
     }
 }
 
+fn read_token(path: &Path) -> Option<String> {
+    let raw = fs::read_to_string(path).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
+    let token = value.get("auth_token")?.as_str()?;
+    if token.is_empty() {
+        return None;
+    }
+    Some(token.to_string())
+}
+
 fn load_or_create_token(path: &Path) -> Result<String, String> {
-    if let Ok(raw) = fs::read_to_string(path) {
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) {
-            if let Some(token) = value.get("auth_token").and_then(|item| item.as_str()) {
-                if !token.is_empty() {
-                    return Ok(token.to_string());
-                }
-            }
-        }
+    if let Some(token) = read_token(path) {
+        return Ok(token);
     }
     let token = generate_token()?;
     if let Some(parent) = path.parent() {
@@ -2086,6 +2134,59 @@ mod tests {
             resolved.1,
             vec!["-m".to_string(), "kronos_engine".to_string()]
         );
+    }
+
+    #[test]
+    fn crash_log_tails_sidecar_then_engine_log() {
+        let temp = tempfile::tempdir().unwrap();
+        let sidecar: String = (1..=50).map(|n| format!("sidecar {n}\n")).collect();
+        std::fs::write(temp.path().join("engine-sidecar.log"), sidecar).unwrap();
+        std::fs::write(temp.path().join("engine.log"), "engine 1\nengine 2\n").unwrap();
+
+        let out = super::read_crash_log(temp.path(), None);
+
+        assert!(
+            out.starts_with("== engine-sidecar.log ==\nsidecar 11\n"),
+            "{out}"
+        );
+        assert!(!out.contains("sidecar 10\n"));
+        assert!(
+            out.ends_with("sidecar 50\n== engine.log ==\nengine 1\nengine 2\n"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn crash_log_is_empty_without_log_files() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("engine.log"), "").unwrap();
+        assert_eq!(super::read_crash_log(temp.path(), None), "");
+    }
+
+    #[test]
+    fn crash_log_redacts_the_install_token_and_survives_non_utf8() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut raw = b"Authorization: Bearer deadbeef\n".to_vec();
+        raw.extend_from_slice(&[0xff, 0xfe, b'\n']);
+        std::fs::write(temp.path().join("engine-sidecar.log"), raw).unwrap();
+
+        let out = super::read_crash_log(temp.path(), Some("deadbeef"));
+
+        assert!(!out.contains("deadbeef"), "{out}");
+        assert!(out.contains("Bearer [redacted]"), "{out}");
+    }
+
+    #[test]
+    fn crash_log_reads_only_the_tail_of_large_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let big: String = (0..20_000).map(|n| format!("line {n}\n")).collect();
+        assert!(big.len() as u64 > super::CRASH_LOG_TAIL_BYTES);
+        std::fs::write(temp.path().join("engine.log"), big).unwrap();
+
+        let out = super::read_crash_log(temp.path(), None);
+
+        assert_eq!(out.lines().count(), 1 + super::CRASH_LOG_LINES);
+        assert!(out.ends_with("line 19999\n"), "{out}");
     }
 
     #[test]

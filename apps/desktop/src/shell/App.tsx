@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   createProductionEngineClient,
+  engineCrashLog,
   type EngineClient,
 } from "../engine/client";
 import {
@@ -155,6 +156,22 @@ function AppShell({
   const committingRef = useRef(false);
   const [notificationCount, setNotificationCount] = useState(0);
   const [folderError, setFolderError] = useState<string | null>(null);
+  const [crashLog, setCrashLog] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (engineState.status !== "unavailable") {
+      return;
+    }
+    let cancelled = false;
+    void engineCrashLog().then((log) => {
+      if (!cancelled) {
+        setCrashLog(log);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [engineState.status]);
 
   useEffect(() => {
     if (!engineReady) {
@@ -458,7 +475,7 @@ function AppShell({
         </a>
         <EngineStatus state={engineState} />
         <main id="main" tabIndex={-1}>
-          <EngineGate starting={engineState.status === "starting"} />
+          <EngineGate starting={engineState.status === "starting"} crashLog={crashLog} />
         </main>
       </div>
     );

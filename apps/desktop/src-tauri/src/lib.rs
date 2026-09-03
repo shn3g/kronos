@@ -25,7 +25,8 @@ pub fn run() {
             engine::engine_stream,
             engine::engine_stream_cancel,
             engine::pick_repository_folder,
-            engine::import_telegram_bot_token
+            engine::import_telegram_bot_token,
+            engine::engine_crash_log
         ])
         .run(tauri::generate_context!())
         .expect("Kronos failed to start");
