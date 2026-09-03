@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./shell/App";
 import "./styles/tokens.css";
 import "./styles/shell.css";
+import "./styles/forms.css";
 
 const root = document.getElementById("root");
 if (!root) {
