@@ -43,6 +43,7 @@ from kronos_engine.application.goals import GoalService
 from kronos_engine.application.planning import PlanningService
 from kronos_engine.application.repositories import RepositoryNotFound, RepositoryService
 from kronos_engine.application.safety import evaluate_repository_safety
+from kronos_engine.application.tool_repeat_guard import ToolCallRepeatGuard
 from kronos_engine.application.workspace_files import (
     list_workspace_files,
     read_workspace_file,
@@ -220,6 +221,7 @@ class ChatService:
         self._store = SqliteConversationStore(conn)
         self._run_commands_this_turn = 0
         self._tool_seq = 0
+        self._repeat_guard = ToolCallRepeatGuard()
         self._last_pack = ContextPack(items=())
 
     def create_conversation(
@@ -322,6 +324,7 @@ class ChatService:
         cancel.clear()
         self._run_commands_this_turn = 0
         self._tool_seq = 0
+        self._repeat_guard.reset()
         yield from self._run_agent(conversation, profile, provider, secret, cancel)
 
     def _run_agent(
@@ -383,6 +386,20 @@ class ChatService:
             if call is not None:
                 if streaming_id is not None:
                     self._store.delete_message(streaming_id)
+                if not self._repeat_guard.allow(call):
+                    turn = self._final_answer(
+                        conversation.id,
+                        "Repeated tool call blocked. Reflect on the prior result and choose a "
+                        "different action or provide new evidence.",
+                        profile,
+                        usage=None,
+                        streamed=streamed,
+                        streaming_id=None,
+                    )
+                    if turn.content and not streamed:
+                        yield turn.content
+                    yield turn
+                    return
                 self._tool_seq += 1
                 tool_id = f"t{self._tool_seq}"
                 yield ToolEvent(
@@ -392,6 +409,8 @@ class ChatService:
                     args=redact_tool_arguments(call.arguments),
                 )
                 result, summary, ok = self._execute_tool(call, conversation, cancel)
+                if ok:
+                    self._repeat_guard.remember_success(call)
                 clipped = _clip(result, TOOL_OUTPUT_CLIP)
                 self._store.add_message(
                     conversation.id,

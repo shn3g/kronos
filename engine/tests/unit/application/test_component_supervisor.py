@@ -61,6 +61,46 @@ def test_supervise_once_restarts_dead_component_that_should_be_running() -> None
     assert status.alive is True
 
 
+def test_supervise_once_counts_failed_starts_toward_restart_budget() -> None:
+    class _Broken:
+        def __init__(self) -> None:
+            self.starts = 0
+
+        def start(self) -> None:
+            self.starts += 1
+            raise RuntimeError("cannot start")
+
+        def stop(self) -> None:
+            return None
+
+        def is_alive(self) -> bool:
+            return False
+
+    broken = _Broken()
+    supervisor = ComponentSupervisor(max_restarts=2, backoff_seconds=0.0)
+    supervisor.register(
+        "worker",
+        start=broken.start,
+        stop=broken.stop,
+        is_alive=broken.is_alive,
+    )
+    # Mark running without a successful start so supervise sees a dead worker.
+    try:
+        supervisor.start("worker")
+    except RuntimeError:
+        pass
+    assert broken.starts == 1
+
+    supervisor.supervise_once()
+    supervisor.supervise_once()
+    assert broken.starts == 3
+    assert supervisor.status("worker")[0].restarts == 2
+
+    supervisor.supervise_once()
+    assert broken.starts == 3
+    assert supervisor.status("worker")[0].restarts == 2
+
+
 def test_stop_all_stops_everything() -> None:
     first = _Probe()
     second = _Probe()

@@ -5,13 +5,13 @@ import type { DetectedTool, ModelsClient, ProviderDraft } from "../features/mode
 import {
   assignmentsFromCreatedProfiles,
   billedFromBaseUrl,
-  cursorCliDetected,
   displayNameFromEndpointLabel,
   hostedApiNeedsKey,
   localOpenAiProviderDraft,
   MODEL_URL_PRESETS,
   parseModelSetupLine,
   pickLocalOpenAiEndpoint,
+  workerCliDetected,
 } from "./connectModel";
 
 interface ConnectModelGateProps {
@@ -55,8 +55,8 @@ export function ConnectModelGate({ modelsClient, onConnected }: ConnectModelGate
   }, [modelsClient]);
 
   const localEndpoint = pickLocalOpenAiEndpoint(detected ?? []);
-  const showCursorCliNote =
-    detected !== null && cursorCliDetected(detected) && localEndpoint === null;
+  const showWorkerCliNote =
+    detected !== null && workerCliDetected(detected) && localEndpoint === null;
 
   async function registerProvider(draft: ProviderDraft): Promise<void> {
     setError(null);
@@ -79,6 +79,7 @@ export function ConnectModelGate({ modelsClient, onConnected }: ConnectModelGate
 
   return (
     <section className="gate">
+      <p className="gate__brand">Kronos</p>
       <p className="gate__step">Step 1 of 3 · Connect a model</p>
       <h1 className="gate__title">Connect a model</h1>
       <p className="gate__body">
@@ -138,9 +139,12 @@ export function ConnectModelGate({ modelsClient, onConnected }: ConnectModelGate
           </button>
         </div>
       ) : null}
-      {showCursorCliNote ? (
+      {showWorkerCliNote ? (
         <div className="gate__note">
-          <p>Cursor CLI is on this machine. It can run unattended goals later.</p>
+          <p>
+            A coding worker CLI is on this machine (Cursor, OpenCode, or Claude Code). It can run
+            unattended goals later.
+          </p>
           <p>
             Chat still needs a model API such as Ollama, LM Studio, or a hosted OpenAI-compatible
             key.
@@ -236,7 +240,7 @@ export function ConnectModelGate({ modelsClient, onConnected }: ConnectModelGate
         <button type="submit" className={localEndpoint ? "btn-quiet" : "btn-primary"} disabled={busy}>
           Continue
         </button>
-        {showCursorCliNote ? null : (
+        {showWorkerCliNote ? null : (
           <p className="gate__hint">
             Typical local URLs are Ollama on port 11434 and LM Studio on port 1234.
           </p>

@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
+from kronos_engine.application.goal_judge import VERIFICATION_PASSED_ARTIFACT, GoalJudge
 from kronos_engine.application.issue_hygiene import render_pull_request_body
 from kronos_engine.application.merge import MergeRefused, MergeService
 from kronos_engine.application.recorder import Recorder
@@ -67,6 +68,7 @@ class VerificationService:
         *,
         clock: Callable[[], datetime],
         forge_for: Callable[[EnrolledRepository], object | None] | None = None,
+        goal_judge: GoalJudge | None = None,
     ) -> None:
         self._store = store
         self._repos = repos
@@ -76,6 +78,7 @@ class VerificationService:
         self._leases = leases
         self._clock = clock
         self._forge_for = forge_for
+        self._goal_judge = goal_judge or GoalJudge()
 
     def gate(self, task_id: TaskId) -> VerifyResult:
         task = self._store.get_task(task_id)
@@ -155,7 +158,7 @@ class VerificationService:
                 continue
             waiting = replace(
                 task,
-                artifacts=artifacts,
+                artifacts=tuple(dict.fromkeys((*artifacts, VERIFICATION_PASSED_ARTIFACT))),
                 state=transition_task(task.state, TaskState.AWAITING_GATES),
             )
             self._store.save_task(waiting)
@@ -272,16 +275,25 @@ class VerificationService:
         if siblings and all(item.state is TaskState.MERGED for item in siblings):
             goal = self._store.get_goal(task.goal_id)
             if goal.state is GoalState.ACTIVE:
-                completed = replace(goal, state=transition_goal(goal.state, GoalState.COMPLETED))
-                self._store.save_goal(completed)
-                self._recorder.emit(
-                    "goal.transitioned",
-                    {
-                        "goal_id": goal.id.value,
-                        "from": goal.state.value,
-                        "to": GoalState.COMPLETED.value,
-                    },
-                )
+                completion = self._goal_judge.decide(siblings)
+                if completion.allowed:
+                    completed = replace(
+                        goal, state=transition_goal(goal.state, GoalState.COMPLETED)
+                    )
+                    self._store.save_goal(completed)
+                    self._recorder.emit(
+                        "goal.transitioned",
+                        {
+                            "goal_id": goal.id.value,
+                            "from": goal.state.value,
+                            "to": GoalState.COMPLETED.value,
+                        },
+                    )
+                else:
+                    self._recorder.emit(
+                        "goal.completion_refused",
+                        {"goal_id": goal.id.value, "reason": completion.reason},
+                    )
         self._recorder.emit(
             "review.checked",
             {"task_id": task.id.value, "ok": True},

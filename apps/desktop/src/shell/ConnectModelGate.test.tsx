@@ -163,12 +163,12 @@ describe("ConnectModelGate", () => {
     expect(assign).toHaveBeenCalled();
   });
 
-  it("says Cursor CLI cannot chat until a model API is connected", async () => {
+  it("says a worker CLI cannot chat until a model API is connected", async () => {
     render(
       <ConnectModelGate
         modelsClient={modelsClient({
           snapshot: async () => ({
-            detected: [{ kind: "cursor_cli", label: "cursor-agent", present: true }],
+            detected: [{ kind: "claude_code_cli", label: "claude", present: true }],
             profiles: [],
             assignments: emptyAssignments(),
             embeddingBackend: EMPTY_BACKEND,
@@ -179,7 +179,7 @@ describe("ConnectModelGate", () => {
     );
 
     expect(
-      await screen.findByText(/cursor cli is on this machine/i),
+      await screen.findByText(/coding worker cli is on this machine/i),
     ).toBeInTheDocument();
     expect(screen.getByText(/chat still needs a model api/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /use http/i })).not.toBeInTheDocument();

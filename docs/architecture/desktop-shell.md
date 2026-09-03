@@ -2,19 +2,19 @@
 
 The Tauri 2 client in `apps/desktop` locates a loopback engine through `engine_connection` and probes `/health` plus `/version`. Installers bundle a `kronos-engine` sidecar; development builds may use `python -m kronos_engine` on PATH instead. A dev PATH engine should match the desktop version; a newer desktop against an older engine is **incompatible**. Without a sidecar (Vite `preview` / Playwright smoke), production wiring stays **engine unavailable**.
 
-## 0.5.0 frame
+## 0.5.x frame
 
 Gates first, then chrome. No Home page.
 
 1. **Engine gate.** Installers start the bundled sidecar. If the local engine is not ready, the UI shows "Starting Kronos" or "The local engine is not running" and does not open the menu bar or activity bar.
-2. **Connect a model.** If the engine is ready and no **orchestrator** is assigned, Connect a model blocks the chrome. Presets include OpenAI, OpenRouter, OpenCode Zen, Ollama, and LM Studio, or any OpenAI-compatible URL. API keys are optional for local endpoints. Connecting assigns all five roles from that provider. A workspace folder is not required to pass the gate.
-3. **Shell.** File / Edit / View / Help sit in a menu bar. A 48px activity bar switches Chat, Files, Goals, Workspaces, and Settings. Chat is the main stage. Conversation history is a View toggle. The title row holds the workspace switcher and engine status. A right inspector holds Changes (working tree with Revert and local commit), Goals/Runs, and Health. View can hide the activity bar and the inspector, and open the Terminal panel.
+2. **Connect a model.** If the engine is ready and no **orchestrator** is assigned, Connect a model blocks the chrome. Presets, any OpenAI-compatible URL, or a one-liner (`openai gpt-4o-mini key sk-…`) work. API keys are optional for local endpoints. Connecting assigns all five roles from that provider. Later changes go through Settings → Models. A workspace folder is not required to pass the gate.
+3. **Shell.** File / Edit / View / Help sit in a menu bar (**File → Open Folder** enrols a git workspace). A 48px activity bar switches Chat, Files, Goals, Workspaces, and Settings. Chat is the main stage. Conversation history is a View toggle. The title row holds the workspace switcher, Indexing… / Indexed badge, and Kronos status. A right inspector holds Changes (working tree with Revert and local commit), Goals/Runs, and Health. View can hide the activity bar and the inspector, and open the Terminal panel.
 
 Hash deep links: `#/chat`, `#/files`, `#/goals`, `#/workspaces`, `#/settings`, `#/settings/<section>`. Legacy hashes such as `#/models` rewrite into the Settings hub.
 
 Settings hub sections: General, Models, Index, Connections (GitHub + Telegram), Skills, Memory, Updates, Notifications.
 
-**Files** is a full editor with tree, tabs, Go to file palette, Find/Replace/Go to line, Ask in chat, and save via the workspace files API. **Terminal** (View menu) is a real PTY in the enrolled folder. Inspector **Changes** can revert paths and record a local git commit (Kronos does not push).
+**Files** is a full editor with tree, tabs, Go to file palette, Find/Replace/Go to line, Ask in chat, and save via the workspace files API. **Terminal** (View menu) is a real PTY in the enrolled folder. Inspector **Changes** can revert paths and record a local git commit (Kronos does not push). Background index/goals/telegram workers run under a component supervisor with doctor `background:*` checks. Goal completion requires verification evidence.
 
 Settings → Models includes local embeddings install (MiniLM or bge-small, SHA-256 pinned catalog). Settings → Updates checks GitHub Releases `latest.json` and verifies bundle signatures with the publisher minisign public key.
 

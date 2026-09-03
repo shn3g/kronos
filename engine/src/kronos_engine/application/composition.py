@@ -6,6 +6,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime
 
+from kronos_engine.adapters.executors.claude_code import (
+    ClaudeCodeExecutor,
+    detect_claude_code_cli,
+)
 from kronos_engine.adapters.executors.controlled import ControlledOpenExecutor
 from kronos_engine.adapters.executors.cursor import CursorExecutor, detect_cursor_cli
 from kronos_engine.adapters.executors.opencode import OpencodeExecutor, detect_opencode_cli
@@ -166,6 +170,8 @@ def select_executor(profile: str, *, model_id: str | None = None) -> Executor:
         return CursorExecutor()
     if name == "opencode" and detect_opencode_cli() is not None:
         return OpencodeExecutor(model_id=model_id)
+    if name in {"claude", "claude_code", "claude-code"} and detect_claude_code_cli() is not None:
+        return ClaudeCodeExecutor(model_id=model_id)
     return ControlledOpenExecutor()
 
 

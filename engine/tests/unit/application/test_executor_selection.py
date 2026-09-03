@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from tests.support.executor_fixtures import synthetic_request
 
+from kronos_engine.adapters.executors.claude_code import ClaudeCodeExecutor
 from kronos_engine.adapters.executors.controlled import ControlledOpenExecutor
 from kronos_engine.adapters.executors.cursor import CliResult, CursorCli, CursorExecutor
 from kronos_engine.adapters.executors.opencode import OpencodeExecutor
@@ -74,6 +75,32 @@ def test_opencode_profile_falls_back_when_cli_missing(monkeypatch: pytest.Monkey
         lambda: None,
     )
     executor = select_executor("opencode")
+    assert isinstance(executor, ControlledOpenExecutor)
+
+
+def test_claude_code_profile_uses_claude_when_detected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "kronos_engine.application.composition.detect_cursor_cli",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "kronos_engine.application.composition.detect_opencode_cli",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "kronos_engine.application.composition.detect_claude_code_cli",
+        lambda: object(),
+    )
+    executor = select_executor("claude_code")
+    assert isinstance(executor, ClaudeCodeExecutor)
+
+
+def test_claude_code_profile_falls_back_when_cli_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "kronos_engine.application.composition.detect_claude_code_cli",
+        lambda: None,
+    )
+    executor = select_executor("claude")
     assert isinstance(executor, ControlledOpenExecutor)
 
 

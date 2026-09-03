@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Chat tool-call repeat guard records fingerprints only after a successful tool result, so failed calls can be retried.
+- Goal completion evidence no longer treats “path exists in the worktree” as proof of done; require verification artifacts or a passing exit-code signal.
 - Local span tracing no longer rewrites `spans.jsonl` on every HTTP request (append-only, size-capped, off by default for request spans), which was thrashing disks while the app sat idle.
 - Engine log files rotate (`RotatingFileHandler` on `engine.log`). The Tauri sidecar captures child stdout/stderr to a separate `engine-sidecar.log` so rotation is not defeated by dual writers on one inode.
 - Desktop uses one shared engine connection poll (`EngineConnectionProvider`) instead of per-page 1.5s `getState` intervals; polling slows when the window is hidden.

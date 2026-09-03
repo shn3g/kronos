@@ -8,6 +8,7 @@ export function EngineGate({ starting }: EngineGateProps) {
   if (starting) {
     return (
       <section className="gate">
+        <p className="gate__brand">Kronos</p>
         <h1 className="gate__title">Starting Kronos</h1>
         <p className="gate__body">This usually takes a few seconds.</p>
       </section>
@@ -15,10 +16,11 @@ export function EngineGate({ starting }: EngineGateProps) {
   }
   return (
     <section className="gate">
+      <p className="gate__brand">Kronos</p>
       <h1 className="gate__title">Kronos stopped unexpectedly</h1>
       <p className="gate__body">
-        Kronos is restarting the local service. If this message stays up, quit and reopen the app,
-        or check Health for details.
+        Kronos is restarting. If this message stays up, quit and reopen the app, or check Health for
+        details.
       </p>
     </section>
   );
