@@ -236,5 +236,6 @@ async def test_route_group_happy_path(
     client: tuple[AsyncClient, dict[str, str], str], group: str, method: str, path: str
 ) -> None:
     http, headers, repository_id = client
-    response = await getattr(http, method)(path.format(repository_id=repository_id), headers=headers)
+    url = path.format(repository_id=repository_id)
+    response = await getattr(http, method)(url, headers=headers)
     assert response.status_code == 200, group
